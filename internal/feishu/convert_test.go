@@ -37,6 +37,9 @@ func TestConvertDirectTextMessage(t *testing.T) {
 	if event.Platform != "feishu" {
 		t.Fatalf("platform = %q", event.Platform)
 	}
+	if event.MentionedBot {
+		t.Fatal("MentionedBot = true, want false")
+	}
 }
 
 func TestConvertGroupTextMessageUsesTextWithoutAtBot(t *testing.T) {
@@ -63,5 +66,67 @@ func TestConvertGroupTextMessageUsesTextWithoutAtBot(t *testing.T) {
 	}
 	if !event.MentionedBot {
 		t.Fatal("MentionedBot = false, want true")
+	}
+}
+
+func TestConvertGroupChatTypeCaseInsensitive(t *testing.T) {
+	input := IncomingMessage{
+		ChatID:       "oc_group",
+		ChatType:     "GROUP",
+		SenderOpenID: "ou_sender",
+		Text:         "status",
+	}
+
+	event := NormalizeIncoming(input)
+
+	if event.Conversation.Kind != channel.ConversationGroup {
+		t.Fatalf("conversation kind = %q", event.Conversation.Kind)
+	}
+}
+
+func TestConvertDefaultsUnknownChatTypeToDirect(t *testing.T) {
+	tests := []struct {
+		name     string
+		chatType string
+	}{
+		{name: "empty", chatType: ""},
+		{name: "unknown", chatType: "topic"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := IncomingMessage{
+				ChatID:       "oc_direct",
+				ChatType:     tt.chatType,
+				SenderOpenID: "ou_sender",
+				Text:         "hello",
+			}
+
+			event := NormalizeIncoming(input)
+
+			if event.Conversation.Kind != channel.ConversationDirect {
+				t.Fatalf("conversation kind = %q", event.Conversation.Kind)
+			}
+		})
+	}
+}
+
+func TestConvertBlankTextWithoutAtBotFallsBackToTrimmedText(t *testing.T) {
+	input := IncomingMessage{
+		ChatID:           "oc_group",
+		ChatType:         "group",
+		SenderOpenID:     "ou_sender",
+		Text:             "  @bot status  ",
+		TextWithoutAtBot: "   ",
+		IsMention:        true,
+	}
+
+	event := NormalizeIncoming(input)
+
+	if event.Text != "@bot status" {
+		t.Fatalf("text = %q, want @bot status", event.Text)
+	}
+	if event.RawText != "@bot status" {
+		t.Fatalf("raw text = %q, want @bot status", event.RawText)
 	}
 }
