@@ -25,10 +25,22 @@ export ALTER_EGO_LARK_REQUIRE_MENTION="true"
 To enable real chat replies instead of the stub handler, configure:
 
 ```sh
-export ALTER_EGO_OPENAI_API_KEY="sk-xxx"
-export ALTER_EGO_OPENAI_BASE_URL="https://api.openai.com/v1"
-export ALTER_EGO_OPENAI_MODEL="gpt-5"
+export ALTER_EGO_LLM_PROVIDER="openai"
+export ALTER_EGO_LLM_API_KEY="sk-xxx"
+export ALTER_EGO_LLM_BASE_URL="https://api.openai.com/v1"
+export ALTER_EGO_LLM_MODEL="gpt-5"
 ```
+
+For GLM Coding Plan setups, use the OpenAI-compatible coding endpoint:
+
+```sh
+export ALTER_EGO_LLM_PROVIDER="glm"
+export ALTER_EGO_LLM_API_KEY="your-bigmodel-api-key"
+export ALTER_EGO_LLM_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"
+export ALTER_EGO_LLM_MODEL="GLM-5.1"
+```
+
+Legacy `ALTER_EGO_OPENAI_*` variables are still accepted for backward compatibility.
 
 Supported commands:
 

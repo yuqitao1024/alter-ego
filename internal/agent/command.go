@@ -38,16 +38,21 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, event channel.Messag
 	case "/help":
 		reply.Text = "/help - show supported commands\n/status - show handler status\n/reset - clear current conversation context"
 	case "/status":
+		provider := h.cfg.Provider
+		if provider == "" {
+			provider = "openai"
+		}
 		model := h.cfg.Model
 		if model == "" {
 			model = "not configured"
 		}
 		reply.Text = fmt.Sprintf(
-			"platform: %s\nconversation: %s\nconversation_id: %s\nsender_id: %s\nmodel: %s\nhistory_messages: %d",
+			"platform: %s\nconversation: %s\nconversation_id: %s\nsender_id: %s\nprovider: %s\nmodel: %s\nhistory_messages: %d",
 			event.Platform,
 			event.Conversation.Kind,
 			event.Conversation.ID,
 			event.Sender.ID,
+			provider,
 			model,
 			h.sessions.Count(sessionKey(event)),
 		)

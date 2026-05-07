@@ -148,7 +148,7 @@ func TestChatHandlerHandlesClientError(t *testing.T) {
 	}
 }
 
-func TestOpenAIClientParsesOutputText(t *testing.T) {
+func TestOpenAIProviderParsesOutputText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s", r.Method)
@@ -164,7 +164,7 @@ func TestOpenAIClientParsesOutputText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenAIClient(Config{
+	client := NewOpenAIProvider(Config{
 		APIKey:  "sk-test",
 		BaseURL: server.URL,
 		Model:   "gpt-test",
@@ -181,6 +181,43 @@ func TestOpenAIClientParsesOutputText(t *testing.T) {
 		t.Fatalf("CreateResponse returned error: %v", err)
 	}
 	if text != "hello from model" {
+		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestGLMProviderParsesChatCompletionsText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer glm-test" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello from glm"}}]}`))
+	}))
+	defer server.Close()
+
+	client := NewGLMProvider(Config{
+		APIKey:  "glm-test",
+		BaseURL: server.URL,
+		Model:   "GLM-5.1",
+	}, server.Client())
+
+	text, err := client.CreateResponse(context.Background(), ChatRequest{
+		Model: "GLM-5.1",
+		Messages: []ChatMessage{
+			{Role: "developer", Content: "system"},
+			{Role: "user", Content: "hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateResponse returned error: %v", err)
+	}
+	if text != "hello from glm" {
 		t.Fatalf("text = %q", text)
 	}
 }
