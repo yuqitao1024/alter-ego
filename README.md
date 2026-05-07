@@ -12,15 +12,29 @@ Required environment variables:
 export ALTER_EGO_LARK_APP_ID="cli_xxx"
 export ALTER_EGO_LARK_APP_SECRET="xxx"
 export ALTER_EGO_LARK_ALLOW_USERS="ou_xxx"
-export ALTER_EGO_LARK_ALLOW_GROUPS="oc_xxx"
 ```
 
 Optional environment variables:
 
 ```sh
 export ALTER_EGO_LARK_DOMAIN="lark"
+export ALTER_EGO_LARK_ALLOW_GROUPS="oc_xxx"
 export ALTER_EGO_LARK_REQUIRE_MENTION="true"
 ```
+
+To enable real chat replies instead of the stub handler, configure:
+
+```sh
+export ALTER_EGO_OPENAI_API_KEY="sk-xxx"
+export ALTER_EGO_OPENAI_BASE_URL="https://api.openai.com/v1"
+export ALTER_EGO_OPENAI_MODEL="gpt-5"
+```
+
+Supported commands:
+
+- `/help`
+- `/status`
+- `/reset`
 
 Run locally:
 

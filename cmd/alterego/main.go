@@ -19,15 +19,21 @@ func main() {
 }
 
 func run() error {
-	cfg, err := lark.ConfigFromEnv()
+	larkCfg, err := lark.ConfigFromEnv()
 	if err != nil {
 		return err
 	}
+	agentCfg := agent.ConfigFromEnv()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	adapter := lark.NewAdapter(cfg, agent.NewStubHandler())
+	sessions := agent.NewSessionStore(12)
+	commandHandler := agent.NewCommandHandler(agentCfg, sessions)
+	chatHandler := agent.NewChatHandler(agentCfg, sessions, nil)
+	handler := agent.NewRouter(commandHandler, chatHandler)
+
+	adapter := lark.NewAdapter(larkCfg, handler)
 	err = adapter.Start(ctx)
 	if errors.Is(err, context.Canceled) {
 		return nil
