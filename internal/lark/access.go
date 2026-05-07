@@ -1,4 +1,4 @@
-package feishu
+package lark
 
 import "github.com/yuqitao1024/alter-ego/internal/channel"
 

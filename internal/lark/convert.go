@@ -1,4 +1,4 @@
-package feishu
+package lark
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 	"github.com/yuqitao1024/alter-ego/internal/channel"
 )
 
-const platformName = "feishu"
+const platformName = "lark"
 
 type IncomingMessage struct {
 	MessageID        string

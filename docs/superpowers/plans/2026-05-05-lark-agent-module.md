@@ -1,12 +1,12 @@
-# Feishu Agent Module Implementation Plan
+# Lark Agent Module Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the first Go-based Feishu assistant integration so Alter Ego can receive Feishu messages, run an internal handler, and send text replies back to the same conversation.
+**Goal:** Build the first Go-based Lark assistant integration so Alter Ego can receive Lark messages, run an internal handler, and send text replies back to the same conversation.
 
-**Architecture:** Start with a small Go module and four focused layers: `cmd/alterego` for process startup, `internal/channel` for platform-neutral message contracts, `internal/agent` for the initial stub handler, and `internal/feishu` for Feishu SDK integration. Keep Feishu SDK imports out of `internal/channel` so later channel refactoring stays possible.
+**Architecture:** Start with a small Go module and four focused layers: `cmd/alterego` for process startup, `internal/channel` for platform-neutral message contracts, `internal/agent` for the initial stub handler, and `internal/lark` for Lark SDK integration. Keep Lark SDK imports out of `internal/channel` so later channel refactoring stays possible.
 
-**Tech Stack:** Go 1.22+, standard library tests, `github.com/larksuite/oapi-sdk-go/v3` for Feishu/Lark API and WebSocket events.
+**Tech Stack:** Go 1.22+, standard library tests, `github.com/larksuite/oapi-sdk-go/v3` for Lark/Lark API and WebSocket events.
 
 ---
 
@@ -15,30 +15,30 @@
 - Create: `go.mod`
   - Declares module `github.com/yuqitao1024/alter-ego` and Go version.
 - Create: `cmd/alterego/main.go`
-  - Loads config, creates the Feishu adapter, attaches the stub agent handler, and starts the process.
+  - Loads config, creates the Lark adapter, attaches the stub agent handler, and starts the process.
 - Create: `internal/channel/message.go`
   - Defines platform-neutral message types and handler/sender interfaces.
 - Create: `internal/agent/stub.go`
   - Provides deterministic first response behavior.
 - Create: `internal/agent/stub_test.go`
   - Tests the stub handler.
-- Create: `internal/feishu/config.go`
-  - Parses environment variables into Feishu config.
-- Create: `internal/feishu/config_test.go`
+- Create: `internal/lark/config.go`
+  - Parses environment variables into Lark config.
+- Create: `internal/lark/config_test.go`
   - Tests config parsing and defaults.
-- Create: `internal/feishu/access.go`
+- Create: `internal/lark/access.go`
   - Implements allowlist and mention checks.
-- Create: `internal/feishu/access_test.go`
+- Create: `internal/lark/access_test.go`
   - Tests DM and group access decisions.
-- Create: `internal/feishu/convert.go`
-  - Converts simplified Feishu message payloads into `channel.MessageEvent`.
-- Create: `internal/feishu/convert_test.go`
+- Create: `internal/lark/convert.go`
+  - Converts simplified Lark message payloads into `channel.MessageEvent`.
+- Create: `internal/lark/convert_test.go`
   - Tests message normalization.
-- Create: `internal/feishu/sender.go`
-  - Sends outgoing text messages through Feishu SDK.
-- Create: `internal/feishu/sender_test.go`
+- Create: `internal/lark/sender.go`
+  - Sends outgoing text messages through Lark SDK.
+- Create: `internal/lark/sender_test.go`
   - Tests reply target selection through a fake message creator.
-- Create: `internal/feishu/adapter.go`
+- Create: `internal/lark/adapter.go`
   - Wires SDK WebSocket event handling to the internal handler.
 - Modify: `README.md`
   - Adds minimal local run instructions and required environment variables.
@@ -236,27 +236,27 @@ git commit -m "feat: add stub agent handler"
 
 ---
 
-### Task 3: Parse Feishu Configuration
+### Task 3: Parse Lark Configuration
 
 **Files:**
-- Create: `internal/feishu/config_test.go`
-- Create: `internal/feishu/config.go`
+- Create: `internal/lark/config_test.go`
+- Create: `internal/lark/config.go`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `internal/feishu/config_test.go`:
+Create `internal/lark/config_test.go`:
 
 ```go
-package feishu
+package lark
 
 import "testing"
 
 func TestConfigFromEnvParsesDefaultsAndAllowlists(t *testing.T) {
 	env := map[string]string{
-		"ALTER_EGO_FEISHU_APP_ID":       "cli_test",
-		"ALTER_EGO_FEISHU_APP_SECRET":   "secret",
-		"ALTER_EGO_FEISHU_ALLOW_USERS":  "ou_1, ou_2",
-		"ALTER_EGO_FEISHU_ALLOW_GROUPS": "oc_1,oc_2",
+		"ALTER_EGO_LARK_APP_ID":       "cli_test",
+		"ALTER_EGO_LARK_APP_SECRET":   "secret",
+		"ALTER_EGO_LARK_ALLOW_USERS":  "ou_1, ou_2",
+		"ALTER_EGO_LARK_ALLOW_GROUPS": "oc_1,oc_2",
 	}
 
 	cfg, err := ConfigFromMap(env)
@@ -267,8 +267,8 @@ func TestConfigFromEnvParsesDefaultsAndAllowlists(t *testing.T) {
 	if cfg.AppID != "cli_test" || cfg.AppSecret != "secret" {
 		t.Fatalf("credentials were not parsed: %#v", cfg)
 	}
-	if cfg.Domain != "feishu" {
-		t.Fatalf("domain = %q, want feishu", cfg.Domain)
+	if cfg.Domain != "lark" {
+		t.Fatalf("domain = %q, want lark", cfg.Domain)
 	}
 	if !cfg.RequireMention {
 		t.Fatal("RequireMention = false, want true by default")
@@ -290,9 +290,9 @@ func TestConfigFromEnvRequiresCredentials(t *testing.T) {
 
 func TestConfigFromEnvParsesRequireMentionFalse(t *testing.T) {
 	cfg, err := ConfigFromMap(map[string]string{
-		"ALTER_EGO_FEISHU_APP_ID":          "cli_test",
-		"ALTER_EGO_FEISHU_APP_SECRET":      "secret",
-		"ALTER_EGO_FEISHU_REQUIRE_MENTION": "false",
+		"ALTER_EGO_LARK_APP_ID":          "cli_test",
+		"ALTER_EGO_LARK_APP_SECRET":      "secret",
+		"ALTER_EGO_LARK_REQUIRE_MENTION": "false",
 	})
 	if err != nil {
 		t.Fatalf("ConfigFromMap returned error: %v", err)
@@ -308,17 +308,17 @@ func TestConfigFromEnvParsesRequireMentionFalse(t *testing.T) {
 Run:
 
 ```bash
-go test ./internal/feishu
+go test ./internal/lark
 ```
 
 Expected: FAIL because `ConfigFromMap` is undefined.
 
 - [ ] **Step 3: Implement config parsing**
 
-Create `internal/feishu/config.go`:
+Create `internal/lark/config.go`:
 
 ```go
-package feishu
+package lark
 
 import (
 	"fmt"
@@ -337,42 +337,42 @@ type Config struct {
 
 func ConfigFromEnv() (Config, error) {
 	return ConfigFromMap(map[string]string{
-		"ALTER_EGO_FEISHU_APP_ID":          os.Getenv("ALTER_EGO_FEISHU_APP_ID"),
-		"ALTER_EGO_FEISHU_APP_SECRET":      os.Getenv("ALTER_EGO_FEISHU_APP_SECRET"),
-		"ALTER_EGO_FEISHU_DOMAIN":          os.Getenv("ALTER_EGO_FEISHU_DOMAIN"),
-		"ALTER_EGO_FEISHU_ALLOW_USERS":     os.Getenv("ALTER_EGO_FEISHU_ALLOW_USERS"),
-		"ALTER_EGO_FEISHU_ALLOW_GROUPS":    os.Getenv("ALTER_EGO_FEISHU_ALLOW_GROUPS"),
-		"ALTER_EGO_FEISHU_REQUIRE_MENTION": os.Getenv("ALTER_EGO_FEISHU_REQUIRE_MENTION"),
+		"ALTER_EGO_LARK_APP_ID":          os.Getenv("ALTER_EGO_LARK_APP_ID"),
+		"ALTER_EGO_LARK_APP_SECRET":      os.Getenv("ALTER_EGO_LARK_APP_SECRET"),
+		"ALTER_EGO_LARK_DOMAIN":          os.Getenv("ALTER_EGO_LARK_DOMAIN"),
+		"ALTER_EGO_LARK_ALLOW_USERS":     os.Getenv("ALTER_EGO_LARK_ALLOW_USERS"),
+		"ALTER_EGO_LARK_ALLOW_GROUPS":    os.Getenv("ALTER_EGO_LARK_ALLOW_GROUPS"),
+		"ALTER_EGO_LARK_REQUIRE_MENTION": os.Getenv("ALTER_EGO_LARK_REQUIRE_MENTION"),
 	})
 }
 
 func ConfigFromMap(values map[string]string) (Config, error) {
 	cfg := Config{
-		AppID:          strings.TrimSpace(values["ALTER_EGO_FEISHU_APP_ID"]),
-		AppSecret:      strings.TrimSpace(values["ALTER_EGO_FEISHU_APP_SECRET"]),
-		Domain:         strings.TrimSpace(values["ALTER_EGO_FEISHU_DOMAIN"]),
-		AllowUsers:     parseCSVSet(values["ALTER_EGO_FEISHU_ALLOW_USERS"]),
-		AllowGroups:    parseCSVSet(values["ALTER_EGO_FEISHU_ALLOW_GROUPS"]),
+		AppID:          strings.TrimSpace(values["ALTER_EGO_LARK_APP_ID"]),
+		AppSecret:      strings.TrimSpace(values["ALTER_EGO_LARK_APP_SECRET"]),
+		Domain:         strings.TrimSpace(values["ALTER_EGO_LARK_DOMAIN"]),
+		AllowUsers:     parseCSVSet(values["ALTER_EGO_LARK_ALLOW_USERS"]),
+		AllowGroups:    parseCSVSet(values["ALTER_EGO_LARK_ALLOW_GROUPS"]),
 		RequireMention: true,
 	}
 
 	if cfg.AppID == "" {
-		return Config{}, fmt.Errorf("ALTER_EGO_FEISHU_APP_ID is required")
+		return Config{}, fmt.Errorf("ALTER_EGO_LARK_APP_ID is required")
 	}
 	if cfg.AppSecret == "" {
-		return Config{}, fmt.Errorf("ALTER_EGO_FEISHU_APP_SECRET is required")
+		return Config{}, fmt.Errorf("ALTER_EGO_LARK_APP_SECRET is required")
 	}
 	if cfg.Domain == "" {
-		cfg.Domain = "feishu"
+		cfg.Domain = "lark"
 	}
 
-	switch strings.ToLower(strings.TrimSpace(values["ALTER_EGO_FEISHU_REQUIRE_MENTION"])) {
+	switch strings.ToLower(strings.TrimSpace(values["ALTER_EGO_LARK_REQUIRE_MENTION"])) {
 	case "", "true", "1", "yes":
 		cfg.RequireMention = true
 	case "false", "0", "no":
 		cfg.RequireMention = false
 	default:
-		return Config{}, fmt.Errorf("ALTER_EGO_FEISHU_REQUIRE_MENTION must be true or false")
+		return Config{}, fmt.Errorf("ALTER_EGO_LARK_REQUIRE_MENTION must be true or false")
 	}
 
 	return cfg, nil
@@ -395,7 +395,7 @@ func parseCSVSet(raw string) map[string]bool {
 Run:
 
 ```bash
-go test ./internal/feishu
+go test ./internal/lark
 ```
 
 Expected: PASS.
@@ -403,8 +403,8 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/feishu/config.go internal/feishu/config_test.go
-git commit -m "feat: parse Feishu configuration"
+git add internal/lark/config.go internal/lark/config_test.go
+git commit -m "feat: parse Lark configuration"
 ```
 
 ---
@@ -412,15 +412,15 @@ git commit -m "feat: parse Feishu configuration"
 ### Task 4: Implement Access Control
 
 **Files:**
-- Create: `internal/feishu/access_test.go`
-- Create: `internal/feishu/access.go`
+- Create: `internal/lark/access_test.go`
+- Create: `internal/lark/access.go`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `internal/feishu/access_test.go`:
+Create `internal/lark/access_test.go`:
 
 ```go
-package feishu
+package lark
 
 import (
 	"testing"
@@ -504,17 +504,17 @@ func TestAccessDeniesGroupWithoutMentionWhenRequired(t *testing.T) {
 Run:
 
 ```bash
-go test ./internal/feishu
+go test ./internal/lark
 ```
 
 Expected: FAIL because `Allowed` is undefined.
 
 - [ ] **Step 3: Implement access checks**
 
-Create `internal/feishu/access.go`:
+Create `internal/lark/access.go`:
 
 ```go
-package feishu
+package lark
 
 import "github.com/yuqitao1024/alter-ego/internal/channel"
 
@@ -545,7 +545,7 @@ func Allowed(cfg Config, event channel.MessageEvent) bool {
 Run:
 
 ```bash
-go test ./internal/feishu
+go test ./internal/lark
 ```
 
 Expected: PASS.
@@ -553,24 +553,24 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/feishu/access.go internal/feishu/access_test.go
-git commit -m "feat: add Feishu access control"
+git add internal/lark/access.go internal/lark/access_test.go
+git commit -m "feat: add Lark access control"
 ```
 
 ---
 
-### Task 5: Normalize Feishu Message Events
+### Task 5: Normalize Lark Message Events
 
 **Files:**
-- Create: `internal/feishu/convert_test.go`
-- Create: `internal/feishu/convert.go`
+- Create: `internal/lark/convert_test.go`
+- Create: `internal/lark/convert.go`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `internal/feishu/convert_test.go`:
+Create `internal/lark/convert_test.go`:
 
 ```go
-package feishu
+package lark
 
 import (
 	"testing"
@@ -606,7 +606,7 @@ func TestConvertDirectTextMessage(t *testing.T) {
 	if event.Sender.ID != "ou_sender" {
 		t.Fatalf("sender ID = %q", event.Sender.ID)
 	}
-	if event.Platform != "feishu" {
+	if event.Platform != "lark" {
 		t.Fatalf("platform = %q", event.Platform)
 	}
 }
@@ -644,17 +644,17 @@ func TestConvertGroupTextMessageUsesTextWithoutAtBot(t *testing.T) {
 Run:
 
 ```bash
-go test ./internal/feishu
+go test ./internal/lark
 ```
 
 Expected: FAIL because `IncomingMessage` and `NormalizeIncoming` are undefined.
 
 - [ ] **Step 3: Implement normalization**
 
-Create `internal/feishu/convert.go`:
+Create `internal/lark/convert.go`:
 
 ```go
-package feishu
+package lark
 
 import (
 	"strings"
@@ -662,7 +662,7 @@ import (
 	"github.com/yuqitao1024/alter-ego/internal/channel"
 )
 
-const platformName = "feishu"
+const platformName = "lark"
 
 type IncomingMessage struct {
 	MessageID        string
@@ -707,7 +707,7 @@ func NormalizeIncoming(input IncomingMessage) channel.MessageEvent {
 Run:
 
 ```bash
-go test ./internal/feishu
+go test ./internal/lark
 ```
 
 Expected: PASS.
@@ -715,24 +715,24 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/feishu/convert.go internal/feishu/convert_test.go
-git commit -m "feat: normalize Feishu message events"
+git add internal/lark/convert.go internal/lark/convert_test.go
+git commit -m "feat: normalize Lark message events"
 ```
 
 ---
 
-### Task 6: Add Feishu Text Sender
+### Task 6: Add Lark Text Sender
 
 **Files:**
-- Create: `internal/feishu/sender_test.go`
-- Create: `internal/feishu/sender.go`
+- Create: `internal/lark/sender_test.go`
+- Create: `internal/lark/sender.go`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `internal/feishu/sender_test.go`:
+Create `internal/lark/sender_test.go`:
 
 ```go
-package feishu
+package lark
 
 import (
 	"context"
@@ -800,17 +800,17 @@ func TestSenderRejectsEmptyConversationID(t *testing.T) {
 Run:
 
 ```bash
-go test ./internal/feishu
+go test ./internal/lark
 ```
 
 Expected: FAIL because `NewSender` is undefined.
 
 - [ ] **Step 3: Implement sender abstraction and SDK creator**
 
-Create `internal/feishu/sender.go`:
+Create `internal/lark/sender.go`:
 
 ```go
-package feishu
+package lark
 
 import (
 	"context"
@@ -872,7 +872,7 @@ Run:
 
 ```bash
 go mod tidy
-go test ./internal/feishu
+go test ./internal/lark
 ```
 
 Expected: PASS. `go.mod` and `go.sum` now include `github.com/larksuite/oapi-sdk-go/v3`.
@@ -880,23 +880,23 @@ Expected: PASS. `go.mod` and `go.sum` now include `github.com/larksuite/oapi-sdk
 - [ ] **Step 5: Commit**
 
 ```bash
-git add go.mod go.sum internal/feishu/sender.go internal/feishu/sender_test.go
-git commit -m "feat: add Feishu text sender"
+git add go.mod go.sum internal/lark/sender.go internal/lark/sender_test.go
+git commit -m "feat: add Lark text sender"
 ```
 
 ---
 
-### Task 7: Wire Feishu WebSocket Adapter
+### Task 7: Wire Lark WebSocket Adapter
 
 **Files:**
-- Create: `internal/feishu/adapter.go`
+- Create: `internal/lark/adapter.go`
 
 - [ ] **Step 1: Implement adapter wiring**
 
-Create `internal/feishu/adapter.go`:
+Create `internal/lark/adapter.go`:
 
 ```go
-package feishu
+package lark
 
 import (
 	"context"
@@ -1015,7 +1015,7 @@ func baseURL(domain string) string {
 	if domain == "lark" {
 		return lark.LarkBaseUrl
 	}
-	return lark.FeishuBaseUrl
+	return lark.LarkBaseUrl
 }
 ```
 
@@ -1032,8 +1032,8 @@ Expected: PASS.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add internal/feishu/adapter.go
-git commit -m "feat: wire Feishu websocket adapter"
+git add internal/lark/adapter.go
+git commit -m "feat: wire Lark websocket adapter"
 ```
 
 ---
@@ -1059,7 +1059,7 @@ import (
 	"syscall"
 
 	"github.com/yuqitao1024/alter-ego/internal/agent"
-	"github.com/yuqitao1024/alter-ego/internal/feishu"
+	"github.com/yuqitao1024/alter-ego/internal/lark"
 )
 
 func main() {
@@ -1069,7 +1069,7 @@ func main() {
 }
 
 func run() error {
-	cfg, err := feishu.ConfigFromEnv()
+	cfg, err := lark.ConfigFromEnv()
 	if err != nil {
 		return err
 	}
@@ -1077,7 +1077,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	adapter := feishu.NewAdapter(cfg, agent.NewStubHandler())
+	adapter := lark.NewAdapter(cfg, agent.NewStubHandler())
 	err = adapter.Start(ctx)
 	if errors.Is(err, context.Canceled) {
 		return nil
@@ -1106,7 +1106,7 @@ git commit -m "feat: add Alter Ego command"
 
 ---
 
-### Task 9: Document Local Feishu Setup
+### Task 9: Document Local Lark Setup
 
 **Files:**
 - Modify: `README.md`
@@ -1120,24 +1120,24 @@ Modify `README.md` to:
 
 Alter Ego is an early-stage AI agent project focused on creating a virtual counterpart of the person who builds and uses it. The goal is to build an agent that can assist with day-to-day work, explore topics of interest, and help investigate the practical boundaries of modern AI systems.
 
-## Feishu Assistant
+## Lark Assistant
 
-The first integration target is a Feishu assistant account. The Go service connects to Feishu through WebSocket event subscription, receives text messages, and sends text replies back to the same conversation.
+The first integration target is a Lark assistant account. The Go service connects to Lark through WebSocket event subscription, receives text messages, and sends text replies back to the same conversation.
 
 Required environment variables:
 
 ```sh
-export ALTER_EGO_FEISHU_APP_ID="cli_xxx"
-export ALTER_EGO_FEISHU_APP_SECRET="xxx"
-export ALTER_EGO_FEISHU_ALLOW_USERS="ou_xxx"
-export ALTER_EGO_FEISHU_ALLOW_GROUPS="oc_xxx"
+export ALTER_EGO_LARK_APP_ID="cli_xxx"
+export ALTER_EGO_LARK_APP_SECRET="xxx"
+export ALTER_EGO_LARK_ALLOW_USERS="ou_xxx"
+export ALTER_EGO_LARK_ALLOW_GROUPS="oc_xxx"
 ```
 
 Optional environment variables:
 
 ```sh
-export ALTER_EGO_FEISHU_DOMAIN="feishu"
-export ALTER_EGO_FEISHU_REQUIRE_MENTION="true"
+export ALTER_EGO_LARK_DOMAIN="lark"
+export ALTER_EGO_LARK_REQUIRE_MENTION="true"
 ```
 
 Run locally:
@@ -1161,13 +1161,13 @@ Run:
 sed -n '1,120p' README.md
 ```
 
-Expected: README contains the Feishu Assistant section and no broken code fences.
+Expected: README contains the Lark Assistant section and no broken code fences.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add README.md
-git commit -m "docs: add Feishu assistant setup"
+git commit -m "docs: add Lark assistant setup"
 ```
 
 ---
@@ -1224,7 +1224,7 @@ Expected: shows small commits for contracts, stub handler, config, access contro
 
 Spec coverage:
 
-- Bidirectional Feishu support is covered by Tasks 6-8.
+- Bidirectional Lark support is covered by Tasks 6-8.
 - WebSocket event subscription is covered by Task 7.
 - Internal channel boundary is covered by Task 1.
 - Stub handler is covered by Task 2.
@@ -1242,4 +1242,4 @@ No placeholders:
 Type consistency:
 
 - The internal interfaces use `channel.MessageEvent`, `channel.OutgoingMessage`, `channel.Handler`, and `channel.MessageSender` consistently.
-- Feishu sender code consistently sends to `chat_id`, matching the design's "same conversation" behavior.
+- Lark sender code consistently sends to `chat_id`, matching the design's "same conversation" behavior.

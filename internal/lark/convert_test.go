@@ -1,4 +1,4 @@
-package feishu
+package lark
 
 import (
 	"testing"
@@ -34,7 +34,7 @@ func TestConvertDirectTextMessage(t *testing.T) {
 	if event.Sender.ID != "ou_sender" {
 		t.Fatalf("sender ID = %q", event.Sender.ID)
 	}
-	if event.Platform != "feishu" {
+	if event.Platform != "lark" {
 		t.Fatalf("platform = %q", event.Platform)
 	}
 	if event.MentionedBot {

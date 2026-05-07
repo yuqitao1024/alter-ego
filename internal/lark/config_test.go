@@ -1,13 +1,13 @@
-package feishu
+package lark
 
 import "testing"
 
 func TestConfigFromEnvParsesDefaultsAndAllowlists(t *testing.T) {
 	env := map[string]string{
-		"ALTER_EGO_FEISHU_APP_ID":       "cli_test",
-		"ALTER_EGO_FEISHU_APP_SECRET":   "secret",
-		"ALTER_EGO_FEISHU_ALLOW_USERS":  "ou_1, ou_2",
-		"ALTER_EGO_FEISHU_ALLOW_GROUPS": "oc_1,oc_2",
+		"ALTER_EGO_LARK_APP_ID":       "cli_test",
+		"ALTER_EGO_LARK_APP_SECRET":   "secret",
+		"ALTER_EGO_LARK_ALLOW_USERS":  "ou_1, ou_2",
+		"ALTER_EGO_LARK_ALLOW_GROUPS": "oc_1,oc_2",
 	}
 
 	cfg, err := ConfigFromMap(env)
@@ -18,8 +18,8 @@ func TestConfigFromEnvParsesDefaultsAndAllowlists(t *testing.T) {
 	if cfg.AppID != "cli_test" || cfg.AppSecret != "secret" {
 		t.Fatalf("credentials were not parsed: %#v", cfg)
 	}
-	if cfg.Domain != "feishu" {
-		t.Fatalf("domain = %q, want feishu", cfg.Domain)
+	if cfg.Domain != "lark" {
+		t.Fatalf("domain = %q, want lark", cfg.Domain)
 	}
 	if !cfg.RequireMention {
 		t.Fatal("RequireMention = false, want true by default")
@@ -41,9 +41,9 @@ func TestConfigFromEnvRequiresCredentials(t *testing.T) {
 
 func TestConfigFromEnvParsesRequireMentionFalse(t *testing.T) {
 	cfg, err := ConfigFromMap(map[string]string{
-		"ALTER_EGO_FEISHU_APP_ID":          "cli_test",
-		"ALTER_EGO_FEISHU_APP_SECRET":      "secret",
-		"ALTER_EGO_FEISHU_REQUIRE_MENTION": "false",
+		"ALTER_EGO_LARK_APP_ID":          "cli_test",
+		"ALTER_EGO_LARK_APP_SECRET":      "secret",
+		"ALTER_EGO_LARK_REQUIRE_MENTION": "false",
 	})
 	if err != nil {
 		t.Fatalf("ConfigFromMap returned error: %v", err)
