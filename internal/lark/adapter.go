@@ -9,7 +9,6 @@ import (
 	larkapi "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
-	larkservice "github.com/larksuite/oapi-sdk-go/v3/service/im"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	"github.com/larksuite/oapi-sdk-go/v3/ws"
 
@@ -47,19 +46,6 @@ func NewAdapter(cfg Config, handler channel.Handler) *Adapter {
 	)
 
 	return adapter
-}
-
-func NewAdapterWithDependencies(cfg Config, handler channel.Handler, sender channel.MessageSender, wsClient *ws.Client) *Adapter {
-	return &Adapter{
-		cfg:      cfg,
-		handler:  handler,
-		sender:   sender,
-		wsClient: wsClient,
-	}
-}
-
-func NewSDKMessageSender(client *larkservice.Service) channel.MessageSender {
-	return NewSender(NewSDKMessageCreator(client))
 }
 
 func (a *Adapter) Start(ctx context.Context) error {
