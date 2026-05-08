@@ -19,7 +19,11 @@ type Adapter struct {
 	cfg      Config
 	handler  channel.Handler
 	sender   channel.MessageSender
-	wsClient *ws.Client
+	wsClient wsStarter
+}
+
+type wsStarter interface {
+	Start(ctx context.Context) error
 }
 
 func NewAdapter(cfg Config, handler channel.Handler) *Adapter {
@@ -52,7 +56,18 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if a.wsClient == nil {
 		return fmt.Errorf("websocket client is not configured")
 	}
-	return a.wsClient.Start(ctx)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- a.wsClient.Start(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (a *Adapter) handleP2Message(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
