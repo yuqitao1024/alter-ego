@@ -7,9 +7,9 @@ import (
 
 type Config struct {
 	Provider string
-	APIKey  string
-	BaseURL string
-	Model   string
+	APIKey   string
+	BaseURL  string
+	Model    string
 }
 
 func ConfigFromEnv() Config {
@@ -47,8 +47,8 @@ func ConfigFromMap(values map[string]string) Config {
 
 	if cfg.BaseURL == "" {
 		switch cfg.Provider {
-		case "glm":
-			cfg.BaseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
+		case "dashscope":
+			cfg.BaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 		default:
 			cfg.BaseURL = "https://api.openai.com/v1"
 		}

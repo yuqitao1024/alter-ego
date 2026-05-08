@@ -7,12 +7,13 @@ import (
 
 type Provider interface {
 	CreateResponse(ctx context.Context, req ChatRequest) (string, error)
+	SystemRole() string
 }
 
 func NewProvider(cfg Config, httpClient *http.Client) Provider {
 	switch cfg.Provider {
-	case "glm":
-		return NewGLMProvider(cfg, httpClient)
+	case "dashscope":
+		return NewDashScopeProvider(cfg, httpClient)
 	default:
 		return NewOpenAIProvider(cfg, httpClient)
 	}

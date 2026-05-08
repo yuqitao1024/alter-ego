@@ -17,13 +17,13 @@ func TestConfigFromMapParsesDefaults(t *testing.T) {
 
 func TestConfigFromMapParsesValues(t *testing.T) {
 	cfg := ConfigFromMap(map[string]string{
-		"ALTER_EGO_LLM_PROVIDER": "glm",
+		"ALTER_EGO_LLM_PROVIDER": "dashscope",
 		"ALTER_EGO_LLM_API_KEY":  "sk-test",
 		"ALTER_EGO_LLM_BASE_URL": "https://example.com/v1",
 		"ALTER_EGO_LLM_MODEL":    "gpt-test",
 	})
 
-	if cfg.Provider != "glm" {
+	if cfg.Provider != "dashscope" {
 		t.Fatalf("Provider = %q", cfg.Provider)
 	}
 	if cfg.APIKey != "sk-test" {
@@ -52,12 +52,12 @@ func TestConfigFromMapFallsBackToLegacyOpenAIVariables(t *testing.T) {
 	}
 }
 
-func TestConfigFromMapUsesGLMDefaultBaseURL(t *testing.T) {
+func TestConfigFromMapUsesDashScopeDefaultBaseURL(t *testing.T) {
 	cfg := ConfigFromMap(map[string]string{
-		"ALTER_EGO_LLM_PROVIDER": "glm",
+		"ALTER_EGO_LLM_PROVIDER": "dashscope",
 	})
 
-	if cfg.BaseURL != "https://open.bigmodel.cn/api/coding/paas/v4" {
+	if cfg.BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
 		t.Fatalf("BaseURL = %q", cfg.BaseURL)
 	}
 }

@@ -11,15 +11,23 @@ import (
 	"github.com/yuqitao1024/alter-ego/internal/channel"
 )
 
-type fakeChatClient struct {
+type fakeProvider struct {
 	lastReq ChatRequest
 	reply   string
 	err     error
+	role    string
 }
 
-func (f *fakeChatClient) CreateResponse(ctx context.Context, req ChatRequest) (string, error) {
+func (f *fakeProvider) CreateResponse(ctx context.Context, req ChatRequest) (string, error) {
 	f.lastReq = req
 	return f.reply, f.err
+}
+
+func (f *fakeProvider) SystemRole() string {
+	if f.role == "" {
+		return "developer"
+	}
+	return f.role
 }
 
 func TestChatHandlerReturnsConfigurationMessageWhenLLMIsNotConfigured(t *testing.T) {
@@ -44,7 +52,7 @@ func TestChatHandlerReturnsConfigurationMessageWhenLLMIsNotConfigured(t *testing
 func TestChatHandlerBuildsPromptFromHistoryAndCurrentMessage(t *testing.T) {
 	store := NewSessionStore(12)
 	store.AppendTurn("lark:oc_1", "previous user", "previous assistant")
-	client := &fakeChatClient{reply: "next assistant"}
+	client := &fakeProvider{reply: "next assistant"}
 	handler := NewChatHandler(Config{APIKey: "sk-test", Model: "gpt-test"}, store, client)
 	event := channel.MessageEvent{
 		Text:     "current user",
@@ -84,7 +92,7 @@ func TestChatHandlerBuildsPromptFromHistoryAndCurrentMessage(t *testing.T) {
 
 func TestChatHandlerStoresSuccessfulTurn(t *testing.T) {
 	store := NewSessionStore(12)
-	client := &fakeChatClient{reply: "assistant reply"}
+	client := &fakeProvider{reply: "assistant reply"}
 	handler := NewChatHandler(Config{APIKey: "sk-test", Model: "gpt-test"}, store, client)
 	event := channel.MessageEvent{
 		Text:     "user text",
@@ -106,7 +114,7 @@ func TestChatHandlerStoresSuccessfulTurn(t *testing.T) {
 
 func TestChatHandlerHandlesEmptyResponseText(t *testing.T) {
 	store := NewSessionStore(12)
-	client := &fakeChatClient{reply: "   "}
+	client := &fakeProvider{reply: "   "}
 	handler := NewChatHandler(Config{APIKey: "sk-test", Model: "gpt-test"}, store, client)
 	event := channel.MessageEvent{
 		Text:     "user text",
@@ -128,7 +136,7 @@ func TestChatHandlerHandlesEmptyResponseText(t *testing.T) {
 
 func TestChatHandlerHandlesClientError(t *testing.T) {
 	store := NewSessionStore(12)
-	client := &fakeChatClient{err: errors.New("boom")}
+	client := &fakeProvider{err: errors.New("boom")}
 	handler := NewChatHandler(Config{APIKey: "sk-test", Model: "gpt-test"}, store, client)
 	event := channel.MessageEvent{
 		Text:     "user text",
@@ -185,7 +193,7 @@ func TestOpenAIProviderParsesOutputText(t *testing.T) {
 	}
 }
 
-func TestGLMProviderParsesChatCompletionsText(t *testing.T) {
+func TestDashScopeProviderParsesChatCompletionsText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s", r.Method)
@@ -197,27 +205,49 @@ func TestGLMProviderParsesChatCompletionsText(t *testing.T) {
 			t.Fatalf("Authorization = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello from glm"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello from dashscope"}}]}`))
 	}))
 	defer server.Close()
 
-	client := NewGLMProvider(Config{
+	client := NewDashScopeProvider(Config{
 		APIKey:  "glm-test",
 		BaseURL: server.URL,
-		Model:   "GLM-5.1",
+		Model:   "glm-5.1",
 	}, server.Client())
 
 	text, err := client.CreateResponse(context.Background(), ChatRequest{
-		Model: "GLM-5.1",
+		Model: "glm-5.1",
 		Messages: []ChatMessage{
-			{Role: "developer", Content: "system"},
+			{Role: "system", Content: "system"},
 			{Role: "user", Content: "hello"},
 		},
 	})
 	if err != nil {
 		t.Fatalf("CreateResponse returned error: %v", err)
 	}
-	if text != "hello from glm" {
+	if text != "hello from dashscope" {
 		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestChatHandlerUsesProviderSpecificSystemRole(t *testing.T) {
+	store := NewSessionStore(12)
+	client := &fakeProvider{reply: "ok", role: "system"}
+	handler := NewChatHandler(Config{Provider: "dashscope", APIKey: "glm-test", Model: "glm-5.1"}, store, client)
+	event := channel.MessageEvent{
+		Text:     "hello",
+		Platform: "lark",
+		Conversation: channel.Conversation{
+			ID:   "oc_1",
+			Kind: channel.ConversationDirect,
+		},
+	}
+
+	_, err := handler.HandleMessage(context.Background(), event)
+	if err != nil {
+		t.Fatalf("HandleMessage returned error: %v", err)
+	}
+	if client.lastReq.Messages[0].Role != "system" {
+		t.Fatalf("system role = %q, want system", client.lastReq.Messages[0].Role)
 	}
 }

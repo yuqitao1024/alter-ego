@@ -49,7 +49,7 @@ func (h *ChatHandler) HandleMessage(ctx context.Context, event channel.MessageEv
 		return reply, nil
 	}
 
-	messages := []ChatMessage{{Role: "developer", Content: h.systemText}}
+	messages := []ChatMessage{{Role: h.provider.SystemRole(), Content: h.systemText}}
 	for _, message := range h.sessions.Snapshot(sessionKey(event)) {
 		messages = append(messages, ChatMessage{
 			Role:    message.Role,

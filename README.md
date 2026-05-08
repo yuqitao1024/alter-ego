@@ -31,13 +31,13 @@ export ALTER_EGO_LLM_BASE_URL="https://api.openai.com/v1"
 export ALTER_EGO_LLM_MODEL="gpt-5"
 ```
 
-For GLM Coding Plan setups, use the OpenAI-compatible coding endpoint:
+For DashScope OpenAI-compatible setups with GLM models, use:
 
 ```sh
-export ALTER_EGO_LLM_PROVIDER="glm"
-export ALTER_EGO_LLM_API_KEY="your-bigmodel-api-key"
-export ALTER_EGO_LLM_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"
-export ALTER_EGO_LLM_MODEL="GLM-5.1"
+export ALTER_EGO_LLM_PROVIDER="dashscope"
+export ALTER_EGO_LLM_API_KEY="your-dashscope-api-key"
+export ALTER_EGO_LLM_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+export ALTER_EGO_LLM_MODEL="glm-5.1"
 ```
 
 Legacy `ALTER_EGO_OPENAI_*` variables are still accepted for backward compatibility.

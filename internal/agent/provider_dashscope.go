@@ -9,30 +9,30 @@ import (
 	"strings"
 )
 
-type GLMProvider struct {
+type DashScopeProvider struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
 }
 
-func NewGLMProvider(cfg Config, httpClient *http.Client) *GLMProvider {
+func NewDashScopeProvider(cfg Config, httpClient *http.Client) *DashScopeProvider {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &GLMProvider{
+	return &DashScopeProvider{
 		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:     cfg.APIKey,
 		httpClient: httpClient,
 	}
 }
 
-func (p *GLMProvider) CreateResponse(ctx context.Context, req ChatRequest) (string, error) {
-	body := glmChatCompletionsRequest{
+func (p *DashScopeProvider) CreateResponse(ctx context.Context, req ChatRequest) (string, error) {
+	body := dashScopeChatCompletionsRequest{
 		Model:    req.Model,
-		Messages: make([]glmChatMessage, 0, len(req.Messages)),
+		Messages: make([]dashScopeChatMessage, 0, len(req.Messages)),
 	}
 	for _, message := range req.Messages {
-		body.Messages = append(body.Messages, glmChatMessage{
+		body.Messages = append(body.Messages, dashScopeChatMessage{
 			Role:    message.Role,
 			Content: message.Content,
 		})
@@ -56,7 +56,7 @@ func (p *GLMProvider) CreateResponse(ctx context.Context, req ChatRequest) (stri
 	}
 	defer resp.Body.Close()
 
-	var decoded glmChatCompletionsResponse
+	var decoded dashScopeChatCompletionsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return "", err
 	}
@@ -64,7 +64,7 @@ func (p *GLMProvider) CreateResponse(ctx context.Context, req ChatRequest) (stri
 		if decoded.Error != nil && decoded.Error.Message != "" {
 			return "", fmt.Errorf(decoded.Error.Message)
 		}
-		return "", fmt.Errorf("glm request failed with status %d", resp.StatusCode)
+		return "", fmt.Errorf("dashscope request failed with status %d", resp.StatusCode)
 	}
 	if len(decoded.Choices) == 0 {
 		return "", nil
@@ -72,17 +72,21 @@ func (p *GLMProvider) CreateResponse(ctx context.Context, req ChatRequest) (stri
 	return decoded.Choices[0].Message.Content, nil
 }
 
-type glmChatCompletionsRequest struct {
-	Model    string           `json:"model"`
-	Messages []glmChatMessage `json:"messages"`
+func (p *DashScopeProvider) SystemRole() string {
+	return "system"
 }
 
-type glmChatMessage struct {
+type dashScopeChatCompletionsRequest struct {
+	Model    string                 `json:"model"`
+	Messages []dashScopeChatMessage `json:"messages"`
+}
+
+type dashScopeChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type glmChatCompletionsResponse struct {
+type dashScopeChatCompletionsResponse struct {
 	Choices []struct {
 		Message struct {
 			Content string `json:"content"`

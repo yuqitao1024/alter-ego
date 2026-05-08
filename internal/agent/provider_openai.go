@@ -70,6 +70,10 @@ func (p *OpenAIProvider) CreateResponse(ctx context.Context, req ChatRequest) (s
 	return decoded.OutputText, nil
 }
 
+func (p *OpenAIProvider) SystemRole() string {
+	return "developer"
+}
+
 type openAIResponseRequest struct {
 	Model string               `json:"model"`
 	Input []openAIInputMessage `json:"input"`
@@ -87,4 +91,3 @@ type openAIResponse struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
 }
-
