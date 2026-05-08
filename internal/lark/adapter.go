@@ -20,6 +20,7 @@ type Adapter struct {
 	handler  channel.Handler
 	sender   channel.MessageSender
 	wsClient wsStarter
+	deduper  *messageDeduper
 }
 
 type wsStarter interface {
@@ -34,6 +35,7 @@ func NewAdapter(cfg Config, handler channel.Handler) *Adapter {
 		cfg:     cfg,
 		handler: handler,
 		sender:  sender,
+		deduper: newMessageDeduper(defaultMessageDedupeTTL, nil),
 	}
 
 	eventHandler := dispatcher.NewEventDispatcher("", "")
@@ -99,6 +101,9 @@ func (a *Adapter) handleP2Message(ctx context.Context, event *larkim.P2MessageRe
 
 	normalized := NormalizeIncoming(incoming)
 	if !Allowed(a.cfg, normalized) {
+		return nil
+	}
+	if a.deduper != nil && !a.deduper.MarkIfNew(normalized.ID) {
 		return nil
 	}
 
