@@ -8,20 +8,19 @@ Alter Ego already has:
 
 - a working Lark transport layer;
 - a hybrid command/chat agent handler;
-- short-lived in-memory session state for conversational use;
 - a real operator-facing bot flow in Lark.
 
-The next capability is operational rather than conversational: the bot should manage development tasks executed by remote `codex` CLI sessions over SSH. The user does not need full terminal access, but the bot must be able to conduct the full remote CLI interaction on the user's behalf.
+The next capability is operational rather than conversational: the bot should manage development tasks executed by remote `codex` CLI sessions over SSH.
 
-The operating constraints established during design are:
+The user does not need full terminal access, but the bot must be able to carry a full remote Codex conversation on the user's behalf, including:
 
-- only two remote machines need to be supported in the first version;
-- one machine may run multiple Codex tasks concurrently;
-- task distribution should be balanced across the two machines;
-- only one class of human escalation is required in the first version: implementation-solution choice;
-- all other ordinary execution steps should continue automatically;
-- tasks and remote Codex session identities must be persisted locally so work can continue after local restart or SSH disconnect;
-- restoring a task must prefer reusing a still-running remote Codex process, and only fall back to `codex resume <session_id>` after confirming the old process is gone.
+- requirement clarification;
+- scope confirmation;
+- solution discussion;
+- implementation follow-through;
+- recovery after local restart.
+
+The earlier `exec/resume` design is no longer the primary path. It does not preserve the interactive behavior needed for `superpowers`-style requirement discussion. The system should instead use long-lived remote interactive sessions backed by `tmux`.
 
 ## Decision
 
@@ -31,9 +30,11 @@ Implement a repository-scoped remote task orchestration subsystem with these pro
 - repositories define execution locations through bound machine pools;
 - templates define workflow behavior and are bound one-to-one with workflow documents;
 - the orchestrator persists task state in SQLite;
-- remote task execution is session-aware and can resume an existing Codex session by remote session ID;
+- each remote task owns one `tmux` session on one remote machine;
+- `codex` runs inside that `tmux` session;
+- the orchestrator reads remote output with `tmux capture-pane` and sends input with `tmux send-keys`;
 - multiple tasks are advanced through a round-robin scheduler;
-- only implementation-solution-choice nodes pause for a Lark reply from the user.
+- user escalation happens when Codex asks for missing information, scope confirmation, or solution choice.
 
 This is a state-machine-driven system with model assistance, not a pure conversational workflow.
 
@@ -45,8 +46,8 @@ This is a state-machine-driven system with model assistance, not a pure conversa
 - Bind each task template to one repository and one workflow document.
 - Persist remote task state locally.
 - Recover remote tasks after local process restart or transient SSH disconnect.
-- Reuse a live remote Codex process when possible instead of spawning a duplicate.
-- Ask the user in Lark only when the task reaches an implementation-solution-choice decision point.
+- Preserve a continuous interactive Codex session instead of repeatedly spawning non-interactive runs.
+- Ask the user in Lark whenever the remote session requires clarification, confirmation, or a solution decision.
 
 ## Non-Goals
 
@@ -54,9 +55,8 @@ This is a state-machine-driven system with model assistance, not a pure conversa
 - A general-purpose web console.
 - Multi-user authorization and tenant isolation.
 - Non-SSH execution transports.
-- Automatic recovery of arbitrary shell processes outside Codex session semantics.
-- Rich terminal mirroring into Lark.
-- Automatic human escalation for categories other than implementation-solution choice.
+- Raw terminal streaming into Lark.
+- Exact terminal rendering fidelity.
 
 ## High-Level Architecture
 
@@ -98,27 +98,29 @@ Owns task lifecycle, persistence, scheduling, recovery, and human-escalation sta
 
 This layer is deterministic and stateful. It is not delegated to the LLM.
 
-### 4. Remote Codex Runner
+### 4. Remote Interactive Runner
 
-Connects to remote machines over SSH and manages `codex` CLI sessions in a controlled way:
+Connects to remote machines over SSH and manages a long-lived `tmux` session per task.
 
-- start new session;
-- inspect existing session/process state;
-- attach to a still-running session;
-- resume an ended session by Codex session ID;
-- send task instructions;
-- collect output windows;
-- stop a task.
+Primary capabilities:
+
+- prepare task workspace;
+- create and name a `tmux` session;
+- start `codex` inside that session;
+- read recent output with `tmux capture-pane`;
+- send follow-up input with `tmux send-keys`;
+- detect whether a session still exists with `tmux has-session`;
+- stop a task by terminating the `tmux` session or the foreground process.
 
 ### 5. Decision Layer
 
 Uses the repository/template workflow document plus runtime context to:
 
-- generate the next instruction to the remote Codex session;
 - summarize remote progress for status reporting;
-- decide whether the remote session has reached an implementation-solution-choice node.
+- decide whether Codex is still executing, has completed, or is blocked;
+- classify user-facing questions into escalation categories.
 
-The model may suggest escalation, but the orchestrator owns the explicit transition into `waiting_user_decision`.
+The model may suggest escalation, but the orchestrator owns the explicit transition into `waiting_user_input`.
 
 ### 6. Persistence Layer
 
@@ -137,7 +139,6 @@ Suggested fields:
 - `host`
 - `port`
 - `user`
-- `auth` reference or credential lookup key
 - optional SSH options needed by the runner
 
 ### RepositoryConfig
@@ -157,9 +158,9 @@ Suggested fields:
 
 `machine_ids` is authoritative. It defines where tasks for this repository may run.
 
-`pre_clone_bootstrap` runs after the remote task directory is created but before the repository is cloned. This is intended for environment preparation needed to make code download succeed.
+`pre_clone_bootstrap` runs after the remote task directory is created but before the repository is cloned.
 
-`post_clone_bootstrap` runs after clone and branch checkout. This is intended for repository-local setup such as dependency installation or submodule initialization.
+`post_clone_bootstrap` runs after clone and branch checkout.
 
 ### TemplateConfig
 
@@ -185,8 +186,6 @@ When a task is created:
 4. choose the machine with the fewest active tasks;
 5. break ties by config order.
 
-This matches the user's requirement that tasks should be distributed across the two machines rather than selected arbitrarily.
-
 ## Task State Model
 
 ### TaskRun
@@ -201,23 +200,25 @@ Each task instance persists at least:
 - `user_request`
 - `created_by`
 - `remote_workdir`
-- `remote_codex_session_id`
-- `remote_process_identity` when discoverable
+- `tmux_session_name`
+- `remote_codex_session_id` when discoverable
 - `last_input`
 - `last_output_summary`
+- `last_screen_digest`
 - `awaiting_question`
 - `created_at`
 - `updated_at`
 
 ### AwaitingQuestion
 
-Only needed when the task reaches an implementation-solution-choice node.
+Needed whenever the task pauses for user input.
 
 Suggested fields:
 
 - `question_text`
 - `options_summary`
 - `context_excerpt`
+- `question_type`
 - `asked_at`
 - `answered_at`
 
@@ -226,32 +227,27 @@ Suggested fields:
 Suggested states:
 
 - `pending`
-- `starting`
+- `preparing_workspace`
+- `starting_session`
 - `running`
-- `waiting_user_decision`
+- `waiting_user_input`
 - `detached`
-- `probing`
-- `attaching`
-- `resuming`
 - `completed`
 - `failed`
 - `stopped`
 
 Representative transitions:
 
-- `pending -> starting`
-- `starting -> running`
-- `running -> waiting_user_decision`
-- `waiting_user_decision -> running`
+- `pending -> preparing_workspace`
+- `preparing_workspace -> starting_session`
+- `starting_session -> running`
+- `running -> waiting_user_input`
+- `waiting_user_input -> running`
 - `running -> detached`
-- `detached -> probing`
-- `probing -> attaching`
-- `probing -> resuming`
-- `attaching -> running`
-- `resuming -> running`
+- `detached -> running`
 - `running -> completed`
-- `starting/running/probing/attaching/resuming -> failed`
-- `pending/starting/running/waiting_user_decision/detached -> stopped`
+- `preparing_workspace/starting_session/running/detached -> failed`
+- `pending/preparing_workspace/starting_session/running/waiting_user_input/detached -> stopped`
 
 ## Remote Startup Model
 
@@ -263,9 +259,10 @@ For a new task, the runner should:
 2. create a task-scoped remote directory under `remote_workspace_root`, for example `<workspace_root>/<task-id>`;
 3. run `pre_clone_bootstrap` inside that task directory;
 4. clone `remote_repo_url` into a repository subdirectory inside the task directory;
-5. checkout `default_branch` (or repository override when added later);
+5. checkout `default_branch`;
 6. run `post_clone_bootstrap` inside the cloned repository;
-7. start `codex` inside the cloned repository directory.
+7. create a `tmux` session named from the task id, for example `alterego-<task-id>`;
+8. start `codex` inside that `tmux` session.
 
 The workflow document does not own clone or environment setup. It only guides how the development task should proceed once the repository is ready.
 
@@ -275,31 +272,31 @@ The orchestrator maintains a round-robin queue of active tasks.
 
 Scheduling rules:
 
-- tasks in `running`, `detached`, or recovery-related states remain eligible for scheduling;
-- tasks in `waiting_user_decision` are skipped until the user replies;
+- tasks in `running` or `detached` remain eligible for scheduling;
+- tasks in `waiting_user_input` are skipped until the user replies;
 - each scheduling turn gives one task one bounded unit of progress:
-  - observe remote output;
+  - capture recent output from the remote `tmux` session;
   - interpret task state;
   - decide whether to continue, escalate, recover, or finish;
-  - optionally send one next instruction.
+  - optionally send one next input.
 
-This keeps long-running tasks from monopolizing the system and matches the user's requirement for multi-task rotation.
-
-## Remote Codex Session Model
+## Remote Session Model
 
 The runner must support two top-level entry paths:
 
-- `StartNewSession`
-- `RecoverSession`
+- `StartNewInteractiveSession`
+- `ReconnectInteractiveSession`
 
-`RecoverSession` is not a blind resume. It must follow this strict order:
+Recovery is based on `tmux`, not `codex exec resume`.
+
+For a detached task:
 
 1. connect to the machine over SSH;
-2. inspect whether the old Codex-backed process/session is still alive for the stored task;
-3. if still alive, attach or continue that live remote session;
-4. only if it is confirmed dead, run the Codex session resume flow using the persisted `remote_codex_session_id`.
+2. check `tmux has-session -t <session-name>`;
+3. if the session still exists, keep using that live session;
+4. if the session no longer exists, mark the task failed or require explicit operator recovery policy.
 
-This rule prevents duplicate execution branches for the same task.
+The first version does not attempt to reconstruct a lost interactive session from a dead terminal.
 
 ### Recovery Inputs
 
@@ -307,26 +304,16 @@ The recovery operation uses:
 
 - `machine_id`
 - `remote_workdir`
-- `remote_codex_session_id`
+- `tmux_session_name`
 
-No attempt is made to recreate the original SSH transport state. The only stable remote identity is the Codex session.
+`remote_codex_session_id` may still be persisted when visible, but it is informational in the TTY-first design rather than the primary recovery key.
 
 ## Persistence
 
 SQLite is the first-version persistence backend.
 
-Reasons:
-
-- task state is more structured than a simple append-only log;
-- recovery, filtering, and lifecycle transitions need indexed queries;
-- multiple task states, questions, machine assignments, and timestamps fit naturally in relational storage;
-- JSON files would become brittle quickly once recovery logic is added.
-
 Suggested tables:
 
-- `machines` if runtime caching of machine config is needed
-- `repositories`
-- `templates`
 - `tasks`
 - `task_events`
 - `task_questions`
@@ -335,11 +322,10 @@ Suggested tables:
 
 - task created
 - machine selected
-- session started
-- live session attached
-- session resumed
-- user decision requested
-- user decision applied
+- workspace prepared
+- tmux session started
+- user question raised
+- user answer applied
 - task completed
 - task failed
 
@@ -357,8 +343,8 @@ The decision model context should contain three ordered layers:
 
 These rules stay constant:
 
-- the coordinator is managing remote Codex development sessions;
-- it should continue automatically unless the task reaches an implementation-solution-choice node;
+- the coordinator is managing remote interactive Codex sessions;
+- it should continue automatically unless Codex asks for user input;
 - it should summarize progress concisely;
 - it should not invent task state outside the orchestrator's known state.
 
@@ -369,7 +355,6 @@ This document defines repository-specific operating behavior, for example:
 - preferred development sequence;
 - validation expectations;
 - summary style;
-- signals that count as implementation-solution choice;
 - repository-specific coding norms.
 
 ### Runtime Context
@@ -380,25 +365,20 @@ Runtime context includes:
 - task status;
 - repository and template identity;
 - recent output summary;
-- latest raw output window when needed;
+- latest captured terminal window when needed;
 - last command sent to Codex;
 - whether a question is currently pending.
 
 ## Human Escalation Policy
 
-Only one category pauses for user input in the first version:
+The first version should explicitly support at least these categories:
 
-- implementation-solution choice
+- `requirement_clarification`
+- `scope_confirmation`
+- `implementation_solution_choice`
+- `missing_context`
 
-Everything else should proceed automatically, including:
-
-- ordinary iteration;
-- test execution;
-- code edits;
-- dependency installation;
-- commit/push behavior, if later enabled by workflow policy.
-
-The orchestrator must encode this policy explicitly. It should not rely solely on prompt wording.
+Anything that looks like a direct question from Codex to the user should pause the task and route the question through Lark.
 
 ## Lark Command Semantics
 
@@ -408,7 +388,7 @@ The orchestrator must encode this policy explicitly. It should not rely solely o
 - resolve repository;
 - choose machine;
 - create persisted `TaskRun`;
-- schedule remote session start;
+- schedule workspace preparation and session start;
 - return task ID, repository, and chosen machine.
 
 ### `/task list`
@@ -429,21 +409,21 @@ Returns detailed state:
 - task metadata
 - machine
 - current state
-- remote session identity
+- `tmux` session name
 - latest summary
 - pending question if any
 
 ### `/task reply <task-id> <decision text>`
 
-- only valid when the task is in `waiting_user_decision`;
-- persists the user's decision;
+- only valid when the task is in `waiting_user_input`;
+- persists the user's reply;
 - transitions the task back to `running`;
-- enqueues the task for the next scheduling turn.
+- injects the reply into the live `tmux` session.
 
 ### `/task stop <task-id>`
 
 - marks the task as stopping/stopped;
-- attempts remote cancellation or termination if applicable;
+- attempts remote session termination;
 - persists final state.
 
 ## Error Handling
@@ -451,10 +431,11 @@ Returns detailed state:
 The first version should handle at least:
 
 - SSH connection failure;
-- repository path missing on remote machine;
-- Codex session start failure;
-- live-session probe failure;
-- resume failure;
+- workspace preparation failure;
+- bootstrap command failure;
+- repository clone failure;
+- `tmux` session creation failure;
+- `tmux has-session` failure;
 - malformed or unrecognized remote output;
 - SQLite open or write failure;
 - duplicate Lark delivery, already handled by the current message deduper.
@@ -469,20 +450,19 @@ Tests should cover:
 - machine selection balancing across two machines;
 - task state transitions;
 - SQLite persistence and reload;
-- recovery decision order:
-  - attach live process first
-  - resume only after confirmed exit
+- `tmux` startup command construction;
+- `tmux capture-pane` parsing and screen normalization;
+- `tmux has-session` recovery path;
 - round-robin scheduling behavior;
 - Lark command parsing and task operation routing;
-- decision-layer gating for `waiting_user_decision`.
+- decision-layer gating for `waiting_user_input`.
 
-The implementation should isolate remote execution behind interfaces so SSH and Codex interactions can be tested with fakes.
+The implementation should isolate remote execution behind interfaces so SSH and `tmux` interactions can be tested with fakes.
 
 ## Future Work
 
 - natural-language task creation that compiles down into `/task start`;
-- richer escalation categories;
-- repository health and capacity scoring;
+- richer escalation categories and better question extraction;
+- richer operator view into recent terminal output;
 - web dashboard for task inspection;
-- cross-process leader election if the orchestrator ever runs in more than one local instance;
-- remote output snapshots and artifact collection.
+- cross-process leader election if the orchestrator ever runs in more than one local instance.
