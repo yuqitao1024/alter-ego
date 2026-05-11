@@ -55,7 +55,7 @@ Supported commands:
 
 ## Remote Codex Tasks
 
-Remote Codex orchestration is configured from repository files and persisted in SQLite.
+Remote Codex orchestration is configured from repository files and persisted in SQLite. Each task runs inside a long-lived remote `tmux` session, and Alter Ego drives Codex by reading the session screen and sending follow-up input back into the same session.
 
 Optional task environment variables:
 
@@ -74,6 +74,13 @@ docs/workflows/*.md
 ```
 
 Each repository binds to its remote machine pool. Each template binds to one repository and one workflow document. Task state is stored in the SQLite database defined by `ALTER_EGO_TASK_DB_PATH`.
+
+Remote machine prerequisites:
+
+- `ssh` access from the local control node
+- `tmux` installed on the remote machine
+- `codex` installed and already authenticated on the remote machine
+- Git access to the configured `remote_repo_url`
 
 Repository configuration now uses task-scoped checkout settings instead of a fixed repository path. A repository entry should define:
 
@@ -99,7 +106,24 @@ For each new task, Alter Ego will:
 4. clone the repository;
 5. checkout `default_branch`;
 6. run `post_clone_bootstrap`;
-7. start `codex` inside the cloned repository.
+7. create a task-scoped `tmux` session;
+8. start `codex` inside that `tmux` session.
+
+Interactive task lifecycle:
+
+1. `pending`
+2. `preparing_workspace`
+3. `starting_session`
+4. `running`
+5. `waiting_user_input` when Codex needs clarification, scope confirmation, an implementation choice, or missing context
+
+Task state and operator audit data are stored in SQLite:
+
+- `tasks`
+- `task_events`
+- `task_questions`
+
+Replies from `/task reply` are injected back into the live remote session rather than starting a new Codex run.
 
 Run locally:
 

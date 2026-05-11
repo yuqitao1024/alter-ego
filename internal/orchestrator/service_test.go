@@ -326,6 +326,64 @@ func TestStopMarksTaskStoppedAndCallsRunner(t *testing.T) {
 	}
 }
 
+func TestLifecyclePersistsEventsAndQuestions(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task, err := service.StartTask(ctx, "feature_dev", "tester", "Implement orchestrator")
+	if err != nil {
+		t.Fatalf("StartTask returned error: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := service.TickOnce(ctx); err != nil {
+			t.Fatalf("TickOnce #%d returned error: %v", i+1, err)
+		}
+	}
+
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{Summary: "Please clarify the requirement before I proceed."}
+	service.decider.(*fakeDecisionEngine).result = DecisionResult{
+		DecisionType: "requirement_clarification",
+		Summary:      "Please clarify the requirement before I proceed.",
+		Question: &AwaitingQuestion{
+			QuestionText:   "Please clarify the requirement before I proceed.",
+			OptionsSummary: "",
+			ContextExcerpt: "Need more information.",
+			QuestionType:   "requirement_clarification",
+			AskedAt:        time.Now().UTC(),
+		},
+	}
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce for clarification returned error: %v", err)
+	}
+
+	if err := service.Reply(ctx, task.TaskID, "Use behavior A."); err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+
+	events, err := store.ListEvents(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("ListEvents returned no events")
+	}
+
+	questions, err := store.ListQuestions(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("ListQuestions returned error: %v", err)
+	}
+	if len(questions) != 1 {
+		t.Fatalf("len(ListQuestions) = %d, want 1", len(questions))
+	}
+	if questions[0].AnsweredAt == nil || questions[0].AnswerText != "Use behavior A." {
+		t.Fatalf("question = %#v, want answered question", questions[0])
+	}
+}
+
 func newTestService(t *testing.T) (*Service, *Store, func()) {
 	t.Helper()
 

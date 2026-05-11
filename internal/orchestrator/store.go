@@ -238,6 +238,154 @@ func (s *Store) AppendEvent(ctx context.Context, event TaskEvent) error {
 	return nil
 }
 
+func (s *Store) ListEvents(ctx context.Context, taskID string) ([]TaskEvent, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT task_id, event_type, message, created_at
+		FROM task_events
+		WHERE task_id = ?
+		ORDER BY id
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task events for %q: %w", taskID, err)
+	}
+	defer rows.Close()
+
+	var events []TaskEvent
+	for rows.Next() {
+		var event TaskEvent
+		var createdAt string
+		if err := rows.Scan(&event.TaskID, &event.EventType, &event.Message, &createdAt); err != nil {
+			return nil, fmt.Errorf("list task events for %q: %w", taskID, err)
+		}
+		event.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse task event created_at: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list task events for %q: %w", taskID, err)
+	}
+
+	return events, nil
+}
+
+func (s *Store) AppendQuestion(ctx context.Context, question TaskQuestion) error {
+	var answeredAt any
+	if question.AnsweredAt != nil {
+		answeredAt = question.AnsweredAt.UTC().Format(time.RFC3339Nano)
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO task_questions (
+			task_id,
+			question_type,
+			question_text,
+			options_summary,
+			context_excerpt,
+			asked_at,
+			answered_at,
+			answer_text
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		question.TaskID,
+		question.QuestionType,
+		question.QuestionText,
+		question.OptionsSummary,
+		question.ContextExcerpt,
+		question.AskedAt.UTC().Format(time.RFC3339Nano),
+		answeredAt,
+		question.AnswerText,
+	)
+	if err != nil {
+		return fmt.Errorf("append task question for %q: %w", question.TaskID, err)
+	}
+	return nil
+}
+
+func (s *Store) MarkQuestionAnswered(ctx context.Context, taskID string, askedAt, answeredAt time.Time, answerText string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE task_questions
+		SET answered_at = ?, answer_text = ?
+		WHERE task_id = ? AND asked_at = ? AND answered_at IS NULL
+	`,
+		answeredAt.UTC().Format(time.RFC3339Nano),
+		answerText,
+		taskID,
+		askedAt.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("mark task question answered for %q: %w", taskID, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("mark task question answered for %q: rows affected: %w", taskID, err)
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) ListQuestions(ctx context.Context, taskID string) ([]TaskQuestion, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			id,
+			task_id,
+			question_type,
+			question_text,
+			options_summary,
+			context_excerpt,
+			asked_at,
+			answered_at,
+			answer_text
+		FROM task_questions
+		WHERE task_id = ?
+		ORDER BY id
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task questions for %q: %w", taskID, err)
+	}
+	defer rows.Close()
+
+	var questions []TaskQuestion
+	for rows.Next() {
+		var question TaskQuestion
+		var askedAt string
+		var answeredAt sql.NullString
+		if err := rows.Scan(
+			&question.ID,
+			&question.TaskID,
+			&question.QuestionType,
+			&question.QuestionText,
+			&question.OptionsSummary,
+			&question.ContextExcerpt,
+			&askedAt,
+			&answeredAt,
+			&question.AnswerText,
+		); err != nil {
+			return nil, fmt.Errorf("list task questions for %q: %w", taskID, err)
+		}
+		question.AskedAt, err = time.Parse(time.RFC3339Nano, askedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse task question asked_at: %w", err)
+		}
+		if answeredAt.Valid && answeredAt.String != "" {
+			tm, err := time.Parse(time.RFC3339Nano, answeredAt.String)
+			if err != nil {
+				return nil, fmt.Errorf("parse task question answered_at: %w", err)
+			}
+			question.AnsweredAt = &tm
+		}
+		questions = append(questions, question)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list task questions for %q: %w", taskID, err)
+	}
+
+	return questions, nil
+}
+
 func (s *Store) init(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS tasks (
@@ -265,8 +413,20 @@ func (s *Store) init(ctx context.Context) error {
 			message TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS task_questions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id TEXT NOT NULL,
+			question_type TEXT NOT NULL,
+			question_text TEXT NOT NULL,
+			options_summary TEXT NOT NULL,
+			context_excerpt TEXT NOT NULL,
+			asked_at TEXT NOT NULL,
+			answered_at TEXT,
+			answer_text TEXT NOT NULL DEFAULT ''
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_events_task_id ON task_events(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_questions_task_id ON task_questions(task_id)`,
 	}
 
 	for _, statement := range statements {

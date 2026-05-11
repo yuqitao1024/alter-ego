@@ -50,3 +50,15 @@ type TaskEvent struct {
 	Message   string
 	CreatedAt time.Time
 }
+
+type TaskQuestion struct {
+	ID             int64
+	TaskID         string
+	QuestionType   string
+	QuestionText   string
+	OptionsSummary string
+	ContextExcerpt string
+	AskedAt        time.Time
+	AnsweredAt     *time.Time
+	AnswerText     string
+}

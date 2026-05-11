@@ -151,6 +151,71 @@ func TestStoreListsActiveTasksForScheduler(t *testing.T) {
 	}
 }
 
+func TestStoreAppendsAndListsTaskEvents(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 11, 10, 0, 0, 0, time.UTC)
+	for _, event := range []TaskEvent{
+		{TaskID: "task-1", EventType: "task_created", Message: "created", CreatedAt: now},
+		{TaskID: "task-1", EventType: "task_started", Message: "started", CreatedAt: now.Add(time.Minute)},
+	} {
+		if err := store.AppendEvent(ctx, event); err != nil {
+			t.Fatalf("AppendEvent returned error: %v", err)
+		}
+	}
+
+	got, err := store.ListEvents(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(ListEvents) = %d, want 2", len(got))
+	}
+	if got[0].EventType != "task_created" || got[1].EventType != "task_started" {
+		t.Fatalf("events = %#v, want ordered events", got)
+	}
+}
+
+func TestStorePersistsAndUpdatesTaskQuestions(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	askedAt := time.Date(2026, 5, 11, 11, 0, 0, 0, time.UTC)
+	question := TaskQuestion{
+		TaskID:          "task-2",
+		QuestionType:    "requirement_clarification",
+		QuestionText:    "Please clarify the expected behavior.",
+		OptionsSummary:  "n/a",
+		ContextExcerpt:  "Need more information to continue.",
+		AskedAt:         askedAt,
+	}
+	if err := store.AppendQuestion(ctx, question); err != nil {
+		t.Fatalf("AppendQuestion returned error: %v", err)
+	}
+
+	answeredAt := askedAt.Add(5 * time.Minute)
+	if err := store.MarkQuestionAnswered(ctx, "task-2", askedAt, answeredAt, "Proceed with behavior A."); err != nil {
+		t.Fatalf("MarkQuestionAnswered returned error: %v", err)
+	}
+
+	got, err := store.ListQuestions(ctx, "task-2")
+	if err != nil {
+		t.Fatalf("ListQuestions returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(ListQuestions) = %d, want 1", len(got))
+	}
+	if got[0].AnswerText != "Proceed with behavior A." {
+		t.Fatalf("AnswerText = %q, want %q", got[0].AnswerText, "Proceed with behavior A.")
+	}
+	if got[0].AnsweredAt == nil || !got[0].AnsweredAt.Equal(answeredAt) {
+		t.Fatalf("AnsweredAt = %#v, want %s", got[0].AnsweredAt, answeredAt)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 
