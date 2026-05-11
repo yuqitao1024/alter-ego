@@ -48,6 +48,11 @@ type Registry struct {
 }
 
 func LoadRegistry(root string) (*Registry, error) {
+	registryRoot, err := canonicalRoot(root)
+	if err != nil {
+		return nil, err
+	}
+
 	registry := &Registry{
 		Machines:       map[string]*MachineConfig{},
 		Repositories:   map[string]*RepositoryConfig{},
@@ -84,16 +89,9 @@ func LoadRegistry(root string) (*Registry, error) {
 			return nil, fmt.Errorf("template %q references unknown repository %q", template.ID, template.RepositoryID)
 		}
 
-		workflowPath := filepath.Join(root, template.WorkflowPath)
-		info, err := os.Stat(workflowPath)
+		workflowPath, err := resolveWorkflowPath(registryRoot, template.ID, template.WorkflowPath)
 		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("template %q workflow path %q does not exist", template.ID, template.WorkflowPath)
-			}
-			return nil, fmt.Errorf("stat workflow for template %q: %w", template.ID, err)
-		}
-		if info.IsDir() {
-			return nil, fmt.Errorf("template %q workflow path %q is a directory", template.ID, template.WorkflowPath)
+			return nil, err
 		}
 
 		template.Repository = repository
@@ -232,4 +230,48 @@ func requireFields(kind, id string, fields []requiredField) error {
 	}
 
 	return nil
+}
+
+func canonicalRoot(root string) (string, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve registry root %q: %w", root, err)
+	}
+
+	rootResolved, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return "", fmt.Errorf("resolve registry root %q: %w", root, err)
+	}
+
+	return rootResolved, nil
+}
+
+func resolveWorkflowPath(root, templateID, authoredPath string) (string, error) {
+	joinedPath := filepath.Join(root, authoredPath)
+
+	info, err := os.Stat(joinedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("template %q workflow path %q does not exist", templateID, authoredPath)
+		}
+		return "", fmt.Errorf("stat workflow for template %q: %w", templateID, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("template %q workflow path %q is a directory", templateID, authoredPath)
+	}
+
+	resolvedPath, err := filepath.EvalSymlinks(joinedPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve workflow for template %q: %w", templateID, err)
+	}
+
+	relativePath, err := filepath.Rel(root, resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve workflow for template %q: %w", templateID, err)
+	}
+	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("template %q workflow path %q resolves outside registry root", templateID, authoredPath)
+	}
+
+	return resolvedPath, nil
 }

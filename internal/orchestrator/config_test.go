@@ -60,17 +60,26 @@ workflow_path: docs/workflows/ops-review.md
 	if template.Repository == nil {
 		t.Fatal("template.Repository = nil")
 	}
+	if template.Repository != cfg.Repositories["repo_backend"] {
+		t.Fatal("template.Repository does not point at cfg.Repositories[repo_backend]")
+	}
 	if template.Repository.ID != "repo_backend" {
 		t.Fatalf("template.Repository.ID = %q, want repo_backend", template.Repository.ID)
 	}
 	if len(template.Repository.Machines) != 1 {
 		t.Fatalf("len(template.Repository.Machines) = %d, want 1", len(template.Repository.Machines))
 	}
+	if template.Repository.Machines[0] != cfg.Machines["machine_a"] {
+		t.Fatal("template.Repository.Machines[0] does not point at cfg.Machines[machine_a]")
+	}
 	if template.Repository.Machines[0] == nil || template.Repository.Machines[0].ID != "machine_a" {
 		t.Fatalf("template.Repository.Machines[0] = %#v, want machine_a", template.Repository.Machines[0])
 	}
 
-	wantWorkflowPath := filepath.Join(root, "docs/workflows/example-feature-dev.md")
+	wantWorkflowPath, err := filepath.EvalSymlinks(filepath.Join(root, "docs/workflows/example-feature-dev.md"))
+	if err != nil {
+		t.Fatalf("EvalSymlinks returned error: %v", err)
+	}
 	if template.WorkflowPath != "docs/workflows/example-feature-dev.md" {
 		t.Fatalf("template.WorkflowPath = %q, want authored relative path", template.WorkflowPath)
 	}
@@ -188,6 +197,40 @@ workflow_path: docs/workflows/missing.md
 	}
 	if !strings.Contains(err.Error(), "docs/workflows/missing.md") {
 		t.Fatalf("LoadRegistry error = %q, want missing workflow path", err)
+	}
+}
+
+func TestLoadConfigRejectsTemplateWorkflowPathOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outsideWorkflow := filepath.Join(filepath.Dir(root), "escape.md")
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+`)
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+id: repo_backend
+remote_path: /srv/backend
+default_branch: main
+machine_ids:
+  - machine_a
+`)
+	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
+id: feature_dev
+repository_id: repo_backend
+workflow_path: ../escape.md
+`)
+	if err := os.WriteFile(outsideWorkflow, []byte("# Escape\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) returned error: %v", outsideWorkflow, err)
+	}
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error")
+	}
+	if !strings.Contains(err.Error(), "outside") && !strings.Contains(err.Error(), "root") {
+		t.Fatalf("LoadRegistry error = %q, want outside-root validation error", err)
 	}
 }
 
