@@ -75,6 +75,22 @@ func TestSenderRejectsEmptyConversationID(t *testing.T) {
 	}
 }
 
+func TestSenderUsesOpenIDForDirectMessages(t *testing.T) {
+	fake := &fakeMessageCreator{}
+	sender := NewSender(fake)
+
+	err := sender.SendDirectMessage(context.Background(), "ou_user", "hello")
+	if err != nil {
+		t.Fatalf("SendDirectMessage returned error: %v", err)
+	}
+	if fake.receiveIDType != "open_id" {
+		t.Fatalf("receiveIDType = %q, want open_id", fake.receiveIDType)
+	}
+	if fake.receiveID != "ou_user" {
+		t.Fatalf("receiveID = %q, want ou_user", fake.receiveID)
+	}
+}
+
 func TestSenderRejectsEmptyMessageText(t *testing.T) {
 	sender := NewSender(&fakeMessageCreator{})
 

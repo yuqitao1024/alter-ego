@@ -33,6 +33,16 @@ func (s *Sender) SendMessage(ctx context.Context, message channel.OutgoingMessag
 	return s.creator.CreateTextMessage(ctx, larkimv1.ReceiveIdTypeChatId, message.Conversation.ID, message.Text)
 }
 
+func (s *Sender) SendDirectMessage(ctx context.Context, openID, text string) error {
+	if openID == "" {
+		return fmt.Errorf("open ID is required")
+	}
+	if text == "" {
+		return fmt.Errorf("message text is required")
+	}
+	return s.creator.CreateTextMessage(ctx, larkimv1.ReceiveIdTypeOpenId, openID, text)
+}
+
 type SDKMessageCreator struct {
 	client *larkim.Service
 }

@@ -47,6 +47,33 @@ Supported commands:
 - `/help`
 - `/status`
 - `/reset`
+- `/task start <template> <requirement text>`
+- `/task list`
+- `/task status <task-id>`
+- `/task reply <task-id> <decision text>`
+- `/task stop <task-id>`
+
+## Remote Codex Tasks
+
+Remote Codex orchestration is configured from repository files and persisted in SQLite.
+
+Optional task environment variables:
+
+```sh
+export ALTER_EGO_TASK_CONFIG_ROOT="."
+export ALTER_EGO_TASK_DB_PATH=".alterego/tasks.db"
+```
+
+Configuration layout:
+
+```text
+configs/machines/*.yaml
+configs/repositories/*.yaml
+configs/templates/*.yaml
+docs/workflows/*.md
+```
+
+Each repository binds to its remote machine pool. Each template binds to one repository and one workflow document. Task state is stored in the SQLite database defined by `ALTER_EGO_TASK_DB_PATH`.
 
 Run locally:
 

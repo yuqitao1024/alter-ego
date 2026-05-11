@@ -17,6 +17,16 @@ func (f *fakeCommandExecutor) HandleCommand(ctx context.Context, event channel.M
 	return f.reply, nil
 }
 
+type fakeTaskExecutor struct {
+	called bool
+	reply  channel.OutgoingMessage
+}
+
+func (f *fakeTaskExecutor) HandleCommand(ctx context.Context, event channel.MessageEvent) (channel.OutgoingMessage, error) {
+	f.called = true
+	return f.reply, nil
+}
+
 type fakeMessageHandler struct {
 	called bool
 	reply  channel.OutgoingMessage
@@ -34,7 +44,7 @@ func TestRouterRoutesSlashCommandToCommandHandler(t *testing.T) {
 	chat := &fakeMessageHandler{
 		reply: channel.OutgoingMessage{Text: "chat"},
 	}
-	router := NewRouter(command, chat)
+	router := NewRouter(command, nil, chat)
 
 	reply, err := router.HandleMessage(context.Background(), channel.MessageEvent{
 		Text: "/help",
@@ -60,7 +70,7 @@ func TestRouterRoutesNormalTextToChatHandler(t *testing.T) {
 	chat := &fakeMessageHandler{
 		reply: channel.OutgoingMessage{Text: "chat"},
 	}
-	router := NewRouter(command, chat)
+	router := NewRouter(command, nil, chat)
 
 	reply, err := router.HandleMessage(context.Background(), channel.MessageEvent{
 		Text: "hello",
@@ -87,7 +97,7 @@ func TestRouterPreservesConversationTarget(t *testing.T) {
 			Conversation: conversation,
 		},
 	}
-	router := NewRouter(&fakeCommandExecutor{}, chat)
+	router := NewRouter(&fakeCommandExecutor{}, nil, chat)
 
 	reply, err := router.HandleMessage(context.Background(), channel.MessageEvent{
 		Text:         "hello",
@@ -98,5 +108,37 @@ func TestRouterPreservesConversationTarget(t *testing.T) {
 	}
 	if reply.Conversation != conversation {
 		t.Fatalf("reply.Conversation = %#v", reply.Conversation)
+	}
+}
+
+func TestRouterRoutesTaskCommandToTaskHandler(t *testing.T) {
+	command := &fakeCommandExecutor{
+		reply: channel.OutgoingMessage{Text: "command"},
+	}
+	task := &fakeTaskExecutor{
+		reply: channel.OutgoingMessage{Text: "task"},
+	}
+	chat := &fakeMessageHandler{
+		reply: channel.OutgoingMessage{Text: "chat"},
+	}
+	router := NewRouter(command, task, chat)
+
+	reply, err := router.HandleMessage(context.Background(), channel.MessageEvent{
+		Text: "/task list",
+	})
+	if err != nil {
+		t.Fatalf("HandleMessage returned error: %v", err)
+	}
+	if !task.called {
+		t.Fatal("task handler was not called")
+	}
+	if command.called {
+		t.Fatal("command handler should not have been called")
+	}
+	if chat.called {
+		t.Fatal("chat handler should not have been called")
+	}
+	if reply.Text != "task" {
+		t.Fatalf("reply.Text = %q", reply.Text)
 	}
 }

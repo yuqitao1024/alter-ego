@@ -1,0 +1,81 @@
+package main
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestBuildTaskSubsystemRequiresConfigRoot(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildTaskSubsystem(context.Background(), taskSubsystemConfig{
+		RegistryRoot: filepath.Join(t.TempDir(), "missing"),
+		DBPath:       filepath.Join(t.TempDir(), "orchestrator.db"),
+	})
+	if err == nil {
+		t.Fatal("buildTaskSubsystem returned nil error, want missing config root error")
+	}
+}
+
+func TestBuildTaskSubsystemBuildsService(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeTaskConfigFixtures(t, root)
+
+	subsystem, err := buildTaskSubsystem(context.Background(), taskSubsystemConfig{
+		RegistryRoot: root,
+		DBPath:       filepath.Join(root, "orchestrator.db"),
+	})
+	if err != nil {
+		t.Fatalf("buildTaskSubsystem returned error: %v", err)
+	}
+	defer subsystem.Close()
+
+	if subsystem.Service == nil {
+		t.Fatal("subsystem.Service is nil")
+	}
+	if subsystem.TaskHandler == nil {
+		t.Fatal("subsystem.TaskHandler is nil")
+	}
+	if subsystem.Registry == nil || subsystem.Registry.Templates["feature_dev"] == nil {
+		t.Fatalf("subsystem.Registry = %#v", subsystem.Registry)
+	}
+}
+
+func writeTaskConfigFixtures(t *testing.T, root string) {
+	t.Helper()
+
+	writeFile(t, filepath.Join(root, "configs/machines/machine_a.yaml"), `id: machine_a
+display_name: Machine A
+host: 127.0.0.1
+port: 22
+user: coder
+`)
+	writeFile(t, filepath.Join(root, "configs/repositories/repo_backend.yaml"), `id: repo_backend
+display_name: Backend Repo
+remote_path: /srv/backend
+default_branch: main
+machine_ids:
+  - machine_a
+`)
+	writeFile(t, filepath.Join(root, "configs/templates/feature_dev.yaml"), `id: feature_dev
+repository_id: repo_backend
+display_name: Feature Development
+description: Default feature workflow
+workflow_path: docs/workflows/feature_dev.md
+`)
+	writeFile(t, filepath.Join(root, "docs/workflows/feature_dev.md"), "Workflow: analyze and implement.\n")
+}
+
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+}
