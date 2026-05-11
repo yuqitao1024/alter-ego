@@ -22,10 +22,10 @@
   - Replace probe/attach/resume contracts with interactive session contracts.
 - Modify: `internal/orchestrator/runner_test.go`
   - Replace recovery-order tests with `tmux` session existence and reconnect tests.
-- Create: `internal/orchestrator/runner_tmux.go`
-  - Concrete `tmux`-backed interactive runner implementation.
-- Create: `internal/orchestrator/runner_tmux_test.go`
-  - Tests for startup command shape, `capture-pane`, `send-keys`, and `has-session`.
+- Modify: `internal/orchestrator/runner_ssh.go`
+  - Concrete `tmux`-backed interactive runner implementation, including `machine.shell_init` injection.
+- Modify: `internal/orchestrator/runner_ssh_test.go`
+  - Tests for startup command shape, `capture-pane`, `send-keys`, `has-session`, and `machine.shell_init`.
 - Modify: `internal/orchestrator/decision.go`
   - Expand escalation categories beyond implementation-solution choice.
 - Modify: `internal/orchestrator/decision_test.go`
@@ -34,6 +34,10 @@
   - Replace exec-oriented tick behavior with interactive capture/send behavior.
 - Modify: `internal/orchestrator/service_test.go`
   - Update lifecycle tests for `preparing_workspace`, `starting_session`, `waiting_user_input`, and detach/reconnect.
+- Modify: `internal/orchestrator/config.go`
+  - Add `machine.shell_init` to remote machine configuration.
+- Modify: `internal/orchestrator/config_test.go`
+  - Verify `machine.shell_init` is loaded and bound into the registry.
 - Modify: `README.md`
   - Document remote `tmux` requirement and the new interaction model.
 
@@ -154,8 +158,10 @@ Expected: PASS
 ### Task 3: Implement `tmux` Runner
 
 **Files:**
-- Create: `internal/orchestrator/runner_tmux.go`
-- Create: `internal/orchestrator/runner_tmux_test.go`
+- Modify: `internal/orchestrator/runner_ssh.go`
+- Modify: `internal/orchestrator/runner_ssh_test.go`
+- Modify: `internal/orchestrator/config.go`
+- Modify: `internal/orchestrator/config_test.go`
 
 - [ ] **Step 1: Write failing `tmux` command-shape tests**
 
@@ -189,6 +195,8 @@ Create command builders for:
 - `tmux send-keys`
 - `tmux has-session`
 - `tmux kill-session`
+- `machine.shell_init` injection for every SSH command
+- `machine.shell_init` injection inside the `tmux` command that launches `codex`
 
 Ensure `codex` is launched with:
 

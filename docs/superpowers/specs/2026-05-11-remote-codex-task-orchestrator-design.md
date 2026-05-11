@@ -139,7 +139,9 @@ Suggested fields:
 - `host`
 - `port`
 - `user`
-- optional SSH options needed by the runner
+- `shell_init`
+
+`shell_init` is a lightweight, idempotent command list injected before every SSH command executed for that machine. It is intended for environment setup such as exporting `CODEX_HOME`, amending `PATH`, or loading proxy variables. It must not contain heavy task bootstrap actions.
 
 ### RepositoryConfig
 
@@ -257,12 +259,13 @@ For a new task, the runner should:
 
 1. select the target machine;
 2. create a task-scoped remote directory under `remote_workspace_root`, for example `<workspace_root>/<task-id>`;
-3. run `pre_clone_bootstrap` inside that task directory;
-4. clone `remote_repo_url` into a repository subdirectory inside the task directory;
-5. checkout `default_branch`;
-6. run `post_clone_bootstrap` inside the cloned repository;
-7. create a `tmux` session named from the task id, for example `alterego-<task-id>`;
-8. start `codex` inside that `tmux` session.
+3. inject `machine.shell_init` before each remote SSH command, including task startup and later `tmux` control operations;
+4. run `pre_clone_bootstrap` inside that task directory;
+5. clone `remote_repo_url` into a repository subdirectory inside the task directory;
+6. checkout `default_branch`;
+7. run `post_clone_bootstrap` inside the cloned repository;
+8. create a `tmux` session named from the task id, for example `alterego-<task-id>`;
+9. start `codex` inside that `tmux` session.
 
 The workflow document does not own clone or environment setup. It only guides how the development task should proceed once the repository is ready.
 
