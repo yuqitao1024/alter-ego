@@ -31,11 +31,21 @@ display_name: Feature Development
 description: Default feature workflow
 workflow_path: docs/workflows/example-feature-dev.md
 `)
+	writeConfigFile(t, root, "configs/templates/ops-review.yaml", `
+id: ops_review
+repository_id: repo_backend
+display_name: Ops Review
+description: Secondary workflow for ordering checks
+workflow_path: docs/workflows/ops-review.md
+`)
 	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
 # Feature Development
 
 1. Sync the branch.
 2. Implement the change.
+`)
+	writeConfigFile(t, root, "docs/workflows/ops-review.md", `
+# Ops Review
 `)
 
 	cfg, err := LoadRegistry(root)
@@ -53,10 +63,25 @@ workflow_path: docs/workflows/example-feature-dev.md
 	if template.Repository.ID != "repo_backend" {
 		t.Fatalf("template.Repository.ID = %q, want repo_backend", template.Repository.ID)
 	}
+	if len(template.Repository.Machines) != 1 {
+		t.Fatalf("len(template.Repository.Machines) = %d, want 1", len(template.Repository.Machines))
+	}
+	if template.Repository.Machines[0] == nil || template.Repository.Machines[0].ID != "machine_a" {
+		t.Fatalf("template.Repository.Machines[0] = %#v, want machine_a", template.Repository.Machines[0])
+	}
 
 	wantWorkflowPath := filepath.Join(root, "docs/workflows/example-feature-dev.md")
-	if template.WorkflowPath != wantWorkflowPath {
-		t.Fatalf("template.WorkflowPath = %q, want %q", template.WorkflowPath, wantWorkflowPath)
+	if template.WorkflowPath != "docs/workflows/example-feature-dev.md" {
+		t.Fatalf("template.WorkflowPath = %q, want authored relative path", template.WorkflowPath)
+	}
+	if template.ResolvedWorkflowPath != wantWorkflowPath {
+		t.Fatalf("template.ResolvedWorkflowPath = %q, want %q", template.ResolvedWorkflowPath, wantWorkflowPath)
+	}
+	if len(cfg.TemplateList) != 2 || cfg.TemplateList[0].ID != "feature_dev" || cfg.TemplateList[1].ID != "ops_review" {
+		t.Fatalf("TemplateList order = %#v, want [feature_dev ops_review]", templateIDs(cfg.TemplateList))
+	}
+	if len(cfg.RepositoryList) != 1 || cfg.RepositoryList[0].ID != "repo_backend" {
+		t.Fatalf("RepositoryList order = %#v, want [repo_backend]", repositoryIDs(cfg.RepositoryList))
 	}
 }
 
@@ -68,6 +93,13 @@ id: machine_a
 display_name: Machine A
 host: machine-a.example.com
 user: dev
+`)
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+id: repo_backend
+remote_path: /srv/backend
+default_branch: main
+machine_ids:
+  - machine_a
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
@@ -92,6 +124,11 @@ workflow_path: docs/workflows/example-feature-dev.md
 func TestLoadConfigRejectsRepositoryWithUnknownMachine(t *testing.T) {
 	root := t.TempDir()
 
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+`)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 display_name: Backend Repo
@@ -154,14 +191,131 @@ workflow_path: docs/workflows/missing.md
 	}
 }
 
+func TestLoadConfigRejectsMissingRequiredFields(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+display_name: Machine A
+host: machine-a.example.com
+`)
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+id: repo_backend
+remote_path: /srv/backend
+default_branch: main
+machine_ids:
+  - machine_a
+`)
+	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
+id: feature_dev
+repository_id: repo_backend
+workflow_path: docs/workflows/example-feature-dev.md
+`)
+	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
+# Feature Development
+`)
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error")
+	}
+	if !strings.Contains(err.Error(), "user") {
+		t.Fatalf("LoadRegistry error = %q, want missing required field name", err)
+	}
+}
+
+func TestLoadConfigRejectsUnknownFields(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+unexpected: true
+`)
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+id: repo_backend
+remote_path: /srv/backend
+default_branch: main
+machine_ids:
+  - machine_a
+`)
+	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
+id: feature_dev
+repository_id: repo_backend
+workflow_path: docs/workflows/example-feature-dev.md
+`)
+	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
+# Feature Development
+`)
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error")
+	}
+	if !strings.Contains(err.Error(), "unexpected") {
+		t.Fatalf("LoadRegistry error = %q, want unknown field name", err)
+	}
+}
+
+func TestLoadConfigRejectsMissingConfigDirectories(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error")
+	}
+	if !strings.Contains(err.Error(), "configs/machines") {
+		t.Fatalf("LoadRegistry error = %q, want missing machines directory", err)
+	}
+}
+
+func TestLoadConfigRejectsEmptyConfigCategory(t *testing.T) {
+	root := t.TempDir()
+
+	mustMkdirAll(t, filepath.Join(root, "configs/machines"))
+	mustMkdirAll(t, filepath.Join(root, "configs/repositories"))
+	mustMkdirAll(t, filepath.Join(root, "configs/templates"))
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error")
+	}
+	if !strings.Contains(err.Error(), "configs/machines") || !strings.Contains(err.Error(), "no config files") {
+		t.Fatalf("LoadRegistry error = %q, want empty category error", err)
+	}
+}
+
 func writeConfigFile(t *testing.T, root, relativePath, contents string) {
 	t.Helper()
 
 	fullPath := filepath.Join(root, relativePath)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) returned error: %v", filepath.Dir(fullPath), err)
-	}
+	mustMkdirAll(t, filepath.Dir(fullPath))
 	if err := os.WriteFile(fullPath, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) returned error: %v", fullPath, err)
 	}
+}
+
+func mustMkdirAll(t *testing.T, path string) {
+	t.Helper()
+
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) returned error: %v", path, err)
+	}
+}
+
+func templateIDs(templates []*TemplateConfig) []string {
+	ids := make([]string, 0, len(templates))
+	for _, template := range templates {
+		ids = append(ids, template.ID)
+	}
+	return ids
+}
+
+func repositoryIDs(repositories []*RepositoryConfig) []string {
+	ids := make([]string, 0, len(repositories))
+	for _, repository := range repositories {
+		ids = append(ids, repository.ID)
+	}
+	return ids
 }
