@@ -142,17 +142,24 @@ Suggested fields:
 
 ### RepositoryConfig
 
-Represents a repository plus its execution boundary.
+Represents a repository plus its execution boundary and task-scoped checkout rules.
 
 Suggested fields:
 
 - `id`
 - `display_name`
-- `remote_path`
+- `remote_repo_url`
+- `remote_workspace_root`
 - `default_branch`
 - `machine_ids`
+- `pre_clone_bootstrap`
+- `post_clone_bootstrap`
 
 `machine_ids` is authoritative. It defines where tasks for this repository may run.
+
+`pre_clone_bootstrap` runs after the remote task directory is created but before the repository is cloned. This is intended for environment preparation needed to make code download succeed.
+
+`post_clone_bootstrap` runs after clone and branch checkout. This is intended for repository-local setup such as dependency installation or submodule initialization.
 
 ### TemplateConfig
 
@@ -245,6 +252,22 @@ Representative transitions:
 - `running -> completed`
 - `starting/running/probing/attaching/resuming -> failed`
 - `pending/starting/running/waiting_user_decision/detached -> stopped`
+
+## Remote Startup Model
+
+Task startup is deterministic code, not workflow prose.
+
+For a new task, the runner should:
+
+1. select the target machine;
+2. create a task-scoped remote directory under `remote_workspace_root`, for example `<workspace_root>/<task-id>`;
+3. run `pre_clone_bootstrap` inside that task directory;
+4. clone `remote_repo_url` into a repository subdirectory inside the task directory;
+5. checkout `default_branch` (or repository override when added later);
+6. run `post_clone_bootstrap` inside the cloned repository;
+7. start `codex` inside the cloned repository directory.
+
+The workflow document does not own clone or environment setup. It only guides how the development task should proceed once the repository is ready.
 
 ## Scheduling Model
 

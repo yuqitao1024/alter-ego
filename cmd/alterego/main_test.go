@@ -56,10 +56,15 @@ user: coder
 `)
 	writeFile(t, filepath.Join(root, "configs/repositories/repo_backend.yaml"), `id: repo_backend
 display_name: Backend Repo
-remote_path: /srv/backend
+remote_repo_url: git@github.com:example/backend.git
+remote_workspace_root: /srv/codex-tasks
 default_branch: main
 machine_ids:
   - machine_a
+pre_clone_bootstrap:
+  - setup-git-auth
+post_clone_bootstrap:
+  - pnpm install
 `)
 	writeFile(t, filepath.Join(root, "configs/templates/feature_dev.yaml"), `id: feature_dev
 repository_id: repo_backend

@@ -68,7 +68,7 @@ func TestTickStartsPendingTaskAndStoresRemoteSession(t *testing.T) {
 	})
 	service.runner.(*fakeServiceRunner).startSession = RemoteSession{
 		MachineID:       "machine_a",
-		Workdir:         "/srv/backend",
+		Workdir:         "/srv/codex-tasks/task-start/repo",
 		CodexSessionID:  "session-start",
 		ProcessIdentity: "pid-100",
 	}
@@ -86,6 +86,9 @@ func TestTickStartsPendingTaskAndStoresRemoteSession(t *testing.T) {
 	}
 	if persisted.RemoteCodexSessionID != "session-start" {
 		t.Fatalf("persisted.RemoteCodexSessionID = %q, want session-start", persisted.RemoteCodexSessionID)
+	}
+	if persisted.RemoteWorkdir != "/srv/codex-tasks/task-start/repo" {
+		t.Fatalf("persisted.RemoteWorkdir = %q, want /srv/codex-tasks/task-start/repo", persisted.RemoteWorkdir)
 	}
 	if persisted.RemoteProcessIdentity != "pid-100" {
 		t.Fatalf("persisted.RemoteProcessIdentity = %q, want pid-100", persisted.RemoteProcessIdentity)
@@ -285,10 +288,13 @@ func newTestService(t *testing.T) (*Service, *Store, func()) {
 		},
 		Repositories: map[string]*RepositoryConfig{
 			"repo_backend": {
-				ID:            "repo_backend",
-				RemotePath:    "/srv/backend",
-				DefaultBranch: "main",
-				MachineIDs:    []string{"machine_a", "machine_b"},
+				ID:                  "repo_backend",
+				RemoteRepoURL:       "git@github.com:example/backend.git",
+				RemoteWorkspaceRoot: "/srv/codex-tasks",
+				DefaultBranch:       "main",
+				MachineIDs:          []string{"machine_a", "machine_b"},
+				PreCloneBootstrap:   []string{"setup-git-auth"},
+				PostCloneBootstrap:  []string{"pnpm install"},
 			},
 		},
 		Templates: map[string]*TemplateConfig{

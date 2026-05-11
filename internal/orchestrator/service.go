@@ -164,18 +164,23 @@ func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {
 	}
 
 	session, err := s.runner.StartNewSession(ctx, StartRequest{
-		Machine:         *machine,
-		RepositoryID:    template.Repository.ID,
-		Workdir:         template.Repository.RemotePath,
-		UserRequest:     task.UserRequest,
-		WorkflowContent: workflowText,
+		Machine:             *machine,
+		RepositoryID:        template.Repository.ID,
+		TaskID:              task.TaskID,
+		RemoteRepoURL:       template.Repository.RemoteRepoURL,
+		RemoteWorkspaceRoot: template.Repository.RemoteWorkspaceRoot,
+		CheckoutBranch:      template.Repository.DefaultBranch,
+		PreCloneBootstrap:   append([]string(nil), template.Repository.PreCloneBootstrap...),
+		PostCloneBootstrap:  append([]string(nil), template.Repository.PostCloneBootstrap...),
+		UserRequest:         task.UserRequest,
+		WorkflowContent:     workflowText,
 	})
 	if err != nil {
 		return fmt.Errorf("start remote session for task %q: %w", task.TaskID, err)
 	}
 
 	task.Status = StatusRunning
-	task.RemoteWorkdir = coalesceString(session.Workdir, template.Repository.RemotePath)
+	task.RemoteWorkdir = coalesceString(session.Workdir, taskRepoWorkdir(template.Repository.RemoteWorkspaceRoot, task.TaskID))
 	task.RemoteCodexSessionID = session.CodexSessionID
 	task.RemoteProcessIdentity = session.ProcessIdentity
 	task.UpdatedAt = s.now()

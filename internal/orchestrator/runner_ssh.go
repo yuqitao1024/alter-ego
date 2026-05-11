@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -37,7 +38,7 @@ func (r *SSHRunner) SetMachineResolver(resolver func(machineID string) (MachineC
 }
 
 func (r *SSHRunner) StartNewSession(ctx context.Context, req StartRequest) (RemoteSession, error) {
-	command := buildStartCommand(req.Workdir)
+	command := buildStartCommand(req)
 	stdin := buildStartInput(req.WorkflowContent, req.UserRequest)
 
 	output, err := r.transport.Run(ctx, req.Machine, command, stdin)
@@ -147,8 +148,23 @@ func (shellSSHTransport) Run(ctx context.Context, machine MachineConfig, command
 	return stdout.String(), nil
 }
 
-func buildStartCommand(workdir string) string {
-	return fmt.Sprintf("cd %s && codex exec --json -", shellQuote(workdir))
+func buildStartCommand(req StartRequest) string {
+	taskRoot := taskRootDir(req.RemoteWorkspaceRoot, req.TaskID)
+	repoDir := taskRepoWorkdir(req.RemoteWorkspaceRoot, req.TaskID)
+
+	steps := []string{
+		fmt.Sprintf("mkdir -p %s", shellQuote(taskRoot)),
+		fmt.Sprintf("cd %s", shellQuote(taskRoot)),
+	}
+	steps = append(steps, req.PreCloneBootstrap...)
+	steps = append(steps,
+		fmt.Sprintf("git clone %s repo", shellQuote(req.RemoteRepoURL)),
+		fmt.Sprintf("cd %s", shellQuote(repoDir)),
+		fmt.Sprintf("git checkout %s", shellQuote(req.CheckoutBranch)),
+	)
+	steps = append(steps, req.PostCloneBootstrap...)
+	steps = append(steps, fmt.Sprintf("cd %s && codex exec --json -", shellQuote(repoDir)))
+	return strings.Join(steps, " && ")
 }
 
 func buildStartInput(workflow, userRequest string) string {
@@ -238,4 +254,12 @@ func sshTarget(machine MachineConfig) string {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func taskRootDir(workspaceRoot, taskID string) string {
+	return path.Join(workspaceRoot, taskID)
+}
+
+func taskRepoWorkdir(workspaceRoot, taskID string) string {
+	return path.Join(taskRootDir(workspaceRoot, taskID), "repo")
 }

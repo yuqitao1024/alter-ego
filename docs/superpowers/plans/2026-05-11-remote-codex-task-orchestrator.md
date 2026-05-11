@@ -4,7 +4,7 @@
 
 **Goal:** Add a repository-scoped remote Codex task orchestrator that can start and manage multiple SSH-backed Codex tasks, persist task state in SQLite, recover remote sessions by Codex session ID, and escalate only implementation-solution-choice decisions through Lark.
 
-**Architecture:** Keep Lark as the command gateway, add a deterministic orchestration layer under a new `internal/orchestrator` package, isolate remote SSH/Codex behavior behind a runner interface, and persist task and question state in SQLite. Templates bind to repositories and workflow documents; repositories bind to machine pools; the scheduler balances active tasks across two machines and advances them round-robin.
+**Architecture:** Keep Lark as the command gateway, add a deterministic orchestration layer under a new `internal/orchestrator` package, isolate remote SSH/Codex behavior behind a runner interface, and persist task and question state in SQLite. Templates bind to repositories and workflow documents; repositories bind to machine pools, remote repo URLs, task workspace roots, and pre/post clone bootstrap commands; the scheduler balances active tasks across two machines and advances them round-robin.
 
 **Tech Stack:** Go 1.22+, standard library, `database/sql` with `modernc.org/sqlite`, existing Lark adapter, SSH transport library, remote `codex` CLI
 

@@ -75,6 +75,32 @@ docs/workflows/*.md
 
 Each repository binds to its remote machine pool. Each template binds to one repository and one workflow document. Task state is stored in the SQLite database defined by `ALTER_EGO_TASK_DB_PATH`.
 
+Repository configuration now uses task-scoped checkout settings instead of a fixed repository path. A repository entry should define:
+
+```yaml
+id: repo_backend
+display_name: Backend Repo
+remote_repo_url: git@github.com:org/repo.git
+remote_workspace_root: /srv/codex-tasks
+default_branch: main
+machine_ids:
+  - machine_a
+pre_clone_bootstrap:
+  - setup-git-auth
+post_clone_bootstrap:
+  - pnpm install
+```
+
+For each new task, Alter Ego will:
+
+1. choose a machine from the repository machine pool;
+2. create a task directory under `remote_workspace_root/<task-id>`;
+3. run `pre_clone_bootstrap`;
+4. clone the repository;
+5. checkout `default_branch`;
+6. run `post_clone_bootstrap`;
+7. start `codex` inside the cloned repository.
+
 Run locally:
 
 ```sh

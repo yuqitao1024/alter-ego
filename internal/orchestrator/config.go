@@ -20,12 +20,15 @@ type MachineConfig struct {
 }
 
 type RepositoryConfig struct {
-	ID            string           `yaml:"id"`
-	DisplayName   string           `yaml:"display_name"`
-	RemotePath    string           `yaml:"remote_path"`
-	DefaultBranch string           `yaml:"default_branch"`
-	MachineIDs    []string         `yaml:"machine_ids"`
-	Machines      []*MachineConfig `yaml:"-"`
+	ID                  string           `yaml:"id"`
+	DisplayName         string           `yaml:"display_name"`
+	RemoteRepoURL       string           `yaml:"remote_repo_url"`
+	RemoteWorkspaceRoot string           `yaml:"remote_workspace_root"`
+	DefaultBranch       string           `yaml:"default_branch"`
+	MachineIDs          []string         `yaml:"machine_ids"`
+	PreCloneBootstrap   []string         `yaml:"pre_clone_bootstrap"`
+	PostCloneBootstrap  []string         `yaml:"post_clone_bootstrap"`
+	Machines            []*MachineConfig `yaml:"-"`
 }
 
 type TemplateConfig struct {
@@ -121,7 +124,8 @@ func (m *MachineConfig) Validate() error {
 func (r *RepositoryConfig) Validate() error {
 	if err := requireFields("repository", r.ID, []requiredField{
 		{name: "id", value: r.ID},
-		{name: "remote_path", value: r.RemotePath},
+		{name: "remote_repo_url", value: r.RemoteRepoURL},
+		{name: "remote_workspace_root", value: r.RemoteWorkspaceRoot},
 		{name: "default_branch", value: r.DefaultBranch},
 	}); err != nil {
 		return err

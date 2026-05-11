@@ -10,15 +10,26 @@ func TestSSHRunnerStartCommandShape(t *testing.T) {
 	t.Parallel()
 
 	transport := &fakeSSHTransport{
-		stdout: "session_id=session-start\nprocess_identity=pid-100\nworkdir=/srv/backend\n",
+		stdout: "session_id=session-start\nprocess_identity=pid-100\nworkdir=/srv/codex-tasks/task-1/repo\n",
 	}
 	runner := NewSSHRunner(transport)
 	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", Port: 2222}
 
 	session, err := runner.StartNewSession(context.Background(), StartRequest{
-		Machine:         machine,
-		RepositoryID:    "repo_backend",
-		Workdir:         "/srv/backend",
+		Machine:             machine,
+		RepositoryID:        "repo_backend",
+		TaskID:              "task-1",
+		RemoteRepoURL:       "git@github.com:example/backend.git",
+		RemoteWorkspaceRoot: "/srv/codex-tasks",
+		CheckoutBranch:      "main",
+		PreCloneBootstrap: []string{
+			"setup-git-auth",
+			"prepare-network",
+		},
+		PostCloneBootstrap: []string{
+			"git submodule update --init --recursive",
+			"pnpm install",
+		},
 		UserRequest:     "Implement scheduler",
 		WorkflowContent: "Workflow: inspect first",
 	})
@@ -29,10 +40,28 @@ func TestSSHRunnerStartCommandShape(t *testing.T) {
 	if session.CodexSessionID != "session-start" {
 		t.Fatalf("session.CodexSessionID = %q, want session-start", session.CodexSessionID)
 	}
-	if !strings.Contains(transport.lastCommand, "cd '/srv/backend'") {
-		t.Fatalf("command = %q, want cd into workdir", transport.lastCommand)
+	if session.Workdir != "/srv/codex-tasks/task-1/repo" {
+		t.Fatalf("session.Workdir = %q, want /srv/codex-tasks/task-1/repo", session.Workdir)
 	}
-	if !strings.Contains(transport.lastCommand, "codex exec --json -") {
+	if !strings.Contains(transport.lastCommand, "mkdir -p '/srv/codex-tasks/task-1'") {
+		t.Fatalf("command = %q, want task directory creation", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "cd '/srv/codex-tasks/task-1'") {
+		t.Fatalf("command = %q, want cd into task directory", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "setup-git-auth") || !strings.Contains(transport.lastCommand, "prepare-network") {
+		t.Fatalf("command = %q, want pre-clone bootstrap commands", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "git clone 'git@github.com:example/backend.git' repo") {
+		t.Fatalf("command = %q, want git clone into repo subdirectory", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "git checkout 'main'") {
+		t.Fatalf("command = %q, want checkout main", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "git submodule update --init --recursive") || !strings.Contains(transport.lastCommand, "pnpm install") {
+		t.Fatalf("command = %q, want post-clone bootstrap commands", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "cd '/srv/codex-tasks/task-1/repo' && codex exec --json -") {
 		t.Fatalf("command = %q, want codex exec --json -", transport.lastCommand)
 	}
 	if !strings.Contains(transport.lastStdin, "Workflow: inspect first") || !strings.Contains(transport.lastStdin, "Implement scheduler") {

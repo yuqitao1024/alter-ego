@@ -16,13 +16,18 @@ display_name: Machine A
 host: machine-a.example.com
 user: dev
 `)
-	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 display_name: Backend Repo
-remote_path: /srv/backend
+remote_repo_url: git@github.com:example/backend.git
+remote_workspace_root: /srv/codex-tasks
 default_branch: main
 machine_ids:
   - machine_a
+pre_clone_bootstrap:
+  - setup-git-auth
+post_clone_bootstrap:
+  - git submodule update --init --recursive
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
@@ -75,6 +80,18 @@ workflow_path: docs/workflows/ops-review.md
 	if template.Repository.Machines[0] == nil || template.Repository.Machines[0].ID != "machine_a" {
 		t.Fatalf("template.Repository.Machines[0] = %#v, want machine_a", template.Repository.Machines[0])
 	}
+	if template.Repository.RemoteRepoURL != "git@github.com:example/backend.git" {
+		t.Fatalf("template.Repository.RemoteRepoURL = %q", template.Repository.RemoteRepoURL)
+	}
+	if template.Repository.RemoteWorkspaceRoot != "/srv/codex-tasks" {
+		t.Fatalf("template.Repository.RemoteWorkspaceRoot = %q", template.Repository.RemoteWorkspaceRoot)
+	}
+	if len(template.Repository.PreCloneBootstrap) != 1 || template.Repository.PreCloneBootstrap[0] != "setup-git-auth" {
+		t.Fatalf("template.Repository.PreCloneBootstrap = %#v", template.Repository.PreCloneBootstrap)
+	}
+	if len(template.Repository.PostCloneBootstrap) != 1 || template.Repository.PostCloneBootstrap[0] != "git submodule update --init --recursive" {
+		t.Fatalf("template.Repository.PostCloneBootstrap = %#v", template.Repository.PostCloneBootstrap)
+	}
 
 	wantWorkflowPath, err := filepath.EvalSymlinks(filepath.Join(root, "docs/workflows/example-feature-dev.md"))
 	if err != nil {
@@ -103,9 +120,10 @@ display_name: Machine A
 host: machine-a.example.com
 user: dev
 `)
-	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
-remote_path: /srv/backend
+remote_repo_url: git@github.com:example/backend.git
+remote_workspace_root: /srv/codex-tasks
 default_branch: main
 machine_ids:
   - machine_a
@@ -138,10 +156,11 @@ id: machine_a
 host: machine-a.example.com
 user: dev
 `)
-	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 display_name: Backend Repo
-remote_path: /srv/backend
+remote_repo_url: git@github.com:example/backend.git
+remote_workspace_root: /srv/codex-tasks
 default_branch: main
 machine_ids:
   - machine_missing
@@ -175,10 +194,11 @@ display_name: Machine A
 host: machine-a.example.com
 user: dev
 `)
-	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 display_name: Backend Repo
-remote_path: /srv/backend
+remote_repo_url: git@github.com:example/backend.git
+remote_workspace_root: /srv/codex-tasks
 default_branch: main
 machine_ids:
   - machine_a
@@ -209,9 +229,10 @@ id: machine_a
 host: machine-a.example.com
 user: dev
 `)
-	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
-remote_path: /srv/backend
+remote_repo_url: git@github.com:example/backend.git
+remote_workspace_root: /srv/codex-tasks
 default_branch: main
 machine_ids:
   - machine_a
@@ -242,9 +263,10 @@ id: machine_a
 display_name: Machine A
 host: machine-a.example.com
 `)
-	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
-remote_path: /srv/backend
+remote_repo_url: git@github.com:example/backend.git
+remote_workspace_root: /srv/codex-tasks
 default_branch: main
 machine_ids:
   - machine_a
@@ -276,9 +298,10 @@ host: machine-a.example.com
 user: dev
 unexpected: true
 `)
-	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
-remote_path: /srv/backend
+remote_repo_url: git@github.com:example/backend.git
+remote_workspace_root: /srv/codex-tasks
 default_branch: main
 machine_ids:
   - machine_a
@@ -298,6 +321,38 @@ workflow_path: docs/workflows/example-feature-dev.md
 	}
 	if !strings.Contains(err.Error(), "unexpected") {
 		t.Fatalf("LoadRegistry error = %q, want unknown field name", err)
+	}
+}
+
+func TestLoadConfigRejectsRepositoryMissingRepoURLAndWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+`)
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+id: repo_backend
+default_branch: main
+machine_ids:
+  - machine_a
+`)
+	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
+id: feature_dev
+repository_id: repo_backend
+workflow_path: docs/workflows/example-feature-dev.md
+`)
+	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
+# Feature Development
+`)
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error")
+	}
+	if !strings.Contains(err.Error(), "remote_repo_url") && !strings.Contains(err.Error(), "remote_workspace_root") {
+		t.Fatalf("LoadRegistry error = %q, want missing repository checkout fields", err)
 	}
 }
 
