@@ -85,7 +85,11 @@ func (s *Service) TickOnce(ctx context.Context) error {
 
 	switch task.Status {
 	case StatusPending:
-		return s.startPendingTask(ctx, task)
+		return s.moveTaskToPreparingWorkspace(ctx, task)
+	case StatusPreparingWorkspace:
+		return s.moveTaskToStartingSession(ctx, task)
+	case StatusStartingSession:
+		return s.startInteractiveSession(ctx, task)
 	case StatusDetached:
 		return s.recoverDetachedTask(ctx, task)
 	case StatusRunning:
@@ -147,7 +151,19 @@ func (s *Service) Status(ctx context.Context, taskID string) (TaskRun, error) {
 	return s.store.GetTask(ctx, taskID)
 }
 
-func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {
+func (s *Service) moveTaskToPreparingWorkspace(ctx context.Context, task TaskRun) error {
+	task.Status = StatusPreparingWorkspace
+	task.UpdatedAt = s.now()
+	return s.store.UpdateTask(ctx, task)
+}
+
+func (s *Service) moveTaskToStartingSession(ctx context.Context, task TaskRun) error {
+	task.Status = StatusStartingSession
+	task.UpdatedAt = s.now()
+	return s.store.UpdateTask(ctx, task)
+}
+
+func (s *Service) startInteractiveSession(ctx context.Context, task TaskRun) error {
 	template, err := s.lookupTemplate(task.TemplateID)
 	if err != nil {
 		return err

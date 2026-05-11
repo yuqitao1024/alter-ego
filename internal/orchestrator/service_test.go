@@ -50,7 +50,7 @@ func TestCreateTaskSelectsMachineAndPersistsPendingTask(t *testing.T) {
 	}
 }
 
-func TestTickStartsPendingTaskAndStoresRemoteSession(t *testing.T) {
+func TestTickMovesPendingTaskToPreparingWorkspace(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
@@ -66,10 +66,70 @@ func TestTickStartsPendingTaskAndStoresRemoteSession(t *testing.T) {
 		UserRequest:  "Implement remote start",
 		CreatedBy:    "tester",
 	})
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusPreparingWorkspace {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusPreparingWorkspace)
+	}
+}
+
+func TestTickMovesPreparingWorkspaceTaskToStartingSession(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:       "task-starting",
+		TemplateID:   "feature_dev",
+		RepositoryID: "repo_backend",
+		MachineID:    "machine_a",
+		Status:       StatusPreparingWorkspace,
+		UserRequest:  "Implement remote start",
+		CreatedBy:    "tester",
+	})
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusStartingSession {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusStartingSession)
+	}
+}
+
+func TestTickStartsInteractiveSessionAndStoresTTYMetadata(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:       "task-running",
+		TemplateID:   "feature_dev",
+		RepositoryID: "repo_backend",
+		MachineID:    "machine_a",
+		Status:       StatusStartingSession,
+		UserRequest:  "Implement remote start",
+		CreatedBy:    "tester",
+	})
 	service.runner.(*fakeServiceRunner).startSession = RemoteSession{
 		MachineID:       "machine_a",
-		Workdir:         "/srv/codex-tasks/task-start/repo",
-		TMUXSessionName: "alterego-task-start",
+		Workdir:         "/srv/codex-tasks/task-running/repo",
+		TMUXSessionName: "alterego-task-running",
 		CodexSessionID:  "session-start",
 	}
 
@@ -87,11 +147,11 @@ func TestTickStartsPendingTaskAndStoresRemoteSession(t *testing.T) {
 	if persisted.RemoteCodexSessionID != "session-start" {
 		t.Fatalf("persisted.RemoteCodexSessionID = %q, want session-start", persisted.RemoteCodexSessionID)
 	}
-	if persisted.RemoteWorkdir != "/srv/codex-tasks/task-start/repo" {
-		t.Fatalf("persisted.RemoteWorkdir = %q, want /srv/codex-tasks/task-start/repo", persisted.RemoteWorkdir)
+	if persisted.RemoteWorkdir != "/srv/codex-tasks/task-running/repo" {
+		t.Fatalf("persisted.RemoteWorkdir = %q, want /srv/codex-tasks/task-running/repo", persisted.RemoteWorkdir)
 	}
-	if persisted.TMUXSessionName != "alterego-task-start" {
-		t.Fatalf("persisted.TMUXSessionName = %q, want alterego-task-start", persisted.TMUXSessionName)
+	if persisted.TMUXSessionName != "alterego-task-running" {
+		t.Fatalf("persisted.TMUXSessionName = %q, want alterego-task-running", persisted.TMUXSessionName)
 	}
 }
 

@@ -68,16 +68,91 @@ func TestDecisionContextIncludesRuntimeTaskFields(t *testing.T) {
 	}
 }
 
-func TestEscalationDetectorRecognizesImplementationSolutionChoiceOnly(t *testing.T) {
+func TestDecisionDetectorRecognizesRequirementClarification(t *testing.T) {
 	t.Parallel()
 
-	if !ShouldEscalateDecision("implementation_solution_choice") {
-		t.Fatal("ShouldEscalateDecision returned false for implementation_solution_choice")
+	engine := NewHeuristicDecisionEngine()
+	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
+		Task: TaskRun{
+			LastOutputSummary: "I need clarification on the requirement before I proceed.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DecideNextStep returned error: %v", err)
+	}
+	if result.DecisionType != "requirement_clarification" {
+		t.Fatalf("DecisionType = %q, want requirement_clarification", result.DecisionType)
+	}
+	if result.Question == nil || result.Question.QuestionType != "requirement_clarification" {
+		t.Fatalf("Question = %#v, want requirement_clarification", result.Question)
+	}
+}
+
+func TestDecisionDetectorRecognizesScopeConfirmation(t *testing.T) {
+	t.Parallel()
+
+	engine := NewHeuristicDecisionEngine()
+	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
+		Task: TaskRun{
+			LastOutputSummary: "Please confirm the scope before I make the change.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DecideNextStep returned error: %v", err)
+	}
+	if result.DecisionType != "scope_confirmation" {
+		t.Fatalf("DecisionType = %q, want scope_confirmation", result.DecisionType)
+	}
+}
+
+func TestDecisionDetectorRecognizesImplementationSolutionChoice(t *testing.T) {
+	t.Parallel()
+
+	engine := NewHeuristicDecisionEngine()
+	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
+		Task: TaskRun{
+			LastOutputSummary: "Which approach should I take for the implementation?",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DecideNextStep returned error: %v", err)
+	}
+	if result.DecisionType != "implementation_solution_choice" {
+		t.Fatalf("DecisionType = %q, want implementation_solution_choice", result.DecisionType)
+	}
+}
+
+func TestDecisionDetectorRecognizesMissingContext(t *testing.T) {
+	t.Parallel()
+
+	engine := NewHeuristicDecisionEngine()
+	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
+		Task: TaskRun{
+			LastOutputSummary: "I am missing context about the expected API behavior.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DecideNextStep returned error: %v", err)
+	}
+	if result.DecisionType != "missing_context" {
+		t.Fatalf("DecisionType = %q, want missing_context", result.DecisionType)
+	}
+}
+
+func TestEscalationDetectorRecognizesSupportedUserInputCategories(t *testing.T) {
+	t.Parallel()
+
+	for _, decisionType := range []string{
+		"requirement_clarification",
+		"scope_confirmation",
+		"implementation_solution_choice",
+		"missing_context",
+	} {
+		if !ShouldEscalateDecision(decisionType) {
+			t.Fatalf("ShouldEscalateDecision returned false for %q", decisionType)
+		}
 	}
 	if ShouldEscalateDecision("continue_execution") {
 		t.Fatal("ShouldEscalateDecision returned true for continue_execution")
-	}
-	if ShouldEscalateDecision("dependency_install") {
-		t.Fatal("ShouldEscalateDecision returned true for dependency_install")
 	}
 }

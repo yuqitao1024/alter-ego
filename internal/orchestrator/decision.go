@@ -10,7 +10,7 @@ import (
 
 const fixedDecisionRules = `You are Alter Ego's remote Codex task coordinator.
 - Advance remote Codex work deterministically.
-- Ask the user only when the task requires an implementation solution choice.
+- Ask the user when the task requires requirement clarification, scope confirmation, an implementation solution choice, or missing context.
 - Continue automatically for all other decisions.
 - Summarize remote progress clearly before asking for input.`
 
@@ -42,14 +42,15 @@ func (e *HeuristicDecisionEngine) DecideNextStep(ctx context.Context, in Decisio
 
 	summary := strings.TrimSpace(in.Task.LastOutputSummary)
 	lower := strings.ToLower(summary)
-	if looksLikeImplementationChoice(lower) {
+	if decisionType := detectDecisionType(lower); decisionType != "" {
 		return DecisionResult{
-			DecisionType: "implementation_solution_choice",
+			DecisionType: decisionType,
 			Summary:      summary,
 			Question: &AwaitingQuestion{
 				QuestionText:   summary,
 				OptionsSummary: "",
 				ContextExcerpt: summary,
+				QuestionType:   decisionType,
 				AskedAt:        time.Now().UTC(),
 			},
 		}, nil
@@ -98,11 +99,34 @@ func BuildDecisionPrompt(in DecisionContext) string {
 }
 
 func ShouldEscalateDecision(decisionType string) bool {
-	return strings.TrimSpace(decisionType) == "implementation_solution_choice"
+	switch strings.TrimSpace(decisionType) {
+	case "requirement_clarification", "scope_confirmation", "implementation_solution_choice", "missing_context":
+		return true
+	default:
+		return false
+	}
 }
 
-func looksLikeImplementationChoice(text string) bool {
-	markers := []string{
+func detectDecisionType(text string) string {
+	switch {
+	case containsAny(text, []string{
+		"need clarification",
+		"clarify the requirement",
+		"clarification on the requirement",
+		"clarify before i proceed",
+		"需要澄清",
+		"请澄清",
+	}):
+		return "requirement_clarification"
+	case containsAny(text, []string{
+		"confirm the scope",
+		"scope confirmation",
+		"please confirm the scope",
+		"范围确认",
+		"确认范围",
+	}):
+		return "scope_confirmation"
+	case containsAny(text, []string{
 		"which approach",
 		"choose",
 		"option",
@@ -110,7 +134,23 @@ func looksLikeImplementationChoice(text string) bool {
 		"implementation options",
 		"方案",
 		"怎么实现",
+	}):
+		return "implementation_solution_choice"
+	case containsAny(text, []string{
+		"missing context",
+		"need more context",
+		"need additional context",
+		"not enough context",
+		"缺少上下文",
+		"信息不足",
+	}):
+		return "missing_context"
+	default:
+		return ""
 	}
+}
+
+func containsAny(text string, markers []string) bool {
 	for _, marker := range markers {
 		if strings.Contains(text, marker) {
 			return true
