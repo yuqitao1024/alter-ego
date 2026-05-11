@@ -19,6 +19,8 @@ type SSHRunner struct {
 	machineResolver func(machineID string) (MachineConfig, error)
 }
 
+const codexBypassFlags = "--dangerously-bypass-approvals-and-sandbox"
+
 func NewSSHRunner(transport sshTransport) *SSHRunner {
 	if transport == nil {
 		transport = shellSSHTransport{}
@@ -163,7 +165,7 @@ func buildStartCommand(req StartRequest) string {
 		fmt.Sprintf("git checkout %s", shellQuote(req.CheckoutBranch)),
 	)
 	steps = append(steps, req.PostCloneBootstrap...)
-	steps = append(steps, fmt.Sprintf("cd %s && codex exec --json -", shellQuote(repoDir)))
+	steps = append(steps, fmt.Sprintf("cd %s && codex exec %s --json -", shellQuote(repoDir), codexBypassFlags))
 	return strings.Join(steps, " && ")
 }
 
@@ -189,7 +191,7 @@ func buildProbeCommand(processIdentity string) string {
 }
 
 func buildResumeCommand(workdir, sessionID, promptArg string) string {
-	command := fmt.Sprintf("cd %s && codex exec resume %s --json", shellQuote(workdir), shellQuote(sessionID))
+	command := fmt.Sprintf("cd %s && codex exec resume %s %s --json", shellQuote(workdir), shellQuote(sessionID), codexBypassFlags)
 	if strings.TrimSpace(promptArg) != "" {
 		command += " " + promptArg
 	}

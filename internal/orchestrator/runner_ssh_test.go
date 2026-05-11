@@ -61,8 +61,8 @@ func TestSSHRunnerStartCommandShape(t *testing.T) {
 	if !strings.Contains(transport.lastCommand, "git submodule update --init --recursive") || !strings.Contains(transport.lastCommand, "pnpm install") {
 		t.Fatalf("command = %q, want post-clone bootstrap commands", transport.lastCommand)
 	}
-	if !strings.Contains(transport.lastCommand, "cd '/srv/codex-tasks/task-1/repo' && codex exec --json -") {
-		t.Fatalf("command = %q, want codex exec --json -", transport.lastCommand)
+	if !strings.Contains(transport.lastCommand, "cd '/srv/codex-tasks/task-1/repo' && codex exec --dangerously-bypass-approvals-and-sandbox --json -") {
+		t.Fatalf("command = %q, want codex exec with bypass flag", transport.lastCommand)
 	}
 	if !strings.Contains(transport.lastStdin, "Workflow: inspect first") || !strings.Contains(transport.lastStdin, "Implement scheduler") {
 		t.Fatalf("stdin = %q, want workflow and user request", transport.lastStdin)
@@ -119,7 +119,7 @@ func TestSSHRunnerAttachAndResumeCommandShape(t *testing.T) {
 	}
 
 	attachCommand := transport.commands[0]
-	if !strings.Contains(attachCommand, "codex exec resume 'session-attach' --json") {
+	if !strings.Contains(attachCommand, "codex exec resume 'session-attach' --dangerously-bypass-approvals-and-sandbox --json") {
 		t.Fatalf("attach command = %q", attachCommand)
 	}
 
@@ -136,7 +136,7 @@ func TestSSHRunnerAttachAndResumeCommandShape(t *testing.T) {
 	}
 
 	resumeCommand := transport.commands[1]
-	if !strings.Contains(resumeCommand, "codex exec resume 'session-resume' --json") {
+	if !strings.Contains(resumeCommand, "codex exec resume 'session-resume' --dangerously-bypass-approvals-and-sandbox --json") {
 		t.Fatalf("resume command = %q", resumeCommand)
 	}
 }
@@ -158,7 +158,7 @@ func TestSSHRunnerStopAndSendCommands(t *testing.T) {
 	if err := runner.SendInput(context.Background(), session, "Continue and run tests."); err != nil {
 		t.Fatalf("SendInput returned error: %v", err)
 	}
-	if !strings.Contains(transport.commands[0], "codex exec resume 'session-1' --json -") {
+	if !strings.Contains(transport.commands[0], "codex exec resume 'session-1' --dangerously-bypass-approvals-and-sandbox --json -") {
 		t.Fatalf("send command = %q", transport.commands[0])
 	}
 	if !strings.Contains(transport.stdins[0], "Continue and run tests.") {
