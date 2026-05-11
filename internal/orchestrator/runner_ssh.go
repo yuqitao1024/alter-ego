@@ -40,7 +40,7 @@ func (r *SSHRunner) SetMachineResolver(resolver func(machineID string) (MachineC
 }
 
 func (r *SSHRunner) StartInteractiveSession(ctx context.Context, req StartRequest) (RemoteSession, error) {
-	command := buildStartCommand(req)
+	command := wrapRemoteCommand(req.Machine, buildStartCommand(req))
 	output, err := r.transport.Run(ctx, req.Machine, command, "")
 	if err != nil {
 		return RemoteSession{}, fmt.Errorf("start remote tmux session: %w", err)
@@ -54,7 +54,7 @@ func (r *SSHRunner) CaptureOutput(ctx context.Context, session RemoteSession) (O
 		return OutputWindow{}, err
 	}
 
-	command := buildCaptureCommand(session.TMUXSessionName)
+	command := wrapRemoteCommand(machine, buildCaptureCommand(session.TMUXSessionName))
 	output, err := r.transport.Run(ctx, machine, command, "")
 	if err != nil {
 		return OutputWindow{}, fmt.Errorf("capture tmux output: %w", err)
@@ -73,7 +73,7 @@ func (r *SSHRunner) SendInteractiveInput(ctx context.Context, session RemoteSess
 		return err
 	}
 
-	command := buildSendKeysCommand(session.TMUXSessionName, input)
+	command := wrapRemoteCommand(machine, buildSendKeysCommand(session.TMUXSessionName, input))
 	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
 		return fmt.Errorf("send tmux input: %w", err)
 	}
@@ -86,7 +86,7 @@ func (r *SSHRunner) HasSession(ctx context.Context, session RemoteSession) (bool
 		return false, err
 	}
 
-	command := buildHasSessionCommand(session.TMUXSessionName)
+	command := wrapRemoteCommand(machine, buildHasSessionCommand(session.TMUXSessionName))
 	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "can't find session") {
 			return false, nil
@@ -102,7 +102,7 @@ func (r *SSHRunner) StopSession(ctx context.Context, session RemoteSession) erro
 		return err
 	}
 
-	command := buildStopCommand(session.TMUXSessionName)
+	command := wrapRemoteCommand(machine, buildStopCommand(session.TMUXSessionName))
 	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
 		return fmt.Errorf("stop tmux session: %w", err)
 	}
@@ -141,8 +141,14 @@ func buildStartCommand(req StartRequest) string {
 	taskRoot := taskRootDir(req.RemoteWorkspaceRoot, req.TaskID)
 	repoDir := taskRepoWorkdir(req.RemoteWorkspaceRoot, req.TaskID)
 	sessionName := defaultTMUXSessionName(req.TaskID)
-	codexInput := shellQuote(buildStartInput(req.WorkflowContent, req.UserRequest))
-	codexCommand := fmt.Sprintf("cd %s && printf %%s %s | codex %s", shellQuote(repoDir), codexInput, codexBypassFlags)
+	promptArg := shellQuote(buildStartInput(req.WorkflowContent, req.UserRequest))
+	codexCommandParts := []string{}
+	if initPrefix := shellInitPrefix(req.Machine.ShellInit); initPrefix != "" {
+		codexCommandParts = append(codexCommandParts, initPrefix)
+	}
+	codexCommandParts = append(codexCommandParts, fmt.Sprintf("cd %s", shellQuote(repoDir)))
+	codexCommandParts = append(codexCommandParts, fmt.Sprintf("codex %s %s", codexBypassFlags, promptArg))
+	codexCommand := strings.Join(codexCommandParts, " && ")
 
 	steps := []string{
 		fmt.Sprintf("mkdir -p %s", shellQuote(taskRoot)),
@@ -189,6 +195,26 @@ func buildHasSessionCommand(sessionName string) string {
 
 func buildStopCommand(sessionName string) string {
 	return fmt.Sprintf("tmux kill-session -t %s", shellQuote(sessionName))
+}
+
+func wrapRemoteCommand(machine MachineConfig, command string) string {
+	prefix := shellInitPrefix(machine.ShellInit)
+	if prefix == "" {
+		return command
+	}
+	return prefix + " && " + command
+}
+
+func shellInitPrefix(commands []string) string {
+	filtered := make([]string, 0, len(commands))
+	for _, command := range commands {
+		command = strings.TrimSpace(command)
+		if command == "" {
+			continue
+		}
+		filtered = append(filtered, command)
+	}
+	return strings.Join(filtered, " && ")
 }
 
 func parseRemoteSession(output, machineID string) (RemoteSession, error) {

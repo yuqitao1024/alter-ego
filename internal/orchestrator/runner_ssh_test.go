@@ -13,7 +13,10 @@ func TestSSHRunnerStartCreatesSessionAndLaunchesCodex(t *testing.T) {
 		stdout: "tmux_session_name=alterego-task-1\nworkdir=/srv/codex-tasks/task-1/repo\n",
 	}
 	runner := NewSSHRunner(transport)
-	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", Port: 2222}
+	machine := MachineConfig{
+		ID: "machine_a", Host: "host-a", User: "coder", Port: 2222,
+		ShellInit: []string{"source /opt/codex/env.sh", "export CODEX_HOME=/opt/codex-home"},
+	}
 
 	session, err := runner.StartInteractiveSession(context.Background(), StartRequest{
 		Machine:             machine,
@@ -58,8 +61,20 @@ func TestSSHRunnerStartCreatesSessionAndLaunchesCodex(t *testing.T) {
 	if !strings.Contains(transport.lastCommand, "tmux new-session -d -s 'alterego-task-1'") {
 		t.Fatalf("command = %q, want tmux new-session", transport.lastCommand)
 	}
+	if !strings.Contains(transport.lastCommand, "source /opt/codex/env.sh") {
+		t.Fatalf("command = %q, want shell init on outer ssh command", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "export CODEX_HOME=/opt/codex-home") {
+		t.Fatalf("command = %q, want CODEX_HOME init", transport.lastCommand)
+	}
 	if !strings.Contains(transport.lastCommand, "codex --dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("command = %q, want codex launch with bypass flag", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "tmux new-session -d -s 'alterego-task-1' 'source /opt/codex/env.sh && export CODEX_HOME=/opt/codex-home") {
+		t.Fatalf("command = %q, want shell init inside tmux codex command", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "codex --dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("command = %q, want codex launch inside tmux command", transport.lastCommand)
 	}
 	if strings.TrimSpace(transport.lastStdin) != "" {
 		t.Fatalf("stdin = %q, want empty stdin for tmux startup", transport.lastStdin)
@@ -71,7 +86,7 @@ func TestSSHRunnerCaptureUsesCapturePane(t *testing.T) {
 
 	transport := &fakeSSHTransport{stdout: "recent output"}
 	runner := NewSSHRunner(transport)
-	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh"}}
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
 
 	window, err := runner.CaptureOutput(context.Background(), RemoteSession{
@@ -87,6 +102,9 @@ func TestSSHRunnerCaptureUsesCapturePane(t *testing.T) {
 	if !strings.Contains(transport.lastCommand, "tmux capture-pane -p -t 'alterego-task-2'") {
 		t.Fatalf("command = %q, want capture-pane", transport.lastCommand)
 	}
+	if !strings.Contains(transport.lastCommand, "source /opt/codex/env.sh && tmux capture-pane") {
+		t.Fatalf("command = %q, want shell init before capture-pane", transport.lastCommand)
+	}
 }
 
 func TestSSHRunnerSendInputUsesSendKeys(t *testing.T) {
@@ -94,7 +112,7 @@ func TestSSHRunnerSendInputUsesSendKeys(t *testing.T) {
 
 	transport := &fakeSSHTransport{}
 	runner := NewSSHRunner(transport)
-	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh"}}
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
 
 	err := runner.SendInteractiveInput(context.Background(), RemoteSession{
@@ -107,6 +125,9 @@ func TestSSHRunnerSendInputUsesSendKeys(t *testing.T) {
 	if !strings.Contains(transport.lastCommand, "tmux send-keys -t 'alterego-task-3' -- 'Continue and run tests.' Enter") {
 		t.Fatalf("command = %q, want send-keys", transport.lastCommand)
 	}
+	if !strings.Contains(transport.lastCommand, "source /opt/codex/env.sh && tmux send-keys") {
+		t.Fatalf("command = %q, want shell init before send-keys", transport.lastCommand)
+	}
 }
 
 func TestSSHRunnerHasSessionUsesTMUXHasSession(t *testing.T) {
@@ -114,7 +135,7 @@ func TestSSHRunnerHasSessionUsesTMUXHasSession(t *testing.T) {
 
 	transport := &fakeSSHTransport{}
 	runner := NewSSHRunner(transport)
-	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh"}}
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
 
 	ok, err := runner.HasSession(context.Background(), RemoteSession{
@@ -130,6 +151,9 @@ func TestSSHRunnerHasSessionUsesTMUXHasSession(t *testing.T) {
 	if !strings.Contains(transport.lastCommand, "tmux has-session -t 'alterego-task-4'") {
 		t.Fatalf("command = %q, want has-session", transport.lastCommand)
 	}
+	if !strings.Contains(transport.lastCommand, "source /opt/codex/env.sh && tmux has-session") {
+		t.Fatalf("command = %q, want shell init before has-session", transport.lastCommand)
+	}
 }
 
 func TestSSHRunnerStopUsesKillSession(t *testing.T) {
@@ -137,7 +161,7 @@ func TestSSHRunnerStopUsesKillSession(t *testing.T) {
 
 	transport := &fakeSSHTransport{}
 	runner := NewSSHRunner(transport)
-	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh"}}
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
 
 	err := runner.StopSession(context.Background(), RemoteSession{
@@ -149,6 +173,9 @@ func TestSSHRunnerStopUsesKillSession(t *testing.T) {
 	}
 	if !strings.Contains(transport.lastCommand, "tmux kill-session -t 'alterego-task-5'") {
 		t.Fatalf("command = %q, want kill-session", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "source /opt/codex/env.sh && tmux kill-session") {
+		t.Fatalf("command = %q, want shell init before kill-session", transport.lastCommand)
 	}
 }
 

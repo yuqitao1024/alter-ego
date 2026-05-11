@@ -3,3 +3,5 @@ display_name: Primary Build Machine
 host: build-a.example.com
 port: 22
 user: codex
+shell_init:
+  - source /opt/codex/env.sh

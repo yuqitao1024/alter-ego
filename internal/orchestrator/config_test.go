@@ -10,11 +10,14 @@ import (
 func TestLoadConfigBindsTemplateToRepositoryAndWorkflow(t *testing.T) {
 	root := t.TempDir()
 
-	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
 id: machine_a
 display_name: Machine A
 host: machine-a.example.com
 user: dev
+shell_init:
+  - source /opt/codex/env.sh
+  - export FOO=bar
 `)
 writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -76,6 +79,12 @@ workflow_path: docs/workflows/ops-review.md
 	}
 	if template.Repository.Machines[0] != cfg.Machines["machine_a"] {
 		t.Fatal("template.Repository.Machines[0] does not point at cfg.Machines[machine_a]")
+	}
+	if len(template.Repository.Machines[0].ShellInit) != 2 {
+		t.Fatalf("machine.ShellInit = %#v, want 2 entries", template.Repository.Machines[0].ShellInit)
+	}
+	if template.Repository.Machines[0].ShellInit[0] != "source /opt/codex/env.sh" {
+		t.Fatalf("machine.ShellInit[0] = %q", template.Repository.Machines[0].ShellInit[0])
 	}
 	if template.Repository.Machines[0] == nil || template.Repository.Machines[0].ID != "machine_a" {
 		t.Fatalf("template.Repository.Machines[0] = %#v, want machine_a", template.Repository.Machines[0])

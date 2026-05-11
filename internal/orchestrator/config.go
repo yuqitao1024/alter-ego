@@ -17,6 +17,7 @@ type MachineConfig struct {
 	Host        string `yaml:"host"`
 	Port        int    `yaml:"port"`
 	User        string `yaml:"user"`
+	ShellInit   []string `yaml:"shell_init"`
 }
 
 type RepositoryConfig struct {

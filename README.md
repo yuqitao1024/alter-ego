@@ -82,6 +82,18 @@ Remote machine prerequisites:
 - `codex` installed and already authenticated on the remote machine
 - Git access to the configured `remote_repo_url`
 
+Machine configuration can also define a lightweight shell preamble that is injected into every SSH command:
+
+```yaml
+id: machine_a
+host: build-a.example.com
+user: codex
+shell_init:
+  - source /opt/codex/env.sh
+```
+
+Use `shell_init` only for idempotent environment setup such as exporting `CODEX_HOME`, toolchain paths, or proxy variables. Keep repository-specific preparation in `pre_clone_bootstrap` and `post_clone_bootstrap`.
+
 Repository configuration now uses task-scoped checkout settings instead of a fixed repository path. A repository entry should define:
 
 ```yaml
