@@ -100,12 +100,12 @@ func (s *Service) Reply(ctx context.Context, taskID, text string) error {
 	if err != nil {
 		return err
 	}
-	if task.Status != StatusWaitingUserDecision {
-		return fmt.Errorf("task %q is not waiting for user decision", taskID)
+	if task.Status != StatusWaitingUserInput {
+		return fmt.Errorf("task %q is not waiting for user input", taskID)
 	}
 
 	session := sessionFromTask(task)
-	if err := s.runner.SendInput(ctx, session, text); err != nil {
+	if err := s.runner.SendInteractiveInput(ctx, session, text); err != nil {
 		return fmt.Errorf("send task reply for %q: %w", taskID, err)
 	}
 
@@ -126,7 +126,7 @@ func (s *Service) Stop(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	if err := s.runner.StopTask(ctx, sessionFromTask(task)); err != nil {
+	if err := s.runner.StopSession(ctx, sessionFromTask(task)); err != nil {
 		return fmt.Errorf("stop task %q: %w", taskID, err)
 	}
 
@@ -163,7 +163,7 @@ func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {
 		return err
 	}
 
-	session, err := s.runner.StartNewSession(ctx, StartRequest{
+	session, err := s.runner.StartInteractiveSession(ctx, StartRequest{
 		Machine:             *machine,
 		RepositoryID:        template.Repository.ID,
 		TaskID:              task.TaskID,
@@ -181,27 +181,22 @@ func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {
 
 	task.Status = StatusRunning
 	task.RemoteWorkdir = coalesceString(session.Workdir, taskRepoWorkdir(template.Repository.RemoteWorkspaceRoot, task.TaskID))
+	task.TMUXSessionName = coalesceString(session.TMUXSessionName, defaultTMUXSessionName(task.TaskID))
 	task.RemoteCodexSessionID = session.CodexSessionID
-	task.RemoteProcessIdentity = session.ProcessIdentity
 	task.UpdatedAt = s.now()
 	return s.store.UpdateTask(ctx, task)
 }
 
 func (s *Service) recoverDetachedTask(ctx context.Context, task TaskRun) error {
-	machine, err := s.lookupMachine(task.MachineID)
-	if err != nil {
-		return err
-	}
-
-	session, err := RecoverRemoteSession(ctx, s.runner, *machine, task)
+	session, err := ReconnectInteractiveSession(ctx, s.runner, task)
 	if err != nil {
 		return err
 	}
 
 	task.Status = StatusRunning
 	task.RemoteWorkdir = coalesceString(session.Workdir, task.RemoteWorkdir)
+	task.TMUXSessionName = coalesceString(session.TMUXSessionName, task.TMUXSessionName)
 	task.RemoteCodexSessionID = coalesceString(session.CodexSessionID, task.RemoteCodexSessionID)
-	task.RemoteProcessIdentity = coalesceString(session.ProcessIdentity, task.RemoteProcessIdentity)
 	task.LastOutputSummary = coalesceString(session.LastOutputWindow.Summary, task.LastOutputSummary)
 	task.UpdatedAt = s.now()
 	return s.store.UpdateTask(ctx, task)
@@ -218,7 +213,7 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		return err
 	}
 
-	window, err := s.runner.ReadWindow(ctx, sessionFromTask(task))
+	window, err := s.runner.CaptureOutput(ctx, sessionFromTask(task))
 	if err != nil {
 		return fmt.Errorf("read remote output for task %q: %w", task.TaskID, err)
 	}
@@ -237,7 +232,7 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 
 	task.LastOutputSummary = coalesceString(result.Summary, task.LastOutputSummary)
 	if ShouldEscalateDecision(result.DecisionType) {
-		task.Status = StatusWaitingUserDecision
+		task.Status = StatusWaitingUserInput
 		task.AwaitingQuestion = result.Question
 		task.UpdatedAt = s.now()
 		if err := s.store.UpdateTask(ctx, task); err != nil {
@@ -252,7 +247,7 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 	}
 
 	if strings.TrimSpace(result.NextInput) != "" {
-		if err := s.runner.SendInput(ctx, sessionFromTask(task), result.NextInput); err != nil {
+		if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), result.NextInput); err != nil {
 			return fmt.Errorf("send remote input for task %q: %w", task.TaskID, err)
 		}
 		task.LastInput = result.NextInput
@@ -285,7 +280,7 @@ func sessionFromTask(task TaskRun) RemoteSession {
 	return RemoteSession{
 		MachineID:       task.MachineID,
 		Workdir:         task.RemoteWorkdir,
+		TMUXSessionName: task.TMUXSessionName,
 		CodexSessionID:  task.RemoteCodexSessionID,
-		ProcessIdentity: task.RemoteProcessIdentity,
 	}
 }

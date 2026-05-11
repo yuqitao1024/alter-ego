@@ -49,7 +49,7 @@ func TestTaskCommandListFormatsActiveTasks(t *testing.T) {
 	handler := NewTaskCommandHandler(&fakeTaskService{
 		tasks: []orchestrator.TaskRun{
 			{TaskID: "task-1", TemplateID: "feature_dev", MachineID: "machine_a", Status: orchestrator.StatusRunning},
-			{TaskID: "task-2", TemplateID: "bugfix", MachineID: "machine_b", Status: orchestrator.StatusWaitingUserDecision},
+			{TaskID: "task-2", TemplateID: "bugfix", MachineID: "machine_b", Status: orchestrator.StatusWaitingUserInput},
 		},
 	})
 

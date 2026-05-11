@@ -2,159 +2,89 @@ package orchestrator
 
 import (
 	"context"
-	"reflect"
+	"strings"
 	"testing"
 )
 
-func TestRecoverPrefersAttachWhenRemoteProcessIsAlive(t *testing.T) {
+func TestReconnectUsesTMUXSessionWhenPresent(t *testing.T) {
 	t.Parallel()
 
-	runner := &fakeRemoteRunner{
-		probeResult: ProbeResult{
-			Alive:           true,
-			ProcessIdentity: "pid-123",
-		},
-		attachSession: RemoteSession{
-			MachineID:        "machine_a",
-			Workdir:          "/srv/repo",
-			CodexSessionID:   "session-1",
-			ProcessIdentity:  "pid-123",
-			AttachedToLive:   true,
-			LastOutputWindow: OutputWindow{Summary: "attached"},
-		},
-	}
+	runner := &fakeRemoteRunner{hasSession: true}
 	task := TaskRun{
-		TaskID:                "task-1",
-		MachineID:             "machine_a",
-		RemoteWorkdir:         "/srv/repo",
-		RemoteCodexSessionID:  "session-1",
-		RemoteProcessIdentity: "pid-previous",
-	}
-	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
-
-	session, err := RecoverRemoteSession(context.Background(), runner, machine, task)
-	if err != nil {
-		t.Fatalf("RecoverRemoteSession returned error: %v", err)
-	}
-
-	if session.CodexSessionID != "session-1" {
-		t.Fatalf("session.CodexSessionID = %q, want session-1", session.CodexSessionID)
-	}
-
-	wantCalls := []string{"probe", "attach"}
-	if !reflect.DeepEqual(runner.calls, wantCalls) {
-		t.Fatalf("calls = %v, want %v", runner.calls, wantCalls)
-	}
-}
-
-func TestRecoverUsesResumeWhenRemoteProcessIsGone(t *testing.T) {
-	t.Parallel()
-
-	runner := &fakeRemoteRunner{
-		probeResult: ProbeResult{Alive: false},
-		resumeSession: RemoteSession{
-			MachineID:       "machine_a",
-			Workdir:         "/srv/repo",
-			CodexSessionID:  "session-2",
-			ProcessIdentity: "pid-456",
-		},
-	}
-	task := TaskRun{
-		TaskID:                "task-2",
-		MachineID:             "machine_a",
-		RemoteWorkdir:         "/srv/repo",
-		RemoteCodexSessionID:  "session-2",
-		RemoteProcessIdentity: "pid-old",
-	}
-	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
-
-	session, err := RecoverRemoteSession(context.Background(), runner, machine, task)
-	if err != nil {
-		t.Fatalf("RecoverRemoteSession returned error: %v", err)
-	}
-
-	if session.ProcessIdentity != "pid-456" {
-		t.Fatalf("session.ProcessIdentity = %q, want pid-456", session.ProcessIdentity)
-	}
-
-	wantCalls := []string{"probe", "resume"}
-	if !reflect.DeepEqual(runner.calls, wantCalls) {
-		t.Fatalf("calls = %v, want %v", runner.calls, wantCalls)
-	}
-}
-
-func TestRecoverNeverStartsDuplicateSessionBeforeProbe(t *testing.T) {
-	t.Parallel()
-
-	runner := &fakeRemoteRunner{
-		probeResult: ProbeResult{Alive: false},
-		resumeSession: RemoteSession{
-			MachineID:       "machine_b",
-			Workdir:         "/srv/repo",
-			CodexSessionID:  "session-3",
-			ProcessIdentity: "pid-789",
-		},
-	}
-	task := TaskRun{
-		TaskID:               "task-3",
-		MachineID:            "machine_b",
+		TaskID:               "task-1",
+		MachineID:            "machine_a",
 		RemoteWorkdir:        "/srv/repo",
-		RemoteCodexSessionID: "session-3",
-	}
-	machine := MachineConfig{ID: "machine_b", Host: "host-b", User: "coder"}
-
-	if _, err := RecoverRemoteSession(context.Background(), runner, machine, task); err != nil {
-		t.Fatalf("RecoverRemoteSession returned error: %v", err)
+		TMUXSessionName:      "alterego-task-1",
+		RemoteCodexSessionID: "session-1",
+		LastScreenDigest:     "digest-1",
 	}
 
-	for _, call := range runner.calls {
-		if call == "start" {
-			t.Fatalf("calls = %v, unexpected start call", runner.calls)
-		}
+	session, err := ReconnectInteractiveSession(context.Background(), runner, task)
+	if err != nil {
+		t.Fatalf("ReconnectInteractiveSession returned error: %v", err)
+	}
+
+	if session.TMUXSessionName != "alterego-task-1" {
+		t.Fatalf("session.TMUXSessionName = %q, want alterego-task-1", session.TMUXSessionName)
+	}
+	if len(runner.calls) != 1 || runner.calls[0] != "has-session" {
+		t.Fatalf("calls = %v, want [has-session]", runner.calls)
+	}
+}
+
+func TestReconnectFailsWhenTMUXSessionMissing(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeRemoteRunner{hasSession: false}
+	task := TaskRun{
+		TaskID:               "task-2",
+		MachineID:            "machine_a",
+		RemoteWorkdir:        "/srv/repo",
+		TMUXSessionName:      "alterego-task-2",
+		RemoteCodexSessionID: "session-2",
+	}
+
+	_, err := ReconnectInteractiveSession(context.Background(), runner, task)
+	if err == nil {
+		t.Fatal("ReconnectInteractiveSession returned nil error, want failure")
+	}
+	if !strings.Contains(err.Error(), "tmux session") {
+		t.Fatalf("ReconnectInteractiveSession error = %v, want tmux session failure", err)
+	}
+	if len(runner.calls) != 1 || runner.calls[0] != "has-session" {
+		t.Fatalf("calls = %v, want [has-session]", runner.calls)
 	}
 }
 
 type fakeRemoteRunner struct {
 	calls []string
 
-	probeResult   ProbeResult
-	attachSession RemoteSession
-	resumeSession RemoteSession
-	startSession  RemoteSession
-	outputWindow  OutputWindow
+	startSession RemoteSession
+	outputWindow OutputWindow
+	hasSession   bool
 }
 
-func (f *fakeRemoteRunner) StartNewSession(context.Context, StartRequest) (RemoteSession, error) {
+func (f *fakeRemoteRunner) StartInteractiveSession(context.Context, StartRequest) (RemoteSession, error) {
 	f.calls = append(f.calls, "start")
 	return f.startSession, nil
 }
 
-func (f *fakeRemoteRunner) ProbeSession(context.Context, ProbeRequest) (ProbeResult, error) {
-	f.calls = append(f.calls, "probe")
-	return f.probeResult, nil
+func (f *fakeRemoteRunner) CaptureOutput(context.Context, RemoteSession) (OutputWindow, error) {
+	f.calls = append(f.calls, "capture")
+	return f.outputWindow, nil
 }
 
-func (f *fakeRemoteRunner) AttachLiveSession(context.Context, AttachRequest) (RemoteSession, error) {
-	f.calls = append(f.calls, "attach")
-	return f.attachSession, nil
-}
-
-func (f *fakeRemoteRunner) ResumeExitedSession(context.Context, ResumeRequest) (RemoteSession, error) {
-	f.calls = append(f.calls, "resume")
-	return f.resumeSession, nil
-}
-
-func (f *fakeRemoteRunner) SendInput(context.Context, RemoteSession, string) error {
+func (f *fakeRemoteRunner) SendInteractiveInput(context.Context, RemoteSession, string) error {
 	f.calls = append(f.calls, "send")
 	return nil
 }
 
-func (f *fakeRemoteRunner) ReadWindow(context.Context, RemoteSession) (OutputWindow, error) {
-	f.calls = append(f.calls, "read")
-	return f.outputWindow, nil
+func (f *fakeRemoteRunner) HasSession(context.Context, RemoteSession) (bool, error) {
+	f.calls = append(f.calls, "has-session")
+	return f.hasSession, nil
 }
 
-func (f *fakeRemoteRunner) StopTask(context.Context, RemoteSession) error {
+func (f *fakeRemoteRunner) StopSession(context.Context, RemoteSession) error {
 	f.calls = append(f.calls, "stop")
 	return nil
 }

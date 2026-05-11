@@ -39,67 +39,25 @@ func (r *SSHRunner) SetMachineResolver(resolver func(machineID string) (MachineC
 	}
 }
 
-func (r *SSHRunner) StartNewSession(ctx context.Context, req StartRequest) (RemoteSession, error) {
+func (r *SSHRunner) StartInteractiveSession(ctx context.Context, req StartRequest) (RemoteSession, error) {
 	command := buildStartCommand(req)
-	stdin := buildStartInput(req.WorkflowContent, req.UserRequest)
-
-	output, err := r.transport.Run(ctx, req.Machine, command, stdin)
-	if err != nil {
-		return RemoteSession{}, fmt.Errorf("start remote codex session: %w", err)
-	}
-	return parseRemoteSession(output, req.Machine.ID, false)
-}
-
-func (r *SSHRunner) ProbeSession(ctx context.Context, req ProbeRequest) (ProbeResult, error) {
-	command := buildProbeCommand(req.ProcessIdentity)
 	output, err := r.transport.Run(ctx, req.Machine, command, "")
 	if err != nil {
-		return ProbeResult{}, fmt.Errorf("probe remote codex session: %w", err)
+		return RemoteSession{}, fmt.Errorf("start remote tmux session: %w", err)
 	}
-	return parseProbeResult(output), nil
+	return parseRemoteSession(output, req.Machine.ID)
 }
 
-func (r *SSHRunner) AttachLiveSession(ctx context.Context, req AttachRequest) (RemoteSession, error) {
-	command := buildResumeCommand(req.Workdir, req.CodexSessionID, "")
-	output, err := r.transport.Run(ctx, req.Machine, command, "")
-	if err != nil {
-		return RemoteSession{}, fmt.Errorf("attach live codex session: %w", err)
-	}
-	return parseRemoteSession(output, req.Machine.ID, true)
-}
-
-func (r *SSHRunner) ResumeExitedSession(ctx context.Context, req ResumeRequest) (RemoteSession, error) {
-	command := buildResumeCommand(req.Workdir, req.CodexSessionID, "")
-	output, err := r.transport.Run(ctx, req.Machine, command, "")
-	if err != nil {
-		return RemoteSession{}, fmt.Errorf("resume exited codex session: %w", err)
-	}
-	return parseRemoteSession(output, req.Machine.ID, false)
-}
-
-func (r *SSHRunner) SendInput(ctx context.Context, session RemoteSession, input string) error {
-	machine, err := r.machineResolver(session.MachineID)
-	if err != nil {
-		return err
-	}
-
-	command := buildResumeCommand(session.Workdir, session.CodexSessionID, "-")
-	if _, err := r.transport.Run(ctx, machine, command, input); err != nil {
-		return fmt.Errorf("send codex session input: %w", err)
-	}
-	return nil
-}
-
-func (r *SSHRunner) ReadWindow(ctx context.Context, session RemoteSession) (OutputWindow, error) {
+func (r *SSHRunner) CaptureOutput(ctx context.Context, session RemoteSession) (OutputWindow, error) {
 	machine, err := r.machineResolver(session.MachineID)
 	if err != nil {
 		return OutputWindow{}, err
 	}
 
-	command := buildResumeCommand(session.Workdir, session.CodexSessionID, "")
+	command := buildCaptureCommand(session.TMUXSessionName)
 	output, err := r.transport.Run(ctx, machine, command, "")
 	if err != nil {
-		return OutputWindow{}, fmt.Errorf("read codex session window: %w", err)
+		return OutputWindow{}, fmt.Errorf("capture tmux output: %w", err)
 	}
 
 	summary := strings.TrimSpace(output)
@@ -109,15 +67,44 @@ func (r *SSHRunner) ReadWindow(ctx context.Context, session RemoteSession) (Outp
 	}, nil
 }
 
-func (r *SSHRunner) StopTask(ctx context.Context, session RemoteSession) error {
+func (r *SSHRunner) SendInteractiveInput(ctx context.Context, session RemoteSession, input string) error {
 	machine, err := r.machineResolver(session.MachineID)
 	if err != nil {
 		return err
 	}
 
-	command := buildStopCommand(session.ProcessIdentity)
+	command := buildSendKeysCommand(session.TMUXSessionName, input)
 	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
-		return fmt.Errorf("stop codex session: %w", err)
+		return fmt.Errorf("send tmux input: %w", err)
+	}
+	return nil
+}
+
+func (r *SSHRunner) HasSession(ctx context.Context, session RemoteSession) (bool, error) {
+	machine, err := r.machineResolver(session.MachineID)
+	if err != nil {
+		return false, err
+	}
+
+	command := buildHasSessionCommand(session.TMUXSessionName)
+	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "can't find session") {
+			return false, nil
+		}
+		return false, fmt.Errorf("probe tmux session: %w", err)
+	}
+	return true, nil
+}
+
+func (r *SSHRunner) StopSession(ctx context.Context, session RemoteSession) error {
+	machine, err := r.machineResolver(session.MachineID)
+	if err != nil {
+		return err
+	}
+
+	command := buildStopCommand(session.TMUXSessionName)
+	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
+		return fmt.Errorf("stop tmux session: %w", err)
 	}
 	return nil
 }
@@ -153,6 +140,9 @@ func (shellSSHTransport) Run(ctx context.Context, machine MachineConfig, command
 func buildStartCommand(req StartRequest) string {
 	taskRoot := taskRootDir(req.RemoteWorkspaceRoot, req.TaskID)
 	repoDir := taskRepoWorkdir(req.RemoteWorkspaceRoot, req.TaskID)
+	sessionName := defaultTMUXSessionName(req.TaskID)
+	codexInput := shellQuote(buildStartInput(req.WorkflowContent, req.UserRequest))
+	codexCommand := fmt.Sprintf("cd %s && printf %%s %s | codex %s", shellQuote(repoDir), codexInput, codexBypassFlags)
 
 	steps := []string{
 		fmt.Sprintf("mkdir -p %s", shellQuote(taskRoot)),
@@ -165,7 +155,10 @@ func buildStartCommand(req StartRequest) string {
 		fmt.Sprintf("git checkout %s", shellQuote(req.CheckoutBranch)),
 	)
 	steps = append(steps, req.PostCloneBootstrap...)
-	steps = append(steps, fmt.Sprintf("cd %s && codex exec %s --json -", shellQuote(repoDir), codexBypassFlags))
+	steps = append(steps,
+		fmt.Sprintf("tmux new-session -d -s %s %s", shellQuote(sessionName), shellQuote(codexCommand)),
+		fmt.Sprintf("printf 'tmux_session_name=%s\\nworkdir=%s\\n'", sessionName, repoDir),
+	)
 	return strings.Join(steps, " && ")
 }
 
@@ -182,46 +175,24 @@ func buildStartInput(workflow, userRequest string) string {
 	return builder.String()
 }
 
-func buildProbeCommand(processIdentity string) string {
-	pid := strings.TrimSpace(processIdentity)
-	if pid == "" {
-		return "printf 'dead\\n'"
-	}
-	return fmt.Sprintf("if kill -0 %s 2>/dev/null; then printf 'alive %s\\n'; else printf 'dead\\n'; fi", shellQuote(pid), shellQuote(pid))
+func buildCaptureCommand(sessionName string) string {
+	return fmt.Sprintf("tmux capture-pane -p -t %s -S -200", shellQuote(sessionName))
 }
 
-func buildResumeCommand(workdir, sessionID, promptArg string) string {
-	command := fmt.Sprintf("cd %s && codex exec resume %s %s --json", shellQuote(workdir), shellQuote(sessionID), codexBypassFlags)
-	if strings.TrimSpace(promptArg) != "" {
-		command += " " + promptArg
-	}
-	return command
+func buildSendKeysCommand(sessionName, input string) string {
+	return fmt.Sprintf("tmux send-keys -t %s -- %s Enter", shellQuote(sessionName), shellQuote(input))
 }
 
-func buildStopCommand(processIdentity string) string {
-	pid := strings.TrimSpace(processIdentity)
-	if pid == "" {
-		return "printf 'no-process\\n'"
-	}
-	return fmt.Sprintf("kill %s", shellQuote(pid))
+func buildHasSessionCommand(sessionName string) string {
+	return fmt.Sprintf("tmux has-session -t %s", shellQuote(sessionName))
 }
 
-func parseProbeResult(output string) ProbeResult {
-	trimmed := strings.TrimSpace(output)
-	if strings.HasPrefix(trimmed, "alive ") {
-		return ProbeResult{
-			Alive:           true,
-			ProcessIdentity: strings.TrimSpace(strings.TrimPrefix(trimmed, "alive ")),
-		}
-	}
-	return ProbeResult{}
+func buildStopCommand(sessionName string) string {
+	return fmt.Sprintf("tmux kill-session -t %s", shellQuote(sessionName))
 }
 
-func parseRemoteSession(output, machineID string, attachedToLive bool) (RemoteSession, error) {
-	session := RemoteSession{
-		MachineID:      machineID,
-		AttachedToLive: attachedToLive,
-	}
+func parseRemoteSession(output, machineID string) (RemoteSession, error) {
+	session := RemoteSession{MachineID: machineID}
 
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
@@ -233,19 +204,22 @@ func parseRemoteSession(output, machineID string, attachedToLive bool) (RemoteSe
 			continue
 		}
 		switch key {
-		case "session_id":
-			session.CodexSessionID = value
-		case "process_identity":
-			session.ProcessIdentity = value
+		case "tmux_session_name":
+			session.TMUXSessionName = value
 		case "workdir":
 			session.Workdir = value
+		case "codex_session_id", "session_id":
+			session.CodexSessionID = value
 		case "summary":
 			session.LastOutputWindow.Summary = value
 		}
 	}
 
-	if strings.TrimSpace(session.CodexSessionID) == "" {
-		return RemoteSession{}, fmt.Errorf("remote codex session output missing session_id")
+	if strings.TrimSpace(session.TMUXSessionName) == "" {
+		return RemoteSession{}, fmt.Errorf("remote tmux session output missing tmux_session_name")
+	}
+	if strings.TrimSpace(session.Workdir) == "" {
+		return RemoteSession{}, fmt.Errorf("remote tmux session output missing workdir")
 	}
 	return session, nil
 }

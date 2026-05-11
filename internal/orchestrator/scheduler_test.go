@@ -41,10 +41,10 @@ func TestSelectMachineBreaksTiesByRepositoryOrder(t *testing.T) {
 	}
 }
 
-func TestSchedulerSkipsWaitingUserDecisionTasks(t *testing.T) {
+func TestSchedulerSkipsWaitingUserInputTasks(t *testing.T) {
 	scheduler := NewScheduler()
 	tasks := []TaskRun{
-		{TaskID: "task-waiting", Status: StatusWaitingUserDecision},
+		{TaskID: "task-waiting", Status: StatusWaitingUserInput},
 		{TaskID: "task-running", Status: StatusRunning},
 	}
 
@@ -62,7 +62,7 @@ func TestSchedulerRotatesRunnableTasksRoundRobin(t *testing.T) {
 	tasks := []TaskRun{
 		{TaskID: "task-a", Status: StatusRunning},
 		{TaskID: "task-b", Status: StatusDetached},
-		{TaskID: "task-c", Status: StatusWaitingUserDecision},
+		{TaskID: "task-c", Status: StatusWaitingUserInput},
 		{TaskID: "task-d", Status: StatusRunning},
 	}
 

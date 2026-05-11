@@ -6,16 +6,16 @@ import (
 	"testing"
 )
 
-func TestSSHRunnerStartCommandShape(t *testing.T) {
+func TestSSHRunnerStartCreatesSessionAndLaunchesCodex(t *testing.T) {
 	t.Parallel()
 
 	transport := &fakeSSHTransport{
-		stdout: "session_id=session-start\nprocess_identity=pid-100\nworkdir=/srv/codex-tasks/task-1/repo\n",
+		stdout: "tmux_session_name=alterego-task-1\nworkdir=/srv/codex-tasks/task-1/repo\n",
 	}
 	runner := NewSSHRunner(transport)
 	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", Port: 2222}
 
-	session, err := runner.StartNewSession(context.Background(), StartRequest{
+	session, err := runner.StartInteractiveSession(context.Background(), StartRequest{
 		Machine:             machine,
 		RepositoryID:        "repo_backend",
 		TaskID:              "task-1",
@@ -34,11 +34,11 @@ func TestSSHRunnerStartCommandShape(t *testing.T) {
 		WorkflowContent: "Workflow: inspect first",
 	})
 	if err != nil {
-		t.Fatalf("StartNewSession returned error: %v", err)
+		t.Fatalf("StartInteractiveSession returned error: %v", err)
 	}
 
-	if session.CodexSessionID != "session-start" {
-		t.Fatalf("session.CodexSessionID = %q, want session-start", session.CodexSessionID)
+	if session.TMUXSessionName != "alterego-task-1" {
+		t.Fatalf("session.TMUXSessionName = %q, want alterego-task-1", session.TMUXSessionName)
 	}
 	if session.Workdir != "/srv/codex-tasks/task-1/repo" {
 		t.Fatalf("session.Workdir = %q, want /srv/codex-tasks/task-1/repo", session.Workdir)
@@ -46,130 +46,109 @@ func TestSSHRunnerStartCommandShape(t *testing.T) {
 	if !strings.Contains(transport.lastCommand, "mkdir -p '/srv/codex-tasks/task-1'") {
 		t.Fatalf("command = %q, want task directory creation", transport.lastCommand)
 	}
-	if !strings.Contains(transport.lastCommand, "cd '/srv/codex-tasks/task-1'") {
-		t.Fatalf("command = %q, want cd into task directory", transport.lastCommand)
+	if !strings.Contains(transport.lastCommand, "git clone 'git@github.com:example/backend.git' repo") {
+		t.Fatalf("command = %q, want git clone into repo subdirectory", transport.lastCommand)
 	}
 	if !strings.Contains(transport.lastCommand, "setup-git-auth") || !strings.Contains(transport.lastCommand, "prepare-network") {
 		t.Fatalf("command = %q, want pre-clone bootstrap commands", transport.lastCommand)
 	}
-	if !strings.Contains(transport.lastCommand, "git clone 'git@github.com:example/backend.git' repo") {
-		t.Fatalf("command = %q, want git clone into repo subdirectory", transport.lastCommand)
-	}
-	if !strings.Contains(transport.lastCommand, "git checkout 'main'") {
-		t.Fatalf("command = %q, want checkout main", transport.lastCommand)
-	}
 	if !strings.Contains(transport.lastCommand, "git submodule update --init --recursive") || !strings.Contains(transport.lastCommand, "pnpm install") {
 		t.Fatalf("command = %q, want post-clone bootstrap commands", transport.lastCommand)
 	}
-	if !strings.Contains(transport.lastCommand, "cd '/srv/codex-tasks/task-1/repo' && codex exec --dangerously-bypass-approvals-and-sandbox --json -") {
-		t.Fatalf("command = %q, want codex exec with bypass flag", transport.lastCommand)
+	if !strings.Contains(transport.lastCommand, "tmux new-session -d -s 'alterego-task-1'") {
+		t.Fatalf("command = %q, want tmux new-session", transport.lastCommand)
 	}
-	if !strings.Contains(transport.lastStdin, "Workflow: inspect first") || !strings.Contains(transport.lastStdin, "Implement scheduler") {
-		t.Fatalf("stdin = %q, want workflow and user request", transport.lastStdin)
+	if !strings.Contains(transport.lastCommand, "codex --dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("command = %q, want codex launch with bypass flag", transport.lastCommand)
 	}
-}
-
-func TestSSHRunnerProbeCommandShape(t *testing.T) {
-	t.Parallel()
-
-	transport := &fakeSSHTransport{stdout: "alive pid-123\n"}
-	runner := NewSSHRunner(transport)
-
-	result, err := runner.ProbeSession(context.Background(), ProbeRequest{
-		Machine:         MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"},
-		Workdir:         "/srv/backend",
-		CodexSessionID:  "session-1",
-		ProcessIdentity: "pid-123",
-	})
-	if err != nil {
-		t.Fatalf("ProbeSession returned error: %v", err)
-	}
-
-	if !result.Alive || result.ProcessIdentity != "pid-123" {
-		t.Fatalf("result = %#v, want alive pid-123", result)
-	}
-	if !strings.Contains(transport.lastCommand, "kill -0 'pid-123'") {
-		t.Fatalf("command = %q, want kill -0 probe", transport.lastCommand)
+	if strings.TrimSpace(transport.lastStdin) != "" {
+		t.Fatalf("stdin = %q, want empty stdin for tmux startup", transport.lastStdin)
 	}
 }
 
-func TestSSHRunnerAttachAndResumeCommandShape(t *testing.T) {
+func TestSSHRunnerCaptureUsesCapturePane(t *testing.T) {
 	t.Parallel()
 
-	transport := &fakeSSHTransport{
-		stdoutByCall: []string{
-			"session_id=session-attach\nprocess_identity=pid-live\nworkdir=/srv/backend\n",
-			"session_id=session-resume\nprocess_identity=pid-new\nworkdir=/srv/backend\n",
-		},
-	}
+	transport := &fakeSSHTransport{stdout: "recent output"}
 	runner := NewSSHRunner(transport)
 	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
+	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
 
-	attached, err := runner.AttachLiveSession(context.Background(), AttachRequest{
-		Machine:         machine,
-		Workdir:         "/srv/backend",
-		CodexSessionID:  "session-attach",
-		ProcessIdentity: "pid-live",
+	window, err := runner.CaptureOutput(context.Background(), RemoteSession{
+		MachineID:       "machine_a",
+		TMUXSessionName: "alterego-task-2",
 	})
 	if err != nil {
-		t.Fatalf("AttachLiveSession returned error: %v", err)
+		t.Fatalf("CaptureOutput returned error: %v", err)
 	}
-	if !attached.AttachedToLive {
-		t.Fatalf("attached.AttachedToLive = false, want true")
+	if window.Summary != "recent output" {
+		t.Fatalf("window.Summary = %q, want recent output", window.Summary)
 	}
-
-	attachCommand := transport.commands[0]
-	if !strings.Contains(attachCommand, "codex exec resume 'session-attach' --dangerously-bypass-approvals-and-sandbox --json") {
-		t.Fatalf("attach command = %q", attachCommand)
-	}
-
-	resumed, err := runner.ResumeExitedSession(context.Background(), ResumeRequest{
-		Machine:        machine,
-		Workdir:        "/srv/backend",
-		CodexSessionID: "session-resume",
-	})
-	if err != nil {
-		t.Fatalf("ResumeExitedSession returned error: %v", err)
-	}
-	if resumed.AttachedToLive {
-		t.Fatalf("resumed.AttachedToLive = true, want false")
-	}
-
-	resumeCommand := transport.commands[1]
-	if !strings.Contains(resumeCommand, "codex exec resume 'session-resume' --dangerously-bypass-approvals-and-sandbox --json") {
-		t.Fatalf("resume command = %q", resumeCommand)
+	if !strings.Contains(transport.lastCommand, "tmux capture-pane -p -t 'alterego-task-2'") {
+		t.Fatalf("command = %q, want capture-pane", transport.lastCommand)
 	}
 }
 
-func TestSSHRunnerStopAndSendCommands(t *testing.T) {
+func TestSSHRunnerSendInputUsesSendKeys(t *testing.T) {
 	t.Parallel()
 
 	transport := &fakeSSHTransport{}
 	runner := NewSSHRunner(transport)
-	session := RemoteSession{
-		MachineID:       "machine_a",
-		Workdir:         "/srv/backend",
-		CodexSessionID:  "session-1",
-		ProcessIdentity: "pid-123",
-	}
 	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
 
-	if err := runner.SendInput(context.Background(), session, "Continue and run tests."); err != nil {
-		t.Fatalf("SendInput returned error: %v", err)
+	err := runner.SendInteractiveInput(context.Background(), RemoteSession{
+		MachineID:       "machine_a",
+		TMUXSessionName: "alterego-task-3",
+	}, "Continue and run tests.")
+	if err != nil {
+		t.Fatalf("SendInteractiveInput returned error: %v", err)
 	}
-	if !strings.Contains(transport.commands[0], "codex exec resume 'session-1' --dangerously-bypass-approvals-and-sandbox --json -") {
-		t.Fatalf("send command = %q", transport.commands[0])
+	if !strings.Contains(transport.lastCommand, "tmux send-keys -t 'alterego-task-3' -- 'Continue and run tests.' Enter") {
+		t.Fatalf("command = %q, want send-keys", transport.lastCommand)
 	}
-	if !strings.Contains(transport.stdins[0], "Continue and run tests.") {
-		t.Fatalf("send stdin = %q", transport.stdins[0])
-	}
+}
 
-	if err := runner.StopTask(context.Background(), session); err != nil {
-		t.Fatalf("StopTask returned error: %v", err)
+func TestSSHRunnerHasSessionUsesTMUXHasSession(t *testing.T) {
+	t.Parallel()
+
+	transport := &fakeSSHTransport{}
+	runner := NewSSHRunner(transport)
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
+	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
+
+	ok, err := runner.HasSession(context.Background(), RemoteSession{
+		MachineID:       "machine_a",
+		TMUXSessionName: "alterego-task-4",
+	})
+	if err != nil {
+		t.Fatalf("HasSession returned error: %v", err)
 	}
-	if !strings.Contains(transport.commands[1], "kill 'pid-123'") {
-		t.Fatalf("stop command = %q", transport.commands[1])
+	if !ok {
+		t.Fatal("HasSession returned false, want true")
+	}
+	if !strings.Contains(transport.lastCommand, "tmux has-session -t 'alterego-task-4'") {
+		t.Fatalf("command = %q, want has-session", transport.lastCommand)
+	}
+}
+
+func TestSSHRunnerStopUsesKillSession(t *testing.T) {
+	t.Parallel()
+
+	transport := &fakeSSHTransport{}
+	runner := NewSSHRunner(transport)
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder"}
+	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
+
+	err := runner.StopSession(context.Background(), RemoteSession{
+		MachineID:       "machine_a",
+		TMUXSessionName: "alterego-task-5",
+	})
+	if err != nil {
+		t.Fatalf("StopSession returned error: %v", err)
+	}
+	if !strings.Contains(transport.lastCommand, "tmux kill-session -t 'alterego-task-5'") {
+		t.Fatalf("command = %q, want kill-session", transport.lastCommand)
 	}
 }
 
@@ -182,6 +161,7 @@ type fakeSSHTransport struct {
 	lastStdin   string
 	commands    []string
 	stdins      []string
+	err         error
 }
 
 func (f *fakeSSHTransport) Run(_ context.Context, _ MachineConfig, command string, stdin string) (string, error) {
@@ -190,7 +170,9 @@ func (f *fakeSSHTransport) Run(_ context.Context, _ MachineConfig, command strin
 	f.lastStdin = stdin
 	f.commands = append(f.commands, command)
 	f.stdins = append(f.stdins, stdin)
-
+	if f.err != nil {
+		return "", f.err
+	}
 	if len(f.stdoutByCall) >= f.callCount {
 		return f.stdoutByCall[f.callCount-1], nil
 	}

@@ -69,8 +69,8 @@ func TestTickStartsPendingTaskAndStoresRemoteSession(t *testing.T) {
 	service.runner.(*fakeServiceRunner).startSession = RemoteSession{
 		MachineID:       "machine_a",
 		Workdir:         "/srv/codex-tasks/task-start/repo",
+		TMUXSessionName: "alterego-task-start",
 		CodexSessionID:  "session-start",
-		ProcessIdentity: "pid-100",
 	}
 
 	if err := service.TickOnce(ctx); err != nil {
@@ -90,12 +90,12 @@ func TestTickStartsPendingTaskAndStoresRemoteSession(t *testing.T) {
 	if persisted.RemoteWorkdir != "/srv/codex-tasks/task-start/repo" {
 		t.Fatalf("persisted.RemoteWorkdir = %q, want /srv/codex-tasks/task-start/repo", persisted.RemoteWorkdir)
 	}
-	if persisted.RemoteProcessIdentity != "pid-100" {
-		t.Fatalf("persisted.RemoteProcessIdentity = %q, want pid-100", persisted.RemoteProcessIdentity)
+	if persisted.TMUXSessionName != "alterego-task-start" {
+		t.Fatalf("persisted.TMUXSessionName = %q, want alterego-task-start", persisted.TMUXSessionName)
 	}
 }
 
-func TestTickMovesTaskToWaitingUserDecisionWhenDecisionRequiresUser(t *testing.T) {
+func TestTickMovesTaskToWaitingUserInputWhenDecisionRequiresUser(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
@@ -111,8 +111,8 @@ func TestTickMovesTaskToWaitingUserDecisionWhenDecisionRequiresUser(t *testing.T
 		UserRequest:           "Implement orchestrator",
 		CreatedBy:             "tester",
 		RemoteWorkdir:         "/srv/backend",
+		TMUXSessionName:       "alterego-task-wait",
 		RemoteCodexSessionID:  "session-wait",
-		RemoteProcessIdentity: "pid-200",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{Summary: "Two implementation approaches are possible"}
 	service.decider.(*fakeDecisionEngine).result = DecisionResult{
@@ -134,8 +134,8 @@ func TestTickMovesTaskToWaitingUserDecisionWhenDecisionRequiresUser(t *testing.T
 	if err != nil {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
-	if persisted.Status != StatusWaitingUserDecision {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserDecision)
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
 	}
 	if persisted.AwaitingQuestion == nil || !strings.Contains(persisted.AwaitingQuestion.QuestionText, "Choose") {
 		t.Fatalf("persisted.AwaitingQuestion = %#v, want question", persisted.AwaitingQuestion)
@@ -157,12 +157,12 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 		TemplateID:            "feature_dev",
 		RepositoryID:          "repo_backend",
 		MachineID:             "machine_a",
-		Status:                StatusWaitingUserDecision,
+		Status:                StatusWaitingUserInput,
 		UserRequest:           "Implement orchestrator",
 		CreatedBy:             "tester",
 		RemoteWorkdir:         "/srv/backend",
+		TMUXSessionName:       "alterego-task-reply",
 		RemoteCodexSessionID:  "session-reply",
-		RemoteProcessIdentity: "pid-300",
 		AwaitingQuestion: &AwaitingQuestion{
 			QuestionText: "Which approach?",
 			AskedAt:      time.Now().UTC().Add(-time.Minute),
@@ -188,7 +188,7 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 	}
 }
 
-func TestRecoverDetachedTaskAttachesLiveSessionBeforeResume(t *testing.T) {
+func TestRecoverDetachedTaskUsesTMUXSessionWhenPresent(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
@@ -204,17 +204,11 @@ func TestRecoverDetachedTaskAttachesLiveSessionBeforeResume(t *testing.T) {
 		UserRequest:           "Resume detached task",
 		CreatedBy:             "tester",
 		RemoteWorkdir:         "/srv/backend",
+		TMUXSessionName:       "alterego-task-detached",
 		RemoteCodexSessionID:  "session-detached",
-		RemoteProcessIdentity: "pid-old",
 	})
 	runner := service.runner.(*fakeServiceRunner)
-	runner.probeResult = ProbeResult{Alive: true, ProcessIdentity: "pid-live"}
-	runner.attachSession = RemoteSession{
-		MachineID:       "machine_a",
-		Workdir:         "/srv/backend",
-		CodexSessionID:  "session-detached",
-		ProcessIdentity: "pid-live",
-	}
+	runner.hasSession = true
 
 	if err := service.TickOnce(ctx); err != nil {
 		t.Fatalf("TickOnce returned error: %v", err)
@@ -228,7 +222,7 @@ func TestRecoverDetachedTaskAttachesLiveSessionBeforeResume(t *testing.T) {
 		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
 	}
 
-	wantCalls := []string{"probe", "attach"}
+	wantCalls := []string{"has-session"}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("calls = %v, want %v", runner.calls, wantCalls)
 	}
@@ -250,8 +244,8 @@ func TestStopMarksTaskStoppedAndCallsRunner(t *testing.T) {
 		UserRequest:           "Stop me",
 		CreatedBy:             "tester",
 		RemoteWorkdir:         "/srv/backend",
+		TMUXSessionName:       "alterego-task-stop",
 		RemoteCodexSessionID:  "session-stop",
-		RemoteProcessIdentity: "pid-stop",
 	})
 
 	if err := service.Stop(ctx, task.TaskID); err != nil {
@@ -354,43 +348,31 @@ type fakeServiceRunner struct {
 	calls []string
 
 	startSession  RemoteSession
-	probeResult   ProbeResult
-	attachSession RemoteSession
-	resumeSession RemoteSession
 	outputWindow  OutputWindow
+	hasSession    bool
 }
 
-func (f *fakeServiceRunner) StartNewSession(context.Context, StartRequest) (RemoteSession, error) {
+func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartRequest) (RemoteSession, error) {
 	f.calls = append(f.calls, "start")
 	return f.startSession, nil
 }
 
-func (f *fakeServiceRunner) ProbeSession(context.Context, ProbeRequest) (ProbeResult, error) {
-	f.calls = append(f.calls, "probe")
-	return f.probeResult, nil
-}
-
-func (f *fakeServiceRunner) AttachLiveSession(context.Context, AttachRequest) (RemoteSession, error) {
-	f.calls = append(f.calls, "attach")
-	return f.attachSession, nil
-}
-
-func (f *fakeServiceRunner) ResumeExitedSession(context.Context, ResumeRequest) (RemoteSession, error) {
-	f.calls = append(f.calls, "resume")
-	return f.resumeSession, nil
-}
-
-func (f *fakeServiceRunner) SendInput(context.Context, RemoteSession, string) error {
+func (f *fakeServiceRunner) SendInteractiveInput(context.Context, RemoteSession, string) error {
 	f.calls = append(f.calls, "send")
 	return nil
 }
 
-func (f *fakeServiceRunner) ReadWindow(context.Context, RemoteSession) (OutputWindow, error) {
-	f.calls = append(f.calls, "read")
+func (f *fakeServiceRunner) CaptureOutput(context.Context, RemoteSession) (OutputWindow, error) {
+	f.calls = append(f.calls, "capture")
 	return f.outputWindow, nil
 }
 
-func (f *fakeServiceRunner) StopTask(context.Context, RemoteSession) error {
+func (f *fakeServiceRunner) HasSession(context.Context, RemoteSession) (bool, error) {
+	f.calls = append(f.calls, "has-session")
+	return f.hasSession, nil
+}
+
+func (f *fakeServiceRunner) StopSession(context.Context, RemoteSession) error {
 	f.calls = append(f.calls, "stop")
 	return nil
 }

@@ -69,7 +69,7 @@ func countsTowardMachineLoad(status TaskStatus) bool {
 
 func isRunnable(status TaskStatus) bool {
 	switch status {
-	case StatusWaitingUserDecision, StatusCompleted, StatusFailed, StatusStopped:
+	case StatusWaitingUserInput, StatusCompleted, StatusFailed, StatusStopped:
 		return false
 	default:
 		return true

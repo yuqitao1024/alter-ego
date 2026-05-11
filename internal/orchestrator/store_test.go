@@ -53,8 +53,9 @@ func TestStoreUpdatesTaskStatusAndSessionFields(t *testing.T) {
 
 	task.Status = StatusRunning
 	task.RemoteWorkdir = "/srv/repos/backend/.codex/task-002"
+	task.TMUXSessionName = "alterego-task-002"
 	task.RemoteCodexSessionID = "codex-session-002"
-	task.RemoteProcessIdentity = "pid:2002"
+	task.LastScreenDigest = "digest:2002"
 	task.UpdatedAt = task.UpdatedAt.Add(2 * time.Minute)
 	if err := store.UpdateTask(ctx, task); err != nil {
 		t.Fatalf("UpdateTask returned error: %v", err)
@@ -73,7 +74,7 @@ func TestStorePersistsAwaitingQuestion(t *testing.T) {
 	store := openTestStore(t)
 	defer store.Close()
 
-	task := sampleTaskRun("task-003", StatusWaitingUserDecision)
+	task := sampleTaskRun("task-003", StatusWaitingUserInput)
 	task.AwaitingQuestion = &AwaitingQuestion{
 		QuestionText:   "Choose implementation approach",
 		OptionsSummary: "A: refactor parser; B: add translation layer",
@@ -106,9 +107,10 @@ func TestStoreListsActiveTasksForScheduler(t *testing.T) {
 	tasks := []TaskRun{
 		sampleTaskRun("task-pending", StatusPending),
 		sampleTaskRun("task-running", StatusRunning),
-		sampleTaskRun("task-waiting", StatusWaitingUserDecision),
+		sampleTaskRun("task-waiting", StatusWaitingUserInput),
 		sampleTaskRun("task-detached", StatusDetached),
-		sampleTaskRun("task-probing", StatusProbing),
+		sampleTaskRun("task-preparing", StatusPreparingWorkspace),
+		sampleTaskRun("task-starting", StatusStartingSession),
 		sampleTaskRun("task-completed", StatusCompleted),
 		sampleTaskRun("task-failed", StatusFailed),
 		sampleTaskRun("task-stopped", StatusStopped),
@@ -129,7 +131,7 @@ func TestStoreListsActiveTasksForScheduler(t *testing.T) {
 		gotByID[task.TaskID] = task
 	}
 
-	wantActiveIDs := []string{"task-pending", "task-running", "task-waiting", "task-detached", "task-probing"}
+	wantActiveIDs := []string{"task-pending", "task-running", "task-waiting", "task-detached", "task-preparing", "task-starting"}
 	if len(gotByID) != len(wantActiveIDs) {
 		t.Fatalf("len(ListActiveTasks) = %d, want %d", len(gotByID), len(wantActiveIDs))
 	}
@@ -170,8 +172,9 @@ func sampleTaskRun(taskID string, status TaskStatus) TaskRun {
 		UserRequest:           "Implement persisted store",
 		CreatedBy:             "user_123",
 		RemoteWorkdir:         "",
+		TMUXSessionName:       "",
 		RemoteCodexSessionID:  "",
-		RemoteProcessIdentity: "",
+		LastScreenDigest:      "",
 		LastInput:             "Continue with Task 2",
 		LastOutputSummary:     "Store not started yet",
 		CreatedAt:             now,
@@ -200,6 +203,9 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	if got.RemoteWorkdir != want.RemoteWorkdir {
 		t.Fatalf("RemoteWorkdir = %q, want %q", got.RemoteWorkdir, want.RemoteWorkdir)
 	}
+	if got.TMUXSessionName != want.TMUXSessionName {
+		t.Fatalf("TMUXSessionName = %q, want %q", got.TMUXSessionName, want.TMUXSessionName)
+	}
 	if got.RemoteCodexSessionID != want.RemoteCodexSessionID {
 		t.Fatalf("RemoteCodexSessionID = %q, want %q", got.RemoteCodexSessionID, want.RemoteCodexSessionID)
 	}
@@ -209,8 +215,8 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	if got.CreatedBy != want.CreatedBy {
 		t.Fatalf("CreatedBy = %q, want %q", got.CreatedBy, want.CreatedBy)
 	}
-	if got.RemoteProcessIdentity != want.RemoteProcessIdentity {
-		t.Fatalf("RemoteProcessIdentity = %q, want %q", got.RemoteProcessIdentity, want.RemoteProcessIdentity)
+	if got.LastScreenDigest != want.LastScreenDigest {
+		t.Fatalf("LastScreenDigest = %q, want %q", got.LastScreenDigest, want.LastScreenDigest)
 	}
 	if got.LastInput != want.LastInput {
 		t.Fatalf("LastInput = %q, want %q", got.LastInput, want.LastInput)
