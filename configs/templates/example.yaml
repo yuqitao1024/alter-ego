@@ -1,0 +1,5 @@
+id: feature_dev
+repository_id: repo_backend
+display_name: Feature Development
+description: Default feature workflow for scoped repository changes.
+workflow_path: docs/workflows/example-feature-dev.md

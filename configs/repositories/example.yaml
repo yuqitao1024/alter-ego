@@ -1,0 +1,6 @@
+id: repo_backend
+display_name: Backend Repo
+remote_path: /srv/backend
+default_branch: main
+machine_ids:
+  - machine_a

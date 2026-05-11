@@ -1,0 +1,5 @@
+id: machine_a
+display_name: Primary Build Machine
+host: build-a.example.com
+port: 22
+user: codex
