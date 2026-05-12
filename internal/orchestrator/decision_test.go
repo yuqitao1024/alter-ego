@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,91 +69,110 @@ func TestDecisionContextIncludesRuntimeTaskFields(t *testing.T) {
 	}
 }
 
-func TestDecisionDetectorRecognizesRequirementClarification(t *testing.T) {
+func TestModelDecisionEngineReturnsWait(t *testing.T) {
 	t.Parallel()
 
-	engine := NewHeuristicDecisionEngine()
+	engine := NewModelDecisionEngine(&fakeDecisionModel{
+		response: `{"action":"wait","decision_type":"none","summary":"Codex is still working."}`,
+	})
+
 	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
-		Task: TaskRun{
-			LastOutputSummary: "I need clarification on the requirement before I proceed.",
-		},
+		Task:         TaskRun{TaskID: "task-wait", LastOutputSummary: "working"},
+		OutputWindow: OutputWindow{RawOutput: "Working", Summary: "working"},
+		WorkflowText: "workflow",
+		UserRequest:  "request",
 	})
 	if err != nil {
 		t.Fatalf("DecideNextStep returned error: %v", err)
 	}
-	if result.DecisionType != "requirement_clarification" {
-		t.Fatalf("DecisionType = %q, want requirement_clarification", result.DecisionType)
-	}
-	if result.Question == nil || result.Question.QuestionType != "requirement_clarification" {
-		t.Fatalf("Question = %#v, want requirement_clarification", result.Question)
+	if result.Action != DecisionActionWait {
+		t.Fatalf("Action = %q, want %q", result.Action, DecisionActionWait)
 	}
 }
 
-func TestDecisionDetectorRecognizesScopeConfirmation(t *testing.T) {
+func TestModelDecisionEngineReturnsAskUser(t *testing.T) {
 	t.Parallel()
 
-	engine := NewHeuristicDecisionEngine()
+	engine := NewModelDecisionEngine(&fakeDecisionModel{
+		response: `{"action":"ask_user","decision_type":"implementation_solution_choice","summary":"Need user choice","user_question":"Choose option 1 or 2."}`,
+	})
+
 	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
-		Task: TaskRun{
-			LastOutputSummary: "Please confirm the scope before I make the change.",
+		Task: TaskRun{TaskID: "task-1", LastOutputSummary: "Need a choice"},
+		OutputWindow: OutputWindow{
+			RawOutput: "Choose 1 or 2",
+			Summary:   "Need a choice",
 		},
+		WorkflowText: "workflow",
+		UserRequest:  "request",
 	})
 	if err != nil {
 		t.Fatalf("DecideNextStep returned error: %v", err)
 	}
-	if result.DecisionType != "scope_confirmation" {
-		t.Fatalf("DecisionType = %q, want scope_confirmation", result.DecisionType)
+	if result.Action != DecisionActionAskUser {
+		t.Fatalf("Action = %q, want %q", result.Action, DecisionActionAskUser)
+	}
+	if result.Question == nil || result.Question.QuestionText != "Choose option 1 or 2." {
+		t.Fatalf("Question = %#v", result.Question)
 	}
 }
 
-func TestDecisionDetectorRecognizesImplementationSolutionChoice(t *testing.T) {
+func TestModelDecisionEngineReturnsReplyToCodex(t *testing.T) {
 	t.Parallel()
 
-	engine := NewHeuristicDecisionEngine()
+	engine := NewModelDecisionEngine(&fakeDecisionModel{
+		response: `{"action":"reply_to_codex","decision_type":"none","summary":"Continue with issue 30","codex_reply":"切回 issue #30 继续开发。"}`,
+	})
+
 	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
-		Task: TaskRun{
-			LastOutputSummary: "Which approach should I take for the implementation?",
+		Task: TaskRun{TaskID: "task-2", LastOutputSummary: "Need a choice"},
+		OutputWindow: OutputWindow{
+			RawOutput: "Choose 1 or 2",
+			Summary:   "Need a choice",
 		},
+		WorkflowText: "workflow",
+		UserRequest:  "request",
 	})
 	if err != nil {
 		t.Fatalf("DecideNextStep returned error: %v", err)
 	}
-	if result.DecisionType != "implementation_solution_choice" {
-		t.Fatalf("DecisionType = %q, want implementation_solution_choice", result.DecisionType)
+	if result.Action != DecisionActionReplyToCodex {
+		t.Fatalf("Action = %q, want %q", result.Action, DecisionActionReplyToCodex)
+	}
+	if result.CodexReply != "切回 issue #30 继续开发。" {
+		t.Fatalf("CodexReply = %q", result.CodexReply)
 	}
 }
 
-func TestDecisionDetectorRecognizesMissingContext(t *testing.T) {
+func TestModelDecisionEngineReturnsCompleteTask(t *testing.T) {
 	t.Parallel()
 
-	engine := NewHeuristicDecisionEngine()
+	engine := NewModelDecisionEngine(&fakeDecisionModel{
+		response: `{"action":"complete_task","decision_type":"none","summary":"Task completed successfully."}`,
+	})
+
 	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
-		Task: TaskRun{
-			LastOutputSummary: "I am missing context about the expected API behavior.",
+		Task: TaskRun{TaskID: "task-3", LastOutputSummary: "Done"},
+		OutputWindow: OutputWindow{
+			RawOutput: "Implementation finished. Waiting for next instruction.",
+			Summary:   "Done",
 		},
+		WorkflowText: "workflow",
+		UserRequest:  "request",
 	})
 	if err != nil {
 		t.Fatalf("DecideNextStep returned error: %v", err)
 	}
-	if result.DecisionType != "missing_context" {
-		t.Fatalf("DecisionType = %q, want missing_context", result.DecisionType)
+	if result.Action != DecisionActionCompleteTask {
+		t.Fatalf("Action = %q, want %q", result.Action, DecisionActionCompleteTask)
 	}
 }
 
-func TestEscalationDetectorRecognizesSupportedUserInputCategories(t *testing.T) {
-	t.Parallel()
+type fakeDecisionModel struct {
+	response string
+	err      error
+}
 
-	for _, decisionType := range []string{
-		"requirement_clarification",
-		"scope_confirmation",
-		"implementation_solution_choice",
-		"missing_context",
-	} {
-		if !ShouldEscalateDecision(decisionType) {
-			t.Fatalf("ShouldEscalateDecision returned false for %q", decisionType)
-		}
-	}
-	if ShouldEscalateDecision("continue_execution") {
-		t.Fatal("ShouldEscalateDecision returned true for continue_execution")
-	}
+func (f *fakeDecisionModel) Complete(context.Context, string, string) (string, error) {
+	return f.response, f.err
 }

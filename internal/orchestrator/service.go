@@ -327,17 +327,29 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		Task:         task,
 		WorkflowText: workflowText,
 		UserRequest:  task.UserRequest,
+		OutputWindow: window,
 	})
 	if err != nil {
 		return fmt.Errorf("decide next step for task %q: %w", task.TaskID, err)
 	}
 
 	task.LastOutputSummary = coalesceString(result.Summary, task.LastOutputSummary)
-	if ShouldEscalateDecision(result.DecisionType) {
+	switch result.Action {
+	case DecisionActionAskUser:
+		question := result.Question
+		if question == nil {
+			question = &AwaitingQuestion{
+				QuestionText:   firstNonEmpty(strings.TrimSpace(task.LastOutputSummary), strings.TrimSpace(window.Summary), strings.TrimSpace(window.RawOutput)),
+				OptionsSummary: "",
+				ContextExcerpt: strings.TrimSpace(window.Summary),
+				QuestionType:   coalesceString(result.DecisionType, "missing_context"),
+				AskedAt:        s.now(),
+			}
+		}
 		task.Status = StatusWaitingUserInput
 		task.ActiveResponderName = ""
 		task.ActiveResponderScreenDigest = ""
-		task.AwaitingQuestion = result.Question
+		task.AwaitingQuestion = question
 		task.UpdatedAt = s.now()
 		if err := s.store.UpdateTask(ctx, task); err != nil {
 			return err
@@ -354,19 +366,39 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 			}
 		}
 		return nil
-	}
-
-	if strings.TrimSpace(result.NextInput) != "" {
-		if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), result.NextInput); err != nil {
-			return fmt.Errorf("send remote input for task %q: %w", task.TaskID, err)
+	case DecisionActionReplyToCodex:
+		reply := strings.TrimSpace(firstNonEmpty(result.CodexReply, result.NextInput))
+		if reply != "" {
+			if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), reply); err != nil {
+				return fmt.Errorf("send remote input for task %q: %w", task.TaskID, err)
+			}
+			task.LastInput = reply
 		}
-		task.LastInput = result.NextInput
+		task.ActiveResponderName = ""
+		task.ActiveResponderScreenDigest = ""
+		task.Status = StatusRunning
+		task.UpdatedAt = s.now()
+		return s.store.UpdateTask(ctx, task)
+	case DecisionActionCompleteTask:
+		if err := s.runner.StopSession(ctx, sessionFromTask(task)); err != nil {
+			return fmt.Errorf("stop completed task %q: %w", task.TaskID, err)
+		}
+		task.Status = StatusCompleted
+		task.ActiveResponderName = ""
+		task.ActiveResponderScreenDigest = ""
+		task.UpdatedAt = s.now()
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, task.TaskID, "task_completed", coalesceString(result.Summary, "task completed"))
+	case DecisionActionWait, "":
+		task.ActiveResponderName = ""
+		task.ActiveResponderScreenDigest = ""
+		task.Status = StatusRunning
+		task.UpdatedAt = s.now()
+		return s.store.UpdateTask(ctx, task)
 	}
-	task.ActiveResponderName = ""
-	task.ActiveResponderScreenDigest = ""
-
-	task.UpdatedAt = s.now()
-	return s.store.UpdateTask(ctx, task)
+	return fmt.Errorf("unsupported decision action %q for task %q", result.Action, task.TaskID)
 }
 
 func (s *Service) lookupTemplate(templateID string) (*TemplateConfig, error) {

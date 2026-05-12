@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current non-interactive remote Codex control path with a `SSH + tmux + codex` interactive runner that preserves multi-turn requirement discussion and long-lived remote task sessions.
 
-**Architecture:** Keep Lark as the command gateway and SQLite as the persistence layer. Preserve the existing orchestrator shape, but replace the `exec/resume` runner model with a `tmux`-backed interactive session model. Task startup remains deterministic code; ongoing progress is driven by `tmux capture-pane`, `tmux send-keys`, and `tmux has-session`.
+**Architecture:** Keep Lark as the command gateway and SQLite as the persistence layer. Preserve the existing orchestrator shape, but replace the `exec/resume` runner model with a `tmux`-backed interactive session model. Task startup remains deterministic code; ongoing progress is driven by `tmux capture-pane`, `tmux send-keys`, and `tmux has-session`. Deterministic terminal responders stay rule-based, but every non-deterministic Codex screen is arbitrated by the configured LLM. There is no heuristic business-decision fallback.
 
 **Tech Stack:** Go 1.23+, standard library, `database/sql` with `modernc.org/sqlite`, existing Lark adapter, SSH transport layer, remote `tmux`, remote `codex`
 
@@ -241,7 +241,7 @@ Run:
 go test -count=1 ./internal/orchestrator
 ```
 
-Expected: FAIL because the decision path still relies on narrow heuristic category matching.
+Expected: FAIL because the decision path still relies on heuristic business-decision handling rather than mandatory model arbitration.
 
 - [ ] **Step 3: Implement the arbitration changes**
 
@@ -249,9 +249,9 @@ Update:
 
 - arbitration result types
 - prompt builder and JSON contract
-- waiting-vs-working gate helpers
 - model-backed arbitrator using the configured LLM provider
 - completion signaling when Codex has finished the requested workflow and is only awaiting further operator input
+- startup validation that task orchestration has a configured model provider, API key, and model name
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -306,7 +306,7 @@ Update the service so that:
 - terminal responder escalations persist responder name and screen digest
 - `/task reply` records the resolved responder and starts a short cooldown window
 - repeated `capture-pane` output for the same responder/screen digest is ignored during cooldown so stale screens do not immediately re-open the same question
-- non-responder prompts only invoke model arbitration when Codex appears to be waiting for input
+- every non-responder prompt invokes model arbitration
 - model arbitration may either ask the user, reply directly to Codex, or mark the task completed
 
 - [ ] **Step 4: Run test to verify it passes**

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,20 +10,32 @@ import (
 )
 
 const fixedDecisionRules = `You are Alter Ego's remote Codex task coordinator.
-- Advance remote Codex work deterministically.
+- Advance remote Codex work deterministically after terminal responders have already been applied.
 - Ask the user when the task requires requirement clarification, scope confirmation, an implementation solution choice, or missing context.
-- Continue automatically for all other decisions.
-- Summarize remote progress clearly before asking for input.`
+- If Codex is still working, return wait.
+- If Codex is waiting for a direct operator answer, either ask the user or reply to Codex directly.
+- If the task is already complete and Codex is only waiting for the next operator instruction, return complete_task.
+- Return strict JSON with one action: reply_to_codex, ask_user, complete_task, or wait.`
+
+const (
+	DecisionActionWait         = "wait"
+	DecisionActionAskUser      = "ask_user"
+	DecisionActionReplyToCodex = "reply_to_codex"
+	DecisionActionCompleteTask = "complete_task"
+)
 
 type DecisionContext struct {
 	Task         TaskRun
 	WorkflowText string
 	UserRequest  string
+	OutputWindow OutputWindow
 }
 
 type DecisionResult struct {
+	Action       string
 	DecisionType string
 	NextInput    string
+	CodexReply   string
 	Summary      string
 	Question     *AwaitingQuestion
 }
@@ -31,35 +44,69 @@ type DecisionEngine interface {
 	DecideNextStep(ctx context.Context, in DecisionContext) (DecisionResult, error)
 }
 
-type HeuristicDecisionEngine struct{}
-
-func NewHeuristicDecisionEngine() *HeuristicDecisionEngine {
-	return &HeuristicDecisionEngine{}
+type DecisionModel interface {
+	Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 }
 
-func (e *HeuristicDecisionEngine) DecideNextStep(ctx context.Context, in DecisionContext) (DecisionResult, error) {
-	_ = ctx
+type ModelDecisionEngine struct {
+	model DecisionModel
+}
 
-	summary := strings.TrimSpace(in.Task.LastOutputSummary)
-	lower := strings.ToLower(summary)
-	if decisionType := detectDecisionType(lower); decisionType != "" {
-		return DecisionResult{
-			DecisionType: decisionType,
-			Summary:      summary,
-			Question: &AwaitingQuestion{
-				QuestionText:   summary,
-				OptionsSummary: "",
-				ContextExcerpt: summary,
-				QuestionType:   decisionType,
-				AskedAt:        time.Now().UTC(),
-			},
-		}, nil
+func NewModelDecisionEngine(model DecisionModel) *ModelDecisionEngine {
+	return &ModelDecisionEngine{
+		model: model,
+	}
+}
+
+type decisionPayload struct {
+	Action       string `json:"action"`
+	DecisionType string `json:"decision_type"`
+	Summary      string `json:"summary"`
+	CodexReply   string `json:"codex_reply"`
+	UserQuestion string `json:"user_question"`
+}
+
+func (e *ModelDecisionEngine) DecideNextStep(ctx context.Context, in DecisionContext) (DecisionResult, error) {
+	if e == nil || e.model == nil {
+		return DecisionResult{}, fmt.Errorf("decision model is not configured")
 	}
 
-	return DecisionResult{
-		DecisionType: "continue_execution",
-		Summary:      summary,
-	}, nil
+	raw, err := e.model.Complete(ctx, fixedDecisionRules, BuildDecisionPrompt(in))
+	if err != nil {
+		return DecisionResult{}, err
+	}
+
+	var payload decisionPayload
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &payload); err != nil {
+		return DecisionResult{}, fmt.Errorf("parse decision JSON: %w", err)
+	}
+
+	result := DecisionResult{
+		Action:       strings.TrimSpace(payload.Action),
+		DecisionType: strings.TrimSpace(payload.DecisionType),
+		Summary:      strings.TrimSpace(payload.Summary),
+		CodexReply:   strings.TrimSpace(payload.CodexReply),
+	}
+	if result.Action == DecisionActionAskUser {
+		questionText := strings.TrimSpace(payload.UserQuestion)
+		if questionText == "" {
+			questionText = strings.TrimSpace(in.Task.LastOutputSummary)
+		}
+		result.Question = &AwaitingQuestion{
+			QuestionText:   questionText,
+			OptionsSummary: "",
+			ContextExcerpt: strings.TrimSpace(in.Task.LastOutputSummary),
+			QuestionType:   coalesceString(result.DecisionType, "missing_context"),
+			AskedAt:        time.Now().UTC(),
+		}
+	}
+	if result.Action == "" {
+		result.Action = DecisionActionWait
+	}
+	if result.Summary == "" {
+		result.Summary = strings.TrimSpace(in.Task.LastOutputSummary)
+	}
+	return result, nil
 }
 
 func LoadWorkflow(path string) (string, error) {
@@ -95,66 +142,9 @@ func BuildDecisionPrompt(in DecisionContext) string {
 	builder.WriteString(in.Task.LastInput)
 	builder.WriteString("\nlast_output_summary: ")
 	builder.WriteString(in.Task.LastOutputSummary)
+	builder.WriteString("\ncompletion_rule: If the requested workflow is already complete and Codex only needs another operator prompt, return complete_task.")
+	builder.WriteString("\nraw_terminal_excerpt:\n")
+	builder.WriteString(strings.TrimSpace(in.OutputWindow.RawOutput))
+	builder.WriteString("\n\nReturn JSON only with fields: action, decision_type, summary, codex_reply, user_question.")
 	return builder.String()
-}
-
-func ShouldEscalateDecision(decisionType string) bool {
-	switch strings.TrimSpace(decisionType) {
-	case "requirement_clarification", "scope_confirmation", "implementation_solution_choice", "missing_context":
-		return true
-	default:
-		return false
-	}
-}
-
-func detectDecisionType(text string) string {
-	switch {
-	case containsAny(text, []string{
-		"need clarification",
-		"clarify the requirement",
-		"clarification on the requirement",
-		"clarify before i proceed",
-		"需要澄清",
-		"请澄清",
-	}):
-		return "requirement_clarification"
-	case containsAny(text, []string{
-		"confirm the scope",
-		"scope confirmation",
-		"please confirm the scope",
-		"范围确认",
-		"确认范围",
-	}):
-		return "scope_confirmation"
-	case containsAny(text, []string{
-		"which approach",
-		"choose",
-		"option",
-		"implementation choice",
-		"implementation options",
-		"方案",
-		"怎么实现",
-	}):
-		return "implementation_solution_choice"
-	case containsAny(text, []string{
-		"missing context",
-		"need more context",
-		"need additional context",
-		"not enough context",
-		"缺少上下文",
-		"信息不足",
-	}):
-		return "missing_context"
-	default:
-		return ""
-	}
-}
-
-func containsAny(text string, markers []string) bool {
-	for _, marker := range markers {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
 }

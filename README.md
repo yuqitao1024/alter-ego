@@ -57,6 +57,8 @@ Supported commands:
 
 Remote Codex orchestration is configured from repository files and persisted in SQLite. Each task runs inside a long-lived remote `tmux` session, and Alter Ego drives Codex by reading the session screen and sending follow-up input back into the same session.
 
+Unlike the general chat handler, remote task orchestration requires a configured LLM. Deterministic terminal handshakes such as trust prompts and usage-limit prompts are still handled by fixed responders, but every non-deterministic Codex interaction is arbitrated by the configured model. The task subsystem will fail to start if `ALTER_EGO_LLM_API_KEY` or `ALTER_EGO_LLM_MODEL` is missing.
+
 Optional task environment variables:
 
 ```sh
@@ -136,6 +138,17 @@ Task state and operator audit data are stored in SQLite:
 - `task_questions`
 
 Replies from `/task reply` are injected back into the live remote session rather than starting a new Codex run.
+
+Task decision flow:
+
+1. capture the current `tmux` screen;
+2. run deterministic responders for known terminal handshakes;
+3. if no responder applies, send the workflow, task context, and terminal excerpt to the configured LLM;
+4. the LLM must return one of:
+   - `wait`
+   - `reply_to_codex`
+   - `ask_user`
+   - `complete_task`
 
 Run locally:
 

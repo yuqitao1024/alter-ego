@@ -39,6 +39,7 @@ func run() error {
 		RegistryRoot: taskRegistryRoot(),
 		DBPath:       taskDBPath(),
 		Notifier:     lark.NewTaskNotifier(larkCfg),
+		LLMConfig:    agentCfg,
 	})
 	if err != nil {
 		return err
@@ -60,6 +61,7 @@ type taskSubsystemConfig struct {
 	RegistryRoot string
 	DBPath       string
 	Notifier     orchestrator.TaskNotifier
+	LLMConfig    agent.Config
 }
 
 type taskSubsystem struct {
@@ -96,12 +98,17 @@ func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubs
 		return *machine, nil
 	})
 
+	decider, err := buildDecisionEngine(cfg.LLMConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	service := orchestrator.NewService(
 		store,
 		registry,
 		orchestrator.NewScheduler(),
 		runner,
-		orchestrator.NewHeuristicDecisionEngine(),
+		decider,
 	)
 	service.SetNotifier(cfg.Notifier)
 
@@ -153,4 +160,33 @@ func taskDBPath() string {
 		return path
 	}
 	return ".alterego/tasks.db"
+}
+
+type decisionModelAdapter struct {
+	model    string
+	provider agent.Provider
+}
+
+func (a decisionModelAdapter) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	return a.provider.CreateResponse(ctx, agent.ChatRequest{
+		Model: a.model,
+		Messages: []agent.ChatMessage{
+			{Role: a.provider.SystemRole(), Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
+		},
+	})
+}
+
+func buildDecisionEngine(cfg agent.Config) (orchestrator.DecisionEngine, error) {
+	if cfg.APIKey == "" || cfg.Model == "" {
+		return nil, errors.New("task orchestration requires ALTER_EGO_LLM_API_KEY and ALTER_EGO_LLM_MODEL")
+	}
+	provider := agent.NewProvider(cfg, nil)
+	if provider == nil {
+		return nil, errors.New("task orchestration decision provider is not available")
+	}
+	return orchestrator.NewModelDecisionEngine(decisionModelAdapter{
+		model:    cfg.Model,
+		provider: provider,
+	}), nil
 }

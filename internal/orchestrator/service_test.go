@@ -175,7 +175,16 @@ func TestTickMovesTaskToWaitingUserInputWhenDecisionRequiresUser(t *testing.T) {
 		RemoteCodexSessionID: "session-wait",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{Summary: "Two implementation approaches are possible"}
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: `I found two implementation approaches.
+
+Which approach should I take for the implementation?
+1. Event-driven
+2. Polling`,
+		Summary: "Two implementation approaches are possible",
+	}
 	service.decider.(*fakeDecisionEngine).result = DecisionResult{
+		Action:       "ask_user",
 		DecisionType: "implementation_solution_choice",
 		Summary:      "Need user to choose approach",
 		Question: &AwaitingQuestion{
@@ -202,6 +211,152 @@ func TestTickMovesTaskToWaitingUserInputWhenDecisionRequiresUser(t *testing.T) {
 	}
 	if notifier.lastTaskID != task.TaskID || notifier.lastUserID != "tester" {
 		t.Fatalf("notifier captured task=%q user=%q", notifier.lastTaskID, notifier.lastUserID)
+	}
+}
+
+func TestTickKeepsTaskRunningWhenDecisionEngineReturnsWait(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-working",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-working",
+		RemoteCodexSessionID: "session-working",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: "• Working (3s • esc to interrupt)",
+		Summary:   "Inspecting repository state",
+	}
+	decider := service.decider.(*fakeDecisionEngine)
+	decider.result = DecisionResult{
+		Action:  DecisionActionWait,
+		Summary: "Inspecting repository state",
+	}
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if decider.callCount != 1 {
+		t.Fatalf("decider.callCount = %d, want 1", decider.callCount)
+	}
+}
+
+func TestTickRepliesToCodexWhenDecisionEngineRequestsDirectReply(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-direct-reply",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-direct-reply",
+		RemoteCodexSessionID: "session-direct-reply",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: `当前状态有冲突，需要先对齐目标。
+
+你现在要我继续哪一条：
+1. 切回真正的 issue #30
+2. 继续围绕已经合并的 BlockReduce 做收尾/补充`,
+		Summary: "需要对齐目标并等待选择",
+	}
+	service.decider.(*fakeDecisionEngine).result = DecisionResult{
+		Action:       "reply_to_codex",
+		DecisionType: "none",
+		Summary:      "Continue with issue #30.",
+		CodexReply:   "切回 issue #30，继续开发 simt/std/span。",
+	}
+	runner := service.runner.(*fakeServiceRunner)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if persisted.LastInput != "切回 issue #30，继续开发 simt/std/span。" {
+		t.Fatalf("persisted.LastInput = %q", persisted.LastInput)
+	}
+	if !reflect.DeepEqual(runner.calls, []string{"capture", "send"}) {
+		t.Fatalf("runner.calls = %v, want [capture send]", runner.calls)
+	}
+}
+
+func TestTickMarksTaskCompletedWhenDecisionEngineRequestsCompletion(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-complete",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-complete",
+		RemoteCodexSessionID: "session-complete",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: `Implementation finished successfully.
+
+Waiting for next instruction.`,
+		Summary: "Implementation finished and waiting for next instruction.",
+	}
+	service.decider.(*fakeDecisionEngine).result = DecisionResult{
+		Action:  "complete_task",
+		Summary: "Task completed successfully.",
+	}
+	runner := service.runner.(*fakeServiceRunner)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusCompleted {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
+	}
+	if len(runner.calls) < 2 || runner.calls[0] != "capture" || runner.calls[1] != "stop" {
+		t.Fatalf("runner.calls = %v, want capture then stop", runner.calls)
 	}
 }
 
@@ -635,8 +790,14 @@ func TestLifecyclePersistsEventsAndQuestions(t *testing.T) {
 		}
 	}
 
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{Summary: "Please clarify the requirement before I proceed."}
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: `I need clarification on the requirement before I proceed.
+
+Please clarify the requirement before I proceed.`,
+		Summary: "Please clarify the requirement before I proceed.",
+	}
 	service.decider.(*fakeDecisionEngine).result = DecisionResult{
+		Action:       "ask_user",
 		DecisionType: "requirement_clarification",
 		Summary:      "Please clarify the requirement before I proceed.",
 		Question: &AwaitingQuestion{

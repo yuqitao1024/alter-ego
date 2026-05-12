@@ -36,7 +36,7 @@ Implement a repository-scoped remote task orchestration subsystem with these pro
 - multiple tasks are advanced through a round-robin scheduler;
 - user escalation happens when Codex asks for missing information, scope confirmation, or solution choice.
 
-This is a state-machine-driven system with model assistance, not a pure conversational workflow.
+This is a state-machine-driven system with mandatory model arbitration for non-deterministic Codex interactions, not a pure conversational workflow.
 
 ## Goals
 
@@ -117,22 +117,20 @@ Primary capabilities:
 Uses the repository/template workflow document plus runtime context to:
 
 - summarize remote progress for status reporting;
-- decide whether Codex is still executing, waiting for input, has completed, or is blocked;
-- arbitrate non-trivial Codex prompts when rule-based responders do not apply;
-- classify user-facing questions into escalation categories;
-- produce either a direct reply to Codex or a user-facing question.
+- interpret the current Codex screen after deterministic responders have had a chance to act;
+- arbitrate all non-deterministic Codex prompts through the configured LLM;
+- produce either a direct reply to Codex, a user-facing question, a completion signal, or a wait result.
 
-The model does not run on every tick. The orchestrator owns the gating logic:
+The orchestrator owns the execution order:
 
 1. run deterministic terminal responders first;
-2. if Codex still appears to be actively working, do nothing and keep the task in `running`;
-3. only if Codex appears to be waiting for input and no deterministic responder matched, call the model arbitrator;
-4. the orchestrator then applies the arbitrator result by either:
+2. if no responder matched, call the model arbitrator with the current terminal excerpt, workflow, and task context;
+3. apply the arbitrator result by either:
    - sending a direct reply back into the live Codex session;
    - moving the task into `waiting_user_input` and notifying the user in Lark;
    - or marking the task `completed`.
 
-The model may suggest escalation or completion, but the orchestrator owns the explicit transition into `waiting_user_input` or `completed`.
+Heuristic business-decision fallbacks are intentionally out of scope. If the deterministic responder layer cannot resolve the screen, the LLM arbitrator is required.
 
 ### 6. Persistence Layer
 
@@ -300,9 +298,8 @@ Scheduling rules:
 - tasks in `waiting_user_input` are skipped until the user replies;
 - each scheduling turn gives one task one bounded unit of progress:
   - capture recent output from the remote `tmux` session;
-  - interpret task state;
-  - decide whether Codex is still working, waiting for input, completed, detached, or failed;
-  - if waiting for input and no deterministic responder applies, invoke the model arbitrator;
+  - run deterministic responders first;
+  - if no responder applies, invoke the model arbitrator;
   - optionally send one next input.
 
 ## Remote Session Model
@@ -371,7 +368,7 @@ The decision model context should contain three ordered layers:
 These rules stay constant:
 
 - the coordinator is managing remote interactive Codex sessions;
-- it should continue automatically unless Codex is clearly waiting for input;
+- it should decide from the current terminal excerpt whether to wait, reply directly, ask the user, or complete the task;
 - it should summarize progress concisely;
 - it should not invent task state outside the orchestrator's known state.
 
@@ -393,6 +390,8 @@ Interpretation:
 - `ask_user`: set `waiting_user_input`, persist the question, and notify the user in Lark;
 - `complete_task`: record `summary`, mark the task `completed`, and stop advancing the session;
 - `wait`: take no action and keep the task `running`.
+
+The remote task subsystem requires a configured LLM provider and model. Without `ALTER_EGO_LLM_API_KEY` and `ALTER_EGO_LLM_MODEL`, task orchestration must fail fast at startup rather than silently degrading to heuristic behavior.
 
 ### Template Workflow Document
 

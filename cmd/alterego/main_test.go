@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/yuqitao1024/alter-ego/internal/agent"
 )
 
 func TestBuildTaskSubsystemRequiresConfigRoot(t *testing.T) {
@@ -28,6 +30,12 @@ func TestBuildTaskSubsystemBuildsService(t *testing.T) {
 	subsystem, err := buildTaskSubsystem(context.Background(), taskSubsystemConfig{
 		RegistryRoot: root,
 		DBPath:       filepath.Join(root, "orchestrator.db"),
+		LLMConfig: agent.Config{
+			Provider: "dashscope",
+			APIKey:   "test-key",
+			BaseURL:  "https://example.invalid/v1",
+			Model:    "test-model",
+		},
 	})
 	if err != nil {
 		t.Fatalf("buildTaskSubsystem returned error: %v", err)
@@ -42,6 +50,21 @@ func TestBuildTaskSubsystemBuildsService(t *testing.T) {
 	}
 	if subsystem.Registry == nil || subsystem.Registry.Templates["feature_dev"] == nil {
 		t.Fatalf("subsystem.Registry = %#v", subsystem.Registry)
+	}
+}
+
+func TestBuildTaskSubsystemRequiresLLMConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeTaskConfigFixtures(t, root)
+
+	_, err := buildTaskSubsystem(context.Background(), taskSubsystemConfig{
+		RegistryRoot: root,
+		DBPath:       filepath.Join(root, "orchestrator.db"),
+	})
+	if err == nil {
+		t.Fatal("buildTaskSubsystem returned nil error, want missing LLM config error")
 	}
 }
 
