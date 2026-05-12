@@ -332,7 +332,12 @@ func TestTickMovesTaskToWaitingUserInputWhenUsageLimitPromptDetected(t *testing.
 		RemoteCodexSessionID: "session-usage-limit",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: `You've hit your usage limit. Upgrade to Pro, purchase more credits or try again later.`,
+		RawOutput: `Do you trust the contents of this directory?
+1. Yes, continue
+2. No, quit
+Press enter to continue
+
+You've hit your usage limit. Upgrade to Pro, purchase more credits or try again later.`,
 		Summary:   "You've hit your usage limit.",
 	}
 	decider := service.decider.(*fakeDecisionEngine)

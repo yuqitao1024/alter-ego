@@ -16,17 +16,6 @@ type TerminalResponse struct {
 
 func EvaluateTerminalResponse(task TaskRun, window OutputWindow, now time.Time) TerminalResponse {
 	text := strings.ToLower(strings.TrimSpace(window.RawOutput + "\n" + window.Summary))
-	if looksLikeTrustDirectoryPrompt(text) {
-		digest := ScreenDigest(window)
-		if task.LastScreenDigest == digest && strings.TrimSpace(task.LastInput) == "1" {
-			return TerminalResponse{Name: "trust_directory_prompt", Handled: true}
-		}
-		return TerminalResponse{
-			Name:      "trust_directory_prompt",
-			Handled:   true,
-			AutoInput: "1",
-		}
-	}
 	if looksLikeLoginPrompt(text) {
 		return TerminalResponse{
 			Name:    "login_required_prompt",
@@ -51,6 +40,17 @@ func EvaluateTerminalResponse(task TaskRun, window OutputWindow, now time.Time) 
 				QuestionType:   "usage_limit",
 				AskedAt:        now,
 			},
+		}
+	}
+	if looksLikeTrustDirectoryPrompt(text) {
+		digest := ScreenDigest(window)
+		if task.LastScreenDigest == digest && strings.TrimSpace(task.LastInput) == "1" {
+			return TerminalResponse{Name: "trust_directory_prompt", Handled: true}
+		}
+		return TerminalResponse{
+			Name:      "trust_directory_prompt",
+			Handled:   true,
+			AutoInput: "1",
 		}
 	}
 	return TerminalResponse{}
