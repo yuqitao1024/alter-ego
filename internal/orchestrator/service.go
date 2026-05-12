@@ -263,6 +263,46 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 	if strings.TrimSpace(window.Summary) != "" {
 		task.LastOutputSummary = window.Summary
 	}
+	task.LastScreenDigest = ScreenDigest(window)
+
+	if response := EvaluateTerminalResponse(task, window, s.now()); response.Handled {
+		if response.AutoInput != "" {
+			if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), response.AutoInput); err != nil {
+				return fmt.Errorf("send terminal responder input for task %q: %w", task.TaskID, err)
+			}
+			task.LastInput = response.AutoInput
+			task.UpdatedAt = s.now()
+			if err := s.store.UpdateTask(ctx, task); err != nil {
+				return err
+			}
+			if err := s.appendEvent(ctx, task.TaskID, "terminal_responder_applied", response.Name); err != nil {
+				return err
+			}
+			return nil
+		}
+		if response.Question != nil {
+			task.Status = StatusWaitingUserInput
+			task.AwaitingQuestion = response.Question
+			task.UpdatedAt = s.now()
+			if err := s.store.UpdateTask(ctx, task); err != nil {
+				return err
+			}
+			if err := s.appendQuestion(ctx, task); err != nil {
+				return err
+			}
+			if err := s.appendEvent(ctx, task.TaskID, "waiting_user_input", fmt.Sprintf("waiting for %s", task.AwaitingQuestion.QuestionType)); err != nil {
+				return err
+			}
+			if s.notifier != nil {
+				if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
+					return fmt.Errorf("notify task question for %q: %w", task.TaskID, err)
+				}
+			}
+			return nil
+		}
+		task.UpdatedAt = s.now()
+		return s.store.UpdateTask(ctx, task)
+	}
 
 	result, err := s.decider.DecideNextStep(ctx, DecisionContext{
 		Task:         task,

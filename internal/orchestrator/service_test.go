@@ -205,6 +205,161 @@ func TestTickMovesTaskToWaitingUserInputWhenDecisionRequiresUser(t *testing.T) {
 	}
 }
 
+func TestTickAutoRespondsToTrustDirectoryPrompt(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-trust",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-trust",
+		RemoteCodexSessionID: "session-trust",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: `Do you trust the contents of this directory?
+1. Yes, continue
+2. No, quit
+Press enter to continue`,
+		Summary: "Do you trust the contents of this directory?",
+	}
+	decider := service.decider.(*fakeDecisionEngine)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if persisted.LastInput != "1" {
+		t.Fatalf("persisted.LastInput = %q, want 1", persisted.LastInput)
+	}
+	if persisted.LastScreenDigest == "" {
+		t.Fatal("persisted.LastScreenDigest is empty, want digest")
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
+
+	runner := service.runner.(*fakeServiceRunner)
+	wantCalls := []string{"capture", "send"}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("runner.calls = %v, want %v", runner.calls, wantCalls)
+	}
+}
+
+func TestTickMovesTaskToWaitingUserInputWhenLoginPromptDetected(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-login",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-login",
+		RemoteCodexSessionID: "session-login",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: `Welcome to Codex
+1. Sign in with ChatGPT
+2. Sign in with Device Code
+3. Provide your own API key`,
+		Summary: "Sign in with ChatGPT",
+	}
+	decider := service.decider.(*fakeDecisionEngine)
+	notifier := service.notifier.(*fakeTaskNotifier)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionType != "login_required" {
+		t.Fatalf("persisted.AwaitingQuestion = %#v, want login_required question", persisted.AwaitingQuestion)
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	}
+}
+
+func TestTickMovesTaskToWaitingUserInputWhenUsageLimitPromptDetected(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-usage-limit",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-usage-limit",
+		RemoteCodexSessionID: "session-usage-limit",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: `You've hit your usage limit. Upgrade to Pro, purchase more credits or try again later.`,
+		Summary:   "You've hit your usage limit.",
+	}
+	decider := service.decider.(*fakeDecisionEngine)
+	notifier := service.notifier.(*fakeTaskNotifier)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionType != "usage_limit" {
+		t.Fatalf("persisted.AwaitingQuestion = %#v, want usage_limit question", persisted.AwaitingQuestion)
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	}
+}
+
 func TestReplyResumesWaitingTask(t *testing.T) {
 	t.Parallel()
 
@@ -497,9 +652,11 @@ func (f *fakeServiceRunner) StopSession(context.Context, RemoteSession) error {
 
 type fakeDecisionEngine struct {
 	result DecisionResult
+	callCount int
 }
 
 func (f *fakeDecisionEngine) DecideNextStep(context.Context, DecisionContext) (DecisionResult, error) {
+	f.callCount++
 	return f.result, nil
 }
 
