@@ -130,6 +130,10 @@ Interactive task lifecycle:
 3. `starting_session`
 4. `running`
 5. `waiting_user_input` when Codex needs clarification, scope confirmation, an implementation choice, or missing context
+6. `detached` when the local operator loses attachment but the remote `tmux` session may still exist
+7. `completed` when the model arbitrator concludes the requested workflow is finished
+8. `failed` when startup, recovery, or remote execution cannot continue
+9. `stopped` when the operator explicitly stops the task
 
 Task state and operator audit data are stored in SQLite:
 
