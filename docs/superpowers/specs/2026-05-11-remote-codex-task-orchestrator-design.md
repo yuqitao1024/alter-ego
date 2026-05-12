@@ -297,8 +297,10 @@ Scheduling rules:
 - tasks in `running` or `detached` remain eligible for scheduling;
 - tasks in `waiting_user_input` are skipped until the user replies;
 - each scheduling turn gives one task one bounded unit of progress:
+  - probe the current `tmux` pane state;
   - capture recent output from the remote `tmux` session;
   - run deterministic responders first;
+  - if `tmux` is still alive but Codex has dropped back to the shell, issue one controlled `codex resume --last`;
   - if no responder applies, invoke the model arbitrator;
   - optionally send one next input.
 

@@ -11,6 +11,7 @@ type RemoteRunner interface {
 	CaptureOutput(ctx context.Context, session RemoteSession) (OutputWindow, error)
 	SendInteractiveInput(ctx context.Context, session RemoteSession, input string) error
 	HasSession(ctx context.Context, session RemoteSession) (bool, error)
+	ResumeLastCodexSession(ctx context.Context, session RemoteSession) error
 	StopSession(ctx context.Context, session RemoteSession) error
 }
 
@@ -36,8 +37,35 @@ type RemoteSession struct {
 }
 
 type OutputWindow struct {
-	RawOutput string
-	Summary   string
+	RawOutput    string
+	Summary      string
+	SessionState SessionState
+}
+
+type SessionState struct {
+	CurrentCommand string
+	PaneDead       bool
+	InMode         bool
+}
+
+func (s SessionState) CodexActive() bool {
+	command := strings.ToLower(strings.TrimSpace(s.CurrentCommand))
+	if s.PaneDead {
+		return false
+	}
+	return command == "codex" || command == "node"
+}
+
+func (s SessionState) NeedsResume() bool {
+	if s.PaneDead {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(s.CurrentCommand)) {
+	case "bash", "sh", "zsh", "dash", "ksh", "fish":
+		return true
+	default:
+		return false
+	}
 }
 
 func ReconnectInteractiveSession(ctx context.Context, runner RemoteRunner, task TaskRun) (RemoteSession, error) {

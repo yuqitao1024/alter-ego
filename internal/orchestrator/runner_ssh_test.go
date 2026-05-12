@@ -84,7 +84,12 @@ func TestSSHRunnerStartCreatesSessionAndLaunchesCodex(t *testing.T) {
 func TestSSHRunnerCaptureUsesCapturePane(t *testing.T) {
 	t.Parallel()
 
-	transport := &fakeSSHTransport{stdout: "recent output"}
+	transport := &fakeSSHTransport{
+		stdoutByCall: []string{
+			"node|0|0\n",
+			"recent output",
+		},
+	}
 	runner := NewSSHRunner(transport)
 	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh"}}
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
@@ -101,6 +106,9 @@ func TestSSHRunnerCaptureUsesCapturePane(t *testing.T) {
 	}
 	if !strings.Contains(transport.lastCommand, "tmux capture-pane -p -t 'alterego-task-2'") {
 		t.Fatalf("command = %q, want capture-pane", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "-S -80 -E -") {
+		t.Fatalf("command = %q, want tail-window capture flags", transport.lastCommand)
 	}
 	if !strings.Contains(transport.lastCommand, "source /opt/codex/env.sh && tmux capture-pane") {
 		t.Fatalf("command = %q, want shell init before capture-pane", transport.lastCommand)
@@ -153,6 +161,61 @@ func TestSSHRunnerHasSessionUsesTMUXHasSession(t *testing.T) {
 	}
 	if !strings.Contains(transport.lastCommand, "source /opt/codex/env.sh && tmux has-session") {
 		t.Fatalf("command = %q, want shell init before has-session", transport.lastCommand)
+	}
+}
+
+func TestSSHRunnerCaptureIncludesPaneState(t *testing.T) {
+	t.Parallel()
+
+	transport := &fakeSSHTransport{
+		stdoutByCall: []string{
+			"bash|0|0\n",
+			"recent output",
+		},
+	}
+	runner := NewSSHRunner(transport)
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh"}}
+	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
+
+	window, err := runner.CaptureOutput(context.Background(), RemoteSession{
+		MachineID:       "machine_a",
+		TMUXSessionName: "alterego-task-state",
+	})
+	if err != nil {
+		t.Fatalf("CaptureOutput returned error: %v", err)
+	}
+	if window.SessionState.CurrentCommand != "bash" {
+		t.Fatalf("window.SessionState.CurrentCommand = %q, want bash", window.SessionState.CurrentCommand)
+	}
+	if len(transport.commands) != 2 {
+		t.Fatalf("len(transport.commands) = %d, want 2", len(transport.commands))
+	}
+	if !strings.Contains(transport.commands[0], "tmux list-panes -t 'alterego-task-state'") {
+		t.Fatalf("first command = %q, want list-panes probe", transport.commands[0])
+	}
+	if !strings.Contains(transport.commands[1], "tmux capture-pane -p -t 'alterego-task-state'") {
+		t.Fatalf("second command = %q, want capture-pane", transport.commands[1])
+	}
+}
+
+func TestSSHRunnerResumeLastCodexSessionUsesTMUXSendKeys(t *testing.T) {
+	t.Parallel()
+
+	transport := &fakeSSHTransport{}
+	runner := NewSSHRunner(transport)
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh", "export CODEX_HOME=/opt/codex-home"}}
+	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
+
+	err := runner.ResumeLastCodexSession(context.Background(), RemoteSession{
+		MachineID:       "machine_a",
+		TMUXSessionName: "alterego-task-6",
+		Workdir:         "/srv/codex-tasks/task-6/repo",
+	})
+	if err != nil {
+		t.Fatalf("ResumeLastCodexSession returned error: %v", err)
+	}
+	if !strings.Contains(transport.lastCommand, "tmux send-keys -t 'alterego-task-6' -- 'source /opt/codex/env.sh && export CODEX_HOME=/opt/codex-home && cd '\\''/srv/codex-tasks/task-6/repo'\\'' && codex resume --last --dangerously-bypass-approvals-and-sandbox' Enter") {
+		t.Fatalf("command = %q, want tmux send-keys with codex resume --last", transport.lastCommand)
 	}
 }
 

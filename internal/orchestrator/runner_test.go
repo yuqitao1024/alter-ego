@@ -84,6 +84,11 @@ func (f *fakeRemoteRunner) HasSession(context.Context, RemoteSession) (bool, err
 	return f.hasSession, nil
 }
 
+func (f *fakeRemoteRunner) ResumeLastCodexSession(context.Context, RemoteSession) error {
+	f.calls = append(f.calls, "resume")
+	return nil
+}
+
 func (f *fakeRemoteRunner) StopSession(context.Context, RemoteSession) error {
 	f.calls = append(f.calls, "stop")
 	return nil

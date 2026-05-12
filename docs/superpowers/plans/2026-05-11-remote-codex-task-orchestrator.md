@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current non-interactive remote Codex control path with a `SSH + tmux + codex` interactive runner that preserves multi-turn requirement discussion and long-lived remote task sessions.
 
-**Architecture:** Keep Lark as the command gateway and SQLite as the persistence layer. Preserve the existing orchestrator shape, but replace the `exec/resume` runner model with a `tmux`-backed interactive session model. Task startup remains deterministic code; ongoing progress is driven by `tmux capture-pane`, `tmux send-keys`, and `tmux has-session`. Deterministic terminal responders stay rule-based, but every non-deterministic Codex screen is arbitrated by the configured LLM. There is no heuristic business-decision fallback.
+**Architecture:** Keep Lark as the command gateway and SQLite as the persistence layer. Preserve the existing orchestrator shape, but replace the `exec/resume` runner model with a `tmux`-backed interactive session model. Task startup remains deterministic code; ongoing progress is driven by `tmux` pane-state probes, `tmux capture-pane`, `tmux send-keys`, and `tmux has-session`. If the pane survives but Codex exits back to the shell, the runner should issue one controlled `codex resume --last` before handing control back to model arbitration. Deterministic terminal responders stay rule-based, but every non-deterministic Codex screen is arbitrated by the configured LLM. There is no heuristic business-decision fallback.
 
 **Tech Stack:** Go 1.23+, standard library, `database/sql` with `modernc.org/sqlite`, existing Lark adapter, SSH transport layer, remote `tmux`, remote `codex`
 

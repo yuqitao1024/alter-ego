@@ -54,6 +54,16 @@ func (r *SSHRunner) CaptureOutput(ctx context.Context, session RemoteSession) (O
 		return OutputWindow{}, err
 	}
 
+	stateCommand := wrapRemoteCommand(machine, buildSessionStateCommand(session.TMUXSessionName))
+	stateOutput, err := r.transport.Run(ctx, machine, stateCommand, "")
+	if err != nil {
+		return OutputWindow{}, fmt.Errorf("inspect tmux session state: %w", err)
+	}
+	state, err := parseSessionState(stateOutput)
+	if err != nil {
+		return OutputWindow{}, fmt.Errorf("parse tmux session state: %w", err)
+	}
+
 	command := wrapRemoteCommand(machine, buildCaptureCommand(session.TMUXSessionName))
 	output, err := r.transport.Run(ctx, machine, command, "")
 	if err != nil {
@@ -62,8 +72,9 @@ func (r *SSHRunner) CaptureOutput(ctx context.Context, session RemoteSession) (O
 
 	summary := strings.TrimSpace(output)
 	return OutputWindow{
-		RawOutput: output,
-		Summary:   summary,
+		RawOutput:    output,
+		Summary:      summary,
+		SessionState: state,
 	}, nil
 }
 
@@ -94,6 +105,22 @@ func (r *SSHRunner) HasSession(ctx context.Context, session RemoteSession) (bool
 		return false, fmt.Errorf("probe tmux session: %w", err)
 	}
 	return true, nil
+}
+
+func (r *SSHRunner) ResumeLastCodexSession(ctx context.Context, session RemoteSession) error {
+	machine, err := r.machineResolver(session.MachineID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(session.Workdir) == "" {
+		return fmt.Errorf("resume codex session: workdir is required")
+	}
+
+	command := wrapRemoteCommand(machine, buildResumeLastCommand(session.TMUXSessionName, session.Workdir, machine.ShellInit))
+	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
+		return fmt.Errorf("resume last codex session: %w", err)
+	}
+	return nil
 }
 
 func (r *SSHRunner) StopSession(ctx context.Context, session RemoteSession) error {
@@ -182,11 +209,27 @@ func buildStartInput(workflow, userRequest string) string {
 }
 
 func buildCaptureCommand(sessionName string) string {
-	return fmt.Sprintf("tmux capture-pane -p -t %s -S -200", shellQuote(sessionName))
+	return fmt.Sprintf("tmux capture-pane -p -t %s -S -80 -E -", shellQuote(sessionName))
+}
+
+func buildSessionStateCommand(sessionName string) string {
+	return fmt.Sprintf("tmux list-panes -t %s -F '#{pane_current_command}|#{pane_dead}|#{pane_in_mode}'", shellQuote(sessionName))
 }
 
 func buildSendKeysCommand(sessionName, input string) string {
 	return fmt.Sprintf("tmux send-keys -t %s -- %s Enter", shellQuote(sessionName), shellQuote(input))
+}
+
+func buildResumeLastCommand(sessionName, workdir string, shellInit []string) string {
+	parts := make([]string, 0, len(shellInit)+2)
+	if initPrefix := shellInitPrefix(shellInit); initPrefix != "" {
+		parts = append(parts, initPrefix)
+	}
+	parts = append(parts,
+		fmt.Sprintf("cd %s", shellQuote(workdir)),
+		fmt.Sprintf("codex resume --last %s", codexBypassFlags),
+	)
+	return buildSendKeysCommand(sessionName, strings.Join(parts, " && "))
 }
 
 func buildHasSessionCommand(sessionName string) string {
@@ -252,6 +295,23 @@ func parseRemoteSession(output, machineID string) (RemoteSession, error) {
 
 func sshTarget(machine MachineConfig) string {
 	return machine.User + "@" + machine.Host
+}
+
+func parseSessionState(output string) (SessionState, error) {
+	line := strings.TrimSpace(output)
+	if line == "" {
+		return SessionState{}, nil
+	}
+	line = strings.Split(line, "\n")[0]
+	parts := strings.Split(line, "|")
+	if len(parts) != 3 {
+		return SessionState{}, fmt.Errorf("unexpected session state output %q", line)
+	}
+	return SessionState{
+		CurrentCommand: strings.TrimSpace(parts[0]),
+		PaneDead:       strings.TrimSpace(parts[1]) == "1",
+		InMode:         strings.TrimSpace(parts[2]) == "1",
+	}, nil
 }
 
 func shellQuote(value string) string {

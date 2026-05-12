@@ -21,6 +21,7 @@ type Service struct {
 }
 
 const resolvedResponderCooldown = 10 * time.Second
+const systemResumeLastInput = "[system] codex resume --last"
 
 type TaskNotifier interface {
 	NotifyTaskQuestion(ctx context.Context, task TaskRun) error
@@ -270,10 +271,26 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 	if err != nil {
 		return fmt.Errorf("read remote output for task %q: %w", task.TaskID, err)
 	}
+	previousDigest := task.LastScreenDigest
+	previousInput := task.LastInput
 	if strings.TrimSpace(window.Summary) != "" {
 		task.LastOutputSummary = window.Summary
 	}
 	task.LastScreenDigest = ScreenDigest(window)
+	if window.SessionState.NeedsResume() {
+		if previousInput == systemResumeLastInput && previousDigest == task.LastScreenDigest {
+			goto decide
+		}
+		if err := s.runner.ResumeLastCodexSession(ctx, sessionFromTask(task)); err != nil {
+			return fmt.Errorf("resume codex session for task %q: %w", task.TaskID, err)
+		}
+		task.LastInput = systemResumeLastInput
+		task.UpdatedAt = s.now()
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, task.TaskID, "codex_session_resumed", "tmux session survived after codex exit; resumed most recent codex session")
+	}
 
 	if response := EvaluateTerminalResponse(task, window, s.now()); response.Handled {
 		if s.shouldIgnoreResolvedResponder(task, response, task.LastScreenDigest) {
@@ -323,6 +340,7 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		return s.store.UpdateTask(ctx, task)
 	}
 
+decide:
 	result, err := s.decider.DecideNextStep(ctx, DecisionContext{
 		Task:         task,
 		WorkflowText: workflowText,

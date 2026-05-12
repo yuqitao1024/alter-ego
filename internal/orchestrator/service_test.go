@@ -360,6 +360,109 @@ Waiting for next instruction.`,
 	}
 }
 
+func TestTickResumesLastCodexSessionWhenTMUXStillAliveButCodexExited(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-resume-last",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Continue issue 30",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-resume-last",
+		RemoteCodexSessionID: "",
+	})
+	runner := service.runner.(*fakeServiceRunner)
+	runner.outputWindow = OutputWindow{
+		RawOutput: "stale screen contents",
+		Summary:   "stale screen contents",
+		SessionState: SessionState{
+			CurrentCommand: "bash",
+		},
+	}
+	decider := service.decider.(*fakeDecisionEngine)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
+	if !reflect.DeepEqual(runner.calls, []string{"capture", "resume"}) {
+		t.Fatalf("runner.calls = %v, want [capture resume]", runner.calls)
+	}
+}
+
+func TestTickDoesNotLoopResumeForSameExitedScreen(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	window := OutputWindow{
+		RawOutput: "All workflow steps have been completed.\nWaiting for next instruction.",
+		Summary:   "All workflow steps have been completed.",
+		SessionState: SessionState{
+			CurrentCommand: "bash",
+		},
+	}
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-resume-once",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Continue issue 30",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-resume-once",
+		RemoteCodexSessionID: "",
+		LastInput:            "[system] codex resume --last",
+		LastScreenDigest:     ScreenDigest(window),
+	})
+	runner := service.runner.(*fakeServiceRunner)
+	runner.outputWindow = window
+	decider := service.decider.(*fakeDecisionEngine)
+	decider.result = DecisionResult{
+		Action:  DecisionActionCompleteTask,
+		Summary: "Task completed successfully.",
+	}
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusCompleted {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
+	}
+	if !reflect.DeepEqual(runner.calls, []string{"capture", "stop"}) {
+		t.Fatalf("runner.calls = %v, want [capture stop]", runner.calls)
+	}
+	if decider.callCount != 1 {
+		t.Fatalf("decider.callCount = %d, want 1", decider.callCount)
+	}
+}
+
 func TestTickAutoRespondsToTrustDirectoryPrompt(t *testing.T) {
 	t.Parallel()
 
@@ -940,6 +1043,11 @@ func (f *fakeServiceRunner) CaptureOutput(context.Context, RemoteSession) (Outpu
 func (f *fakeServiceRunner) HasSession(context.Context, RemoteSession) (bool, error) {
 	f.calls = append(f.calls, "has-session")
 	return f.hasSession, nil
+}
+
+func (f *fakeServiceRunner) ResumeLastCodexSession(context.Context, RemoteSession) error {
+	f.calls = append(f.calls, "resume")
+	return nil
 }
 
 func (f *fakeServiceRunner) StopSession(context.Context, RemoteSession) error {
