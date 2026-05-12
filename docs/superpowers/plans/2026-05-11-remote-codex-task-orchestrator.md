@@ -216,21 +216,21 @@ Expected: PASS
 
 ---
 
-### Task 4: Expand Decision Categories for User Input
+### Task 4: Add Model Arbitration for Waiting Codex Sessions
 
 **Files:**
 - Modify: `internal/orchestrator/decision.go`
 - Modify: `internal/orchestrator/decision_test.go`
 
-- [ ] **Step 1: Write failing decision tests**
+- [ ] **Step 1: Write failing arbitration tests**
 
 Add tests for:
 
 ```go
-func TestDecisionDetectorRecognizesRequirementClarification(t *testing.T)
-func TestDecisionDetectorRecognizesScopeConfirmation(t *testing.T)
-func TestDecisionDetectorRecognizesImplementationSolutionChoice(t *testing.T)
-func TestDecisionDetectorRecognizesMissingContext(t *testing.T)
+func TestArbitratorSkipsModelWhenCodexIsStillWorking(t *testing.T)
+func TestArbitratorAsksUserWhenModelReturnsAskUser(t *testing.T)
+func TestArbitratorRepliesToCodexWhenModelReturnsReplyToCodex(t *testing.T)
+func TestArbitratorMarksTaskCompletedWhenModelReturnsCompleteTask(t *testing.T)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -241,15 +241,17 @@ Run:
 go test -count=1 ./internal/orchestrator
 ```
 
-Expected: FAIL because only the older narrow escalation policy exists.
+Expected: FAIL because the decision path still relies on narrow heuristic category matching.
 
-- [ ] **Step 3: Implement the minimal classification changes**
+- [ ] **Step 3: Implement the arbitration changes**
 
 Update:
 
-- decision result types
-- escalation detection helpers
-- fixed decision rules text
+- arbitration result types
+- prompt builder and JSON contract
+- waiting-vs-working gate helpers
+- model-backed arbitrator using the configured LLM provider
+- completion signaling when Codex has finished the requested workflow and is only awaiting further operator input
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -304,6 +306,8 @@ Update the service so that:
 - terminal responder escalations persist responder name and screen digest
 - `/task reply` records the resolved responder and starts a short cooldown window
 - repeated `capture-pane` output for the same responder/screen digest is ignored during cooldown so stale screens do not immediately re-open the same question
+- non-responder prompts only invoke model arbitration when Codex appears to be waiting for input
+- model arbitration may either ask the user, reply directly to Codex, or mark the task completed
 
 - [ ] **Step 4: Run test to verify it passes**
 

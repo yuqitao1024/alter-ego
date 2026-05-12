@@ -117,10 +117,22 @@ Primary capabilities:
 Uses the repository/template workflow document plus runtime context to:
 
 - summarize remote progress for status reporting;
-- decide whether Codex is still executing, has completed, or is blocked;
-- classify user-facing questions into escalation categories.
+- decide whether Codex is still executing, waiting for input, has completed, or is blocked;
+- arbitrate non-trivial Codex prompts when rule-based responders do not apply;
+- classify user-facing questions into escalation categories;
+- produce either a direct reply to Codex or a user-facing question.
 
-The model may suggest escalation, but the orchestrator owns the explicit transition into `waiting_user_input`.
+The model does not run on every tick. The orchestrator owns the gating logic:
+
+1. run deterministic terminal responders first;
+2. if Codex still appears to be actively working, do nothing and keep the task in `running`;
+3. only if Codex appears to be waiting for input and no deterministic responder matched, call the model arbitrator;
+4. the orchestrator then applies the arbitrator result by either:
+   - sending a direct reply back into the live Codex session;
+   - moving the task into `waiting_user_input` and notifying the user in Lark;
+   - or marking the task `completed`.
+
+The model may suggest escalation or completion, but the orchestrator owns the explicit transition into `waiting_user_input` or `completed`.
 
 ### 6. Persistence Layer
 
@@ -258,6 +270,8 @@ Representative transitions:
 
 When a terminal responder raises `waiting_user_input`, the orchestrator persists both the responder name and the current screen digest. After the user replies, the task returns to `running`, but the responder/screen pair is marked as resolved and enters a short cooldown window. During that window, the orchestrator ignores the same responder on the same screen digest so stale `tmux capture-pane` output does not immediately re-escalate the task.
 
+Completion is also an explicit decision boundary. If Codex has finished the requested workflow and is merely waiting for another operator instruction, the arbitrator may return `complete_task`, in which case the orchestrator records the final summary, marks the task `completed`, and stops advancing the session.
+
 ## Remote Startup Model
 
 Task startup is deterministic code, not workflow prose.
@@ -287,7 +301,8 @@ Scheduling rules:
 - each scheduling turn gives one task one bounded unit of progress:
   - capture recent output from the remote `tmux` session;
   - interpret task state;
-  - decide whether to continue, escalate, recover, or finish;
+  - decide whether Codex is still working, waiting for input, completed, detached, or failed;
+  - if waiting for input and no deterministic responder applies, invoke the model arbitrator;
   - optionally send one next input.
 
 ## Remote Session Model
@@ -356,9 +371,28 @@ The decision model context should contain three ordered layers:
 These rules stay constant:
 
 - the coordinator is managing remote interactive Codex sessions;
-- it should continue automatically unless Codex asks for user input;
+- it should continue automatically unless Codex is clearly waiting for input;
 - it should summarize progress concisely;
 - it should not invent task state outside the orchestrator's known state.
+
+The arbitrator prompt must also define the expected structured result. A first-version JSON shape should include:
+
+```json
+{
+  "action": "reply_to_codex" | "ask_user" | "complete_task" | "wait",
+  "decision_type": "requirement_clarification" | "scope_confirmation" | "implementation_solution_choice" | "missing_context" | "none",
+  "summary": "string",
+  "codex_reply": "string",
+  "user_question": "string"
+}
+```
+
+Interpretation:
+
+- `reply_to_codex`: send `codex_reply` back into the live session and keep the task `running`;
+- `ask_user`: set `waiting_user_input`, persist the question, and notify the user in Lark;
+- `complete_task`: record `summary`, mark the task `completed`, and stop advancing the session;
+- `wait`: take no action and keep the task `running`.
 
 ### Template Workflow Document
 
