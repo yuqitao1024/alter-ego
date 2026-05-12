@@ -163,16 +163,16 @@ func TestTickMovesTaskToWaitingUserInputWhenDecisionRequiresUser(t *testing.T) {
 
 	ctx := context.Background()
 	task := seedTask(t, store, TaskRun{
-		TaskID:                "task-wait",
-		TemplateID:            "feature_dev",
-		RepositoryID:          "repo_backend",
-		MachineID:             "machine_a",
-		Status:                StatusRunning,
-		UserRequest:           "Implement orchestrator",
-		CreatedBy:             "tester",
-		RemoteWorkdir:         "/srv/backend",
-		TMUXSessionName:       "alterego-task-wait",
-		RemoteCodexSessionID:  "session-wait",
+		TaskID:               "task-wait",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-wait",
+		RemoteCodexSessionID: "session-wait",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{Summary: "Two implementation approaches are possible"}
 	service.decider.(*fakeDecisionEngine).result = DecisionResult{
@@ -338,7 +338,7 @@ func TestTickMovesTaskToWaitingUserInputWhenUsageLimitPromptDetected(t *testing.
 Press enter to continue
 
 You've hit your usage limit. Upgrade to Pro, purchase more credits or try again later.`,
-		Summary:   "You've hit your usage limit.",
+		Summary: "You've hit your usage limit.",
 	}
 	decider := service.decider.(*fakeDecisionEngine)
 	notifier := service.notifier.(*fakeTaskNotifier)
@@ -373,18 +373,21 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 
 	ctx := context.Background()
 	task := seedTask(t, store, TaskRun{
-		TaskID:                "task-reply",
-		TemplateID:            "feature_dev",
-		RepositoryID:          "repo_backend",
-		MachineID:             "machine_a",
-		Status:                StatusWaitingUserInput,
-		UserRequest:           "Implement orchestrator",
-		CreatedBy:             "tester",
-		RemoteWorkdir:         "/srv/backend",
-		TMUXSessionName:       "alterego-task-reply",
-		RemoteCodexSessionID:  "session-reply",
+		TaskID:                      "task-reply",
+		TemplateID:                  "feature_dev",
+		RepositoryID:                "repo_backend",
+		MachineID:                   "machine_a",
+		Status:                      StatusWaitingUserInput,
+		UserRequest:                 "Implement orchestrator",
+		CreatedBy:                   "tester",
+		RemoteWorkdir:               "/srv/backend",
+		TMUXSessionName:             "alterego-task-reply",
+		RemoteCodexSessionID:        "session-reply",
+		ActiveResponderName:         "usage_limit_prompt",
+		ActiveResponderScreenDigest: "digest:usage-limit",
 		AwaitingQuestion: &AwaitingQuestion{
-			QuestionText: "Which approach?",
+			QuestionText: "You've hit your usage limit.",
+			QuestionType: "usage_limit",
 			AskedAt:      time.Now().UTC().Add(-time.Minute),
 		},
 	})
@@ -406,6 +409,134 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 	if persisted.LastInput != "Use polling." {
 		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, "Use polling.")
 	}
+	if persisted.LastResolvedResponderName == "" || persisted.LastResolvedScreenDigest == "" {
+		t.Fatalf("resolved responder fields not set: %#v", persisted)
+	}
+	if persisted.ResponderCooldownUntil == nil {
+		t.Fatalf("ResponderCooldownUntil = nil, want cooldown timestamp")
+	}
+}
+
+func TestTickSkipsRecentlyResolvedResponderForSameScreen(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	now := time.Date(2026, 5, 12, 3, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
+
+	ctx := context.Background()
+	window := OutputWindow{
+		RawOutput: `You've hit your usage limit. Upgrade to Pro, purchase more credits or try again later.`,
+		Summary:   "You've hit your usage limit.",
+	}
+	task := seedTask(t, store, TaskRun{
+		TaskID:                      "task-cooldown",
+		TemplateID:                  "feature_dev",
+		RepositoryID:                "repo_backend",
+		MachineID:                   "machine_a",
+		Status:                      StatusWaitingUserInput,
+		UserRequest:                 "Implement orchestrator",
+		CreatedBy:                   "tester",
+		RemoteWorkdir:               "/srv/backend",
+		TMUXSessionName:             "alterego-task-cooldown",
+		RemoteCodexSessionID:        "session-cooldown",
+		ActiveResponderName:         "usage_limit_prompt",
+		ActiveResponderScreenDigest: ScreenDigest(window),
+		AwaitingQuestion: &AwaitingQuestion{
+			QuestionText: "You've hit your usage limit.",
+			QuestionType: "usage_limit",
+			AskedAt:      now.Add(-time.Minute),
+		},
+	})
+
+	if err := service.Reply(ctx, task.TaskID, "额度已经刷新了，你继续工作吧"); err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+
+	service.runner.(*fakeServiceRunner).outputWindow = window
+	notifier := service.notifier.(*fakeTaskNotifier)
+	decider := service.decider.(*fakeDecisionEngine)
+	runner := service.runner.(*fakeServiceRunner)
+	runner.calls = nil
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if notifier.lastTaskID != "" {
+		t.Fatalf("notifier.lastTaskID = %q, want empty", notifier.lastTaskID)
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
+	if !reflect.DeepEqual(runner.calls, []string{"capture"}) {
+		t.Fatalf("runner.calls = %v, want [capture]", runner.calls)
+	}
+}
+
+func TestTickReEscalatesResolvedResponderAfterCooldown(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	now := time.Date(2026, 5, 12, 3, 10, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
+
+	ctx := context.Background()
+	window := OutputWindow{
+		RawOutput: `You've hit your usage limit. Upgrade to Pro, purchase more credits or try again later.`,
+		Summary:   "You've hit your usage limit.",
+	}
+	cooldownExpired := now.Add(-time.Second)
+	task := seedTask(t, store, TaskRun{
+		TaskID:                    "task-recurring",
+		TemplateID:                "feature_dev",
+		RepositoryID:              "repo_backend",
+		MachineID:                 "machine_a",
+		Status:                    StatusRunning,
+		UserRequest:               "Implement orchestrator",
+		CreatedBy:                 "tester",
+		RemoteWorkdir:             "/srv/backend",
+		TMUXSessionName:           "alterego-task-recurring",
+		RemoteCodexSessionID:      "session-recurring",
+		LastResolvedResponderName: "usage_limit_prompt",
+		LastResolvedScreenDigest:  ScreenDigest(window),
+		ResponderCooldownUntil:    &cooldownExpired,
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = window
+	notifier := service.notifier.(*fakeTaskNotifier)
+	decider := service.decider.(*fakeDecisionEngine)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionType != "usage_limit" {
+		t.Fatalf("persisted.AwaitingQuestion = %#v, want usage_limit", persisted.AwaitingQuestion)
+	}
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
 }
 
 func TestRecoverDetachedTaskUsesTMUXSessionWhenPresent(t *testing.T) {
@@ -416,16 +547,16 @@ func TestRecoverDetachedTaskUsesTMUXSessionWhenPresent(t *testing.T) {
 
 	ctx := context.Background()
 	task := seedTask(t, store, TaskRun{
-		TaskID:                "task-detached",
-		TemplateID:            "feature_dev",
-		RepositoryID:          "repo_backend",
-		MachineID:             "machine_a",
-		Status:                StatusDetached,
-		UserRequest:           "Resume detached task",
-		CreatedBy:             "tester",
-		RemoteWorkdir:         "/srv/backend",
-		TMUXSessionName:       "alterego-task-detached",
-		RemoteCodexSessionID:  "session-detached",
+		TaskID:               "task-detached",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusDetached,
+		UserRequest:          "Resume detached task",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-detached",
+		RemoteCodexSessionID: "session-detached",
 	})
 	runner := service.runner.(*fakeServiceRunner)
 	runner.hasSession = true
@@ -456,16 +587,16 @@ func TestStopMarksTaskStoppedAndCallsRunner(t *testing.T) {
 
 	ctx := context.Background()
 	task := seedTask(t, store, TaskRun{
-		TaskID:                "task-stop",
-		TemplateID:            "feature_dev",
-		RepositoryID:          "repo_backend",
-		MachineID:             "machine_a",
-		Status:                StatusRunning,
-		UserRequest:           "Stop me",
-		CreatedBy:             "tester",
-		RemoteWorkdir:         "/srv/backend",
-		TMUXSessionName:       "alterego-task-stop",
-		RemoteCodexSessionID:  "session-stop",
+		TaskID:               "task-stop",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Stop me",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-stop",
+		RemoteCodexSessionID: "session-stop",
 	})
 
 	if err := service.Stop(ctx, task.TaskID); err != nil {
@@ -625,9 +756,9 @@ func writeWorkflowFixture(t *testing.T, body string) string {
 type fakeServiceRunner struct {
 	calls []string
 
-	startSession  RemoteSession
-	outputWindow  OutputWindow
-	hasSession    bool
+	startSession RemoteSession
+	outputWindow OutputWindow
+	hasSession   bool
 }
 
 func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartRequest) (RemoteSession, error) {
@@ -656,7 +787,7 @@ func (f *fakeServiceRunner) StopSession(context.Context, RemoteSession) error {
 }
 
 type fakeDecisionEngine struct {
-	result DecisionResult
+	result    DecisionResult
 	callCount int
 }
 

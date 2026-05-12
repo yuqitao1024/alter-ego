@@ -56,6 +56,12 @@ func TestStoreUpdatesTaskStatusAndSessionFields(t *testing.T) {
 	task.TMUXSessionName = "alterego-task-002"
 	task.RemoteCodexSessionID = "codex-session-002"
 	task.LastScreenDigest = "digest:2002"
+	task.ActiveResponderName = "usage_limit_prompt"
+	task.ActiveResponderScreenDigest = "digest:active"
+	task.LastResolvedResponderName = "trust_directory_prompt"
+	task.LastResolvedScreenDigest = "digest:resolved"
+	cooldown := task.UpdatedAt.Add(30 * time.Second)
+	task.ResponderCooldownUntil = &cooldown
 	task.UpdatedAt = task.UpdatedAt.Add(2 * time.Minute)
 	if err := store.UpdateTask(ctx, task); err != nil {
 		t.Fatalf("UpdateTask returned error: %v", err)
@@ -185,12 +191,12 @@ func TestStorePersistsAndUpdatesTaskQuestions(t *testing.T) {
 
 	askedAt := time.Date(2026, 5, 11, 11, 0, 0, 0, time.UTC)
 	question := TaskQuestion{
-		TaskID:          "task-2",
-		QuestionType:    "requirement_clarification",
-		QuestionText:    "Please clarify the expected behavior.",
-		OptionsSummary:  "n/a",
-		ContextExcerpt:  "Need more information to continue.",
-		AskedAt:         askedAt,
+		TaskID:         "task-2",
+		QuestionType:   "requirement_clarification",
+		QuestionText:   "Please clarify the expected behavior.",
+		OptionsSummary: "n/a",
+		ContextExcerpt: "Need more information to continue.",
+		AskedAt:        askedAt,
 	}
 	if err := store.AppendQuestion(ctx, question); err != nil {
 		t.Fatalf("AppendQuestion returned error: %v", err)
@@ -229,21 +235,21 @@ func openTestStore(t *testing.T) *Store {
 func sampleTaskRun(taskID string, status TaskStatus) TaskRun {
 	now := time.Date(2026, 5, 11, 9, 30, 0, 0, time.UTC)
 	return TaskRun{
-		TaskID:                taskID,
-		TemplateID:            "feature_dev",
-		RepositoryID:          "repo_backend",
-		MachineID:             "machine_a",
-		Status:                status,
-		UserRequest:           "Implement persisted store",
-		CreatedBy:             "user_123",
-		RemoteWorkdir:         "",
-		TMUXSessionName:       "",
-		RemoteCodexSessionID:  "",
-		LastScreenDigest:      "",
-		LastInput:             "Continue with Task 2",
-		LastOutputSummary:     "Store not started yet",
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		TaskID:               taskID,
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               status,
+		UserRequest:          "Implement persisted store",
+		CreatedBy:            "user_123",
+		RemoteWorkdir:        "",
+		TMUXSessionName:      "",
+		RemoteCodexSessionID: "",
+		LastScreenDigest:     "",
+		LastInput:            "Continue with Task 2",
+		LastOutputSummary:    "Store not started yet",
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 }
 
@@ -288,6 +294,25 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	}
 	if got.LastOutputSummary != want.LastOutputSummary {
 		t.Fatalf("LastOutputSummary = %q, want %q", got.LastOutputSummary, want.LastOutputSummary)
+	}
+	if got.ActiveResponderName != want.ActiveResponderName {
+		t.Fatalf("ActiveResponderName = %q, want %q", got.ActiveResponderName, want.ActiveResponderName)
+	}
+	if got.ActiveResponderScreenDigest != want.ActiveResponderScreenDigest {
+		t.Fatalf("ActiveResponderScreenDigest = %q, want %q", got.ActiveResponderScreenDigest, want.ActiveResponderScreenDigest)
+	}
+	if got.LastResolvedResponderName != want.LastResolvedResponderName {
+		t.Fatalf("LastResolvedResponderName = %q, want %q", got.LastResolvedResponderName, want.LastResolvedResponderName)
+	}
+	if got.LastResolvedScreenDigest != want.LastResolvedScreenDigest {
+		t.Fatalf("LastResolvedScreenDigest = %q, want %q", got.LastResolvedScreenDigest, want.LastResolvedScreenDigest)
+	}
+	switch {
+	case got.ResponderCooldownUntil == nil && want.ResponderCooldownUntil == nil:
+	case got.ResponderCooldownUntil == nil || want.ResponderCooldownUntil == nil:
+		t.Fatalf("ResponderCooldownUntil = %v, want %v", got.ResponderCooldownUntil, want.ResponderCooldownUntil)
+	case !got.ResponderCooldownUntil.Equal(*want.ResponderCooldownUntil):
+		t.Fatalf("ResponderCooldownUntil = %s, want %s", got.ResponderCooldownUntil, want.ResponderCooldownUntil)
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("CreatedAt = %s, want %s", got.CreatedAt, want.CreatedAt)

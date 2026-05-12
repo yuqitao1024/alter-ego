@@ -20,6 +20,8 @@ type Service struct {
 	now func() time.Time
 }
 
+const resolvedResponderCooldown = 10 * time.Second
+
 type TaskNotifier interface {
 	NotifyTaskQuestion(ctx context.Context, task TaskRun) error
 }
@@ -122,6 +124,12 @@ func (s *Service) Reply(ctx context.Context, taskID, text string) error {
 	task.Status = StatusRunning
 	task.AwaitingQuestion = nil
 	task.LastInput = text
+	task.LastResolvedResponderName = task.ActiveResponderName
+	task.LastResolvedScreenDigest = task.ActiveResponderScreenDigest
+	cooldownUntil := s.now().Add(resolvedResponderCooldown)
+	task.ResponderCooldownUntil = &cooldownUntil
+	task.ActiveResponderName = ""
+	task.ActiveResponderScreenDigest = ""
 	task.UpdatedAt = s.now()
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return fmt.Errorf("update replied task %q: %w", taskID, err)
@@ -238,6 +246,8 @@ func (s *Service) recoverDetachedTask(ctx context.Context, task TaskRun) error {
 	task.TMUXSessionName = coalesceString(session.TMUXSessionName, task.TMUXSessionName)
 	task.RemoteCodexSessionID = coalesceString(session.CodexSessionID, task.RemoteCodexSessionID)
 	task.LastOutputSummary = coalesceString(session.LastOutputWindow.Summary, task.LastOutputSummary)
+	task.ActiveResponderName = ""
+	task.ActiveResponderScreenDigest = ""
 	task.UpdatedAt = s.now()
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return err
@@ -266,10 +276,17 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 	task.LastScreenDigest = ScreenDigest(window)
 
 	if response := EvaluateTerminalResponse(task, window, s.now()); response.Handled {
+		if s.shouldIgnoreResolvedResponder(task, response, task.LastScreenDigest) {
+			task.Status = StatusRunning
+			task.UpdatedAt = s.now()
+			return s.store.UpdateTask(ctx, task)
+		}
 		if response.AutoInput != "" {
 			if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), response.AutoInput); err != nil {
 				return fmt.Errorf("send terminal responder input for task %q: %w", task.TaskID, err)
 			}
+			task.ActiveResponderName = response.Name
+			task.ActiveResponderScreenDigest = task.LastScreenDigest
 			task.LastInput = response.AutoInput
 			task.UpdatedAt = s.now()
 			if err := s.store.UpdateTask(ctx, task); err != nil {
@@ -282,6 +299,8 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		}
 		if response.Question != nil {
 			task.Status = StatusWaitingUserInput
+			task.ActiveResponderName = response.Name
+			task.ActiveResponderScreenDigest = task.LastScreenDigest
 			task.AwaitingQuestion = response.Question
 			task.UpdatedAt = s.now()
 			if err := s.store.UpdateTask(ctx, task); err != nil {
@@ -316,6 +335,8 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 	task.LastOutputSummary = coalesceString(result.Summary, task.LastOutputSummary)
 	if ShouldEscalateDecision(result.DecisionType) {
 		task.Status = StatusWaitingUserInput
+		task.ActiveResponderName = ""
+		task.ActiveResponderScreenDigest = ""
 		task.AwaitingQuestion = result.Question
 		task.UpdatedAt = s.now()
 		if err := s.store.UpdateTask(ctx, task); err != nil {
@@ -341,6 +362,8 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		}
 		task.LastInput = result.NextInput
 	}
+	task.ActiveResponderName = ""
+	task.ActiveResponderScreenDigest = ""
 
 	task.UpdatedAt = s.now()
 	return s.store.UpdateTask(ctx, task)
@@ -412,4 +435,17 @@ func (s *Service) markAnsweredQuestion(ctx context.Context, taskID string, quest
 		return fmt.Errorf("mark task question answered for %q: %w", taskID, err)
 	}
 	return nil
+}
+
+func (s *Service) shouldIgnoreResolvedResponder(task TaskRun, response TerminalResponse, digest string) bool {
+	if response.Name == "" || digest == "" {
+		return false
+	}
+	if task.LastResolvedResponderName != response.Name || task.LastResolvedScreenDigest != digest {
+		return false
+	}
+	if task.ResponderCooldownUntil == nil {
+		return false
+	}
+	return s.now().Before(*task.ResponderCooldownUntil)
 }

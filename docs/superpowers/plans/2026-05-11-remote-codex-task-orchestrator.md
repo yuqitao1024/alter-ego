@@ -13,9 +13,9 @@
 ## File Structure
 
 - Modify: `internal/orchestrator/types.go`
-  - Replace exec/resume-oriented remote session fields with TTY-oriented session metadata.
+  - Replace exec/resume-oriented remote session fields with TTY-oriented session metadata, including terminal responder convergence fields.
 - Modify: `internal/orchestrator/store.go`
-  - Persist `tmux_session_name` and any new screen-tracking fields.
+  - Persist `tmux_session_name`, screen-tracking fields, and responder cooldown metadata.
 - Modify: `internal/orchestrator/store_test.go`
   - Update persisted field coverage for the new task model.
 - Modify: `internal/orchestrator/runner.go`
@@ -301,6 +301,9 @@ Update the service so that:
 - `waiting_user_input` is used for any supported question category
 - `/task reply` uses `SendInteractiveInput`
 - `detached` recovery uses `HasSession`
+- terminal responder escalations persist responder name and screen digest
+- `/task reply` records the resolved responder and starts a short cooldown window
+- repeated `capture-pane` output for the same responder/screen digest is ignored during cooldown so stale screens do not immediately re-open the same question
 
 - [ ] **Step 4: Run test to verify it passes**
 

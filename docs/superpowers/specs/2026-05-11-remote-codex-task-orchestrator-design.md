@@ -207,6 +207,11 @@ Each task instance persists at least:
 - `last_input`
 - `last_output_summary`
 - `last_screen_digest`
+- `active_responder_name`
+- `active_responder_screen_digest`
+- `last_resolved_responder_name`
+- `last_resolved_screen_digest`
+- `responder_cooldown_until`
 - `awaiting_question`
 - `created_at`
 - `updated_at`
@@ -250,6 +255,8 @@ Representative transitions:
 - `running -> completed`
 - `preparing_workspace/starting_session/running/detached -> failed`
 - `pending/preparing_workspace/starting_session/running/waiting_user_input/detached -> stopped`
+
+When a terminal responder raises `waiting_user_input`, the orchestrator persists both the responder name and the current screen digest. After the user replies, the task returns to `running`, but the responder/screen pair is marked as resolved and enters a short cooldown window. During that window, the orchestrator ignores the same responder on the same screen digest so stale `tmux capture-pane` output does not immediately re-escalate the task.
 
 ## Remote Startup Model
 
@@ -320,6 +327,8 @@ Suggested tables:
 - `tasks`
 - `task_events`
 - `task_questions`
+
+The `tasks` row is not limited to coarse task status. It also persists terminal-responder convergence metadata so recovery and repeated ticks can distinguish a fresh blocking prompt from a stale screen snapshot.
 
 `task_events` should capture operator-auditable state changes such as:
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -58,10 +59,15 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			last_input,
 			last_output_summary,
 			last_screen_digest,
+			active_responder_name,
+			active_responder_screen_digest,
+			last_resolved_responder_name,
+			last_resolved_screen_digest,
+			responder_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
@@ -76,6 +82,11 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		task.LastInput,
 		task.LastOutputSummary,
 		task.LastScreenDigest,
+		task.ActiveResponderName,
+		task.ActiveResponderScreenDigest,
+		task.LastResolvedResponderName,
+		task.LastResolvedScreenDigest,
+		formatOptionalTime(task.ResponderCooldownUntil),
 		awaitingQuestion,
 		task.CreatedAt.UTC().Format(time.RFC3339Nano),
 		task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -107,6 +118,11 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			last_input = ?,
 			last_output_summary = ?,
 			last_screen_digest = ?,
+			active_responder_name = ?,
+			active_responder_screen_digest = ?,
+			last_resolved_responder_name = ?,
+			last_resolved_screen_digest = ?,
+			responder_cooldown_until = ?,
 			awaiting_question = ?,
 			created_at = ?,
 			updated_at = ?
@@ -124,6 +140,11 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		task.LastInput,
 		task.LastOutputSummary,
 		task.LastScreenDigest,
+		task.ActiveResponderName,
+		task.ActiveResponderScreenDigest,
+		task.LastResolvedResponderName,
+		task.LastResolvedScreenDigest,
+		formatOptionalTime(task.ResponderCooldownUntil),
 		awaitingQuestion,
 		task.CreatedAt.UTC().Format(time.RFC3339Nano),
 		task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -160,6 +181,11 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			last_input,
 			last_output_summary,
 			last_screen_digest,
+			active_responder_name,
+			active_responder_screen_digest,
+			last_resolved_responder_name,
+			last_resolved_screen_digest,
+			responder_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
@@ -190,6 +216,11 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			last_input,
 			last_output_summary,
 			last_screen_digest,
+			active_responder_name,
+			active_responder_screen_digest,
+			last_resolved_responder_name,
+			last_resolved_screen_digest,
+			responder_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
@@ -402,6 +433,11 @@ func (s *Store) init(ctx context.Context) error {
 			last_input TEXT NOT NULL,
 			last_output_summary TEXT NOT NULL,
 			last_screen_digest TEXT NOT NULL,
+			active_responder_name TEXT NOT NULL DEFAULT '',
+			active_responder_screen_digest TEXT NOT NULL DEFAULT '',
+			last_resolved_responder_name TEXT NOT NULL DEFAULT '',
+			last_resolved_screen_digest TEXT NOT NULL DEFAULT '',
+			responder_cooldown_until TEXT,
 			awaiting_question TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -435,6 +471,19 @@ func (s *Store) init(ctx context.Context) error {
 		}
 	}
 
+	migrations := []string{
+		`ALTER TABLE tasks ADD COLUMN active_responder_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN active_responder_screen_digest TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN last_resolved_responder_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN last_resolved_screen_digest TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN responder_cooldown_until TEXT`,
+	}
+	for _, statement := range migrations {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate sqlite store: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -446,6 +495,7 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	var task TaskRun
 	var status string
 	var awaitingQuestion sql.NullString
+	var responderCooldownUntil sql.NullString
 	var createdAt string
 	var updatedAt string
 
@@ -463,6 +513,11 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&task.LastInput,
 		&task.LastOutputSummary,
 		&task.LastScreenDigest,
+		&task.ActiveResponderName,
+		&task.ActiveResponderScreenDigest,
+		&task.LastResolvedResponderName,
+		&task.LastResolvedScreenDigest,
+		&responderCooldownUntil,
 		&awaitingQuestion,
 		&createdAt,
 		&updatedAt,
@@ -485,6 +540,10 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	task.AwaitingQuestion, err = unmarshalAwaitingQuestion(awaitingQuestion)
 	if err != nil {
 		return TaskRun{}, err
+	}
+	task.ResponderCooldownUntil, err = parseOptionalTime(responderCooldownUntil)
+	if err != nil {
+		return TaskRun{}, fmt.Errorf("parse responder_cooldown_until: %w", err)
 	}
 
 	return task, nil
@@ -512,6 +571,24 @@ func unmarshalAwaitingQuestion(raw sql.NullString) (*AwaitingQuestion, error) {
 		return nil, fmt.Errorf("unmarshal awaiting question: %w", err)
 	}
 	return &question, nil
+}
+
+func formatOptionalTime(tm *time.Time) any {
+	if tm == nil {
+		return nil
+	}
+	return tm.UTC().Format(time.RFC3339Nano)
+}
+
+func parseOptionalTime(raw sql.NullString) (*time.Time, error) {
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	tm, err := time.Parse(time.RFC3339Nano, raw.String)
+	if err != nil {
+		return nil, err
+	}
+	return &tm, nil
 }
 
 func IsTaskNotFound(err error) bool {
