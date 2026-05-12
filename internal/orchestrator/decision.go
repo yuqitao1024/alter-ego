@@ -15,7 +15,11 @@ const fixedDecisionRules = `You are Alter Ego's remote Codex task coordinator.
 - If Codex is still working, return wait.
 - If Codex is waiting for a direct operator answer, either ask the user or reply to Codex directly.
 - If the task is already complete and Codex is only waiting for the next operator instruction, return complete_task.
-- Return strict JSON with one action: reply_to_codex, ask_user, complete_task, or wait.`
+- Return strict JSON with one action: reply_to_codex, ask_user, complete_task, or wait.
+- Return exactly one JSON object.
+- Do not wrap the JSON in Markdown code fences.
+- Do not add any explanation before or after the JSON.
+- The response must be valid JSON parsable by Go's encoding/json package.`
 
 const (
 	DecisionActionWait         = "wait"
@@ -75,6 +79,7 @@ func (e *ModelDecisionEngine) DecideNextStep(ctx context.Context, in DecisionCon
 	if err != nil {
 		return DecisionResult{}, err
 	}
+	raw = extractJSONPayload(raw)
 
 	var payload decisionPayload
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &payload); err != nil {
@@ -145,6 +150,28 @@ func BuildDecisionPrompt(in DecisionContext) string {
 	builder.WriteString("\ncompletion_rule: If the requested workflow is already complete and Codex only needs another operator prompt, return complete_task.")
 	builder.WriteString("\nraw_terminal_excerpt:\n")
 	builder.WriteString(strings.TrimSpace(in.OutputWindow.RawOutput))
-	builder.WriteString("\n\nReturn JSON only with fields: action, decision_type, summary, codex_reply, user_question.")
+	builder.WriteString("\n\nReturn exactly one JSON object with fields: action, decision_type, summary, codex_reply, user_question.")
+	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
+	builder.WriteString("\nDo not add any explanation before or after the JSON.")
+	builder.WriteString("\nThe response must be valid JSON parsable by Go's encoding/json package.")
 	return builder.String()
+}
+
+func extractJSONPayload(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "```") {
+		return trimmed
+	}
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) < 3 {
+		return trimmed
+	}
+	if !strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+		return trimmed
+	}
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if last != "```" {
+		return trimmed
+	}
+	return strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
 }

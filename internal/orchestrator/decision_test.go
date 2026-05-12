@@ -69,6 +69,29 @@ func TestDecisionContextIncludesRuntimeTaskFields(t *testing.T) {
 	}
 }
 
+func TestDecisionPromptForbidsMarkdownAndExtraText(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildDecisionPrompt(DecisionContext{
+		Task:         TaskRun{TaskID: "task-prompt"},
+		OutputWindow: OutputWindow{RawOutput: "Choose 1 or 2"},
+		WorkflowText: "workflow",
+		UserRequest:  "request",
+	})
+
+	wantParts := []string{
+		"Return exactly one JSON object.",
+		"Do not wrap the JSON in Markdown code fences.",
+		"Do not add any explanation before or after the JSON.",
+		"The response must be valid JSON parsable by Go's encoding/json package.",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Fatalf("prompt missing %q:\n%s", part, prompt)
+		}
+	}
+}
+
 func TestModelDecisionEngineReturnsWait(t *testing.T) {
 	t.Parallel()
 
@@ -165,6 +188,27 @@ func TestModelDecisionEngineReturnsCompleteTask(t *testing.T) {
 	}
 	if result.Action != DecisionActionCompleteTask {
 		t.Fatalf("Action = %q, want %q", result.Action, DecisionActionCompleteTask)
+	}
+}
+
+func TestModelDecisionEngineParsesJSONCodeFence(t *testing.T) {
+	t.Parallel()
+
+	engine := NewModelDecisionEngine(&fakeDecisionModel{
+		response: "```json\n{\"action\":\"ask_user\",\"decision_type\":\"implementation_solution_choice\",\"summary\":\"Need user choice\",\"user_question\":\"Choose option 1 or 2.\"}\n```",
+	})
+
+	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
+		Task:         TaskRun{TaskID: "task-fence", LastOutputSummary: "Need a choice"},
+		OutputWindow: OutputWindow{RawOutput: "Choose 1 or 2", Summary: "Need a choice"},
+		WorkflowText: "workflow",
+		UserRequest:  "request",
+	})
+	if err != nil {
+		t.Fatalf("DecideNextStep returned error: %v", err)
+	}
+	if result.Action != DecisionActionAskUser {
+		t.Fatalf("Action = %q, want %q", result.Action, DecisionActionAskUser)
 	}
 }
 
