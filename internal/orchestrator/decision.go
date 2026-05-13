@@ -70,6 +70,52 @@ type decisionPayload struct {
 	UserQuestion string `json:"user_question"`
 }
 
+func (p *decisionPayload) UnmarshalJSON(data []byte) error {
+	type rawDecisionPayload struct {
+		Action       string          `json:"action"`
+		DecisionType json.RawMessage `json:"decision_type"`
+		Summary      string          `json:"summary"`
+		CodexReply   string          `json:"codex_reply"`
+		UserQuestion string          `json:"user_question"`
+	}
+
+	var raw rawDecisionPayload
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	p.Action = raw.Action
+	p.Summary = raw.Summary
+	p.CodexReply = raw.CodexReply
+	p.UserQuestion = raw.UserQuestion
+
+	decisionType, err := normalizeDecisionType(raw.DecisionType)
+	if err != nil {
+		return err
+	}
+	p.DecisionType = decisionType
+	return nil
+}
+
+func normalizeDecisionType(raw json.RawMessage) (string, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "", nil
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return asString, nil
+	}
+
+	var asNumber json.Number
+	if err := json.Unmarshal(raw, &asNumber); err == nil {
+		return asNumber.String(), nil
+	}
+
+	return "", fmt.Errorf("parse decision_type: unsupported JSON value %s", trimmed)
+}
+
 func (e *ModelDecisionEngine) DecideNextStep(ctx context.Context, in DecisionContext) (DecisionResult, error) {
 	if e == nil || e.model == nil {
 		return DecisionResult{}, fmt.Errorf("decision model is not configured")

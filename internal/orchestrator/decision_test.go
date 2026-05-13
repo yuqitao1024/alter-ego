@@ -212,6 +212,30 @@ func TestModelDecisionEngineParsesJSONCodeFence(t *testing.T) {
 	}
 }
 
+func TestModelDecisionEngineAcceptsNumericDecisionType(t *testing.T) {
+	t.Parallel()
+
+	engine := NewModelDecisionEngine(&fakeDecisionModel{
+		response: `{"action":"reply_to_codex","decision_type":2,"summary":"Continue with step 1","codex_reply":"Read the headers first."}`,
+	})
+
+	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
+		Task:         TaskRun{TaskID: "task-numeric-decision-type", LastOutputSummary: "Need next step"},
+		OutputWindow: OutputWindow{RawOutput: "Need next step", Summary: "Need next step"},
+		WorkflowText: "workflow",
+		UserRequest:  "request",
+	})
+	if err != nil {
+		t.Fatalf("DecideNextStep returned error: %v", err)
+	}
+	if result.Action != DecisionActionReplyToCodex {
+		t.Fatalf("Action = %q, want %q", result.Action, DecisionActionReplyToCodex)
+	}
+	if result.DecisionType != "2" {
+		t.Fatalf("DecisionType = %q, want %q", result.DecisionType, "2")
+	}
+}
+
 type fakeDecisionModel struct {
 	response string
 	err      error
