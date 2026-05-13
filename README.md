@@ -161,6 +161,17 @@ Run locally:
 CGO_ENABLED=0 go run ./cmd/alterego
 ```
 
+## Packaging
+
+Generic Linux packaging assets live in [packaging/README.md](/Users/yuqitao/aiagent/alter-ego/packaging/README.md). The committed packaging flow builds a `tar.gz` with:
+
+- the Linux `alterego` binary
+- `alteregod.service`
+- an empty environment template
+- example task configuration
+
+It intentionally excludes any real secrets or real deployment configuration.
+
 ## License
 
 Copyright 2026 yuqitao1024.
