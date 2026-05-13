@@ -133,7 +133,7 @@ func (s *taskSubsystem) Run(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {

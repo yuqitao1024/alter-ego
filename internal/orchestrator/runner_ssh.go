@@ -3,11 +3,13 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type sshTransport interface {
@@ -20,6 +22,17 @@ type SSHRunner struct {
 }
 
 const codexBypassFlags = "--dangerously-bypass-approvals-and-sandbox"
+
+var ErrRemoteCommandTimeout = errors.New("remote command timeout")
+
+const (
+	startSessionTimeout      = 60 * time.Second
+	captureOutputTimeout     = 8 * time.Second
+	sendInteractiveTimeout   = 8 * time.Second
+	hasSessionTimeout        = 8 * time.Second
+	resumeLastSessionTimeout = 15 * time.Second
+	stopSessionTimeout       = 8 * time.Second
+)
 
 func NewSSHRunner(transport sshTransport) *SSHRunner {
 	if transport == nil {
@@ -41,9 +54,9 @@ func (r *SSHRunner) SetMachineResolver(resolver func(machineID string) (MachineC
 
 func (r *SSHRunner) StartInteractiveSession(ctx context.Context, req StartRequest) (RemoteSession, error) {
 	command := wrapRemoteCommand(req.Machine, buildStartCommand(req))
-	output, err := r.transport.Run(ctx, req.Machine, command, "")
+	output, err := r.runWithTimeout(ctx, startSessionTimeout, req.Machine, "start remote tmux session", command, "")
 	if err != nil {
-		return RemoteSession{}, fmt.Errorf("start remote tmux session: %w", err)
+		return RemoteSession{}, err
 	}
 	return parseRemoteSession(output, req.Machine.ID)
 }
@@ -55,9 +68,9 @@ func (r *SSHRunner) CaptureOutput(ctx context.Context, session RemoteSession) (O
 	}
 
 	stateCommand := wrapRemoteCommand(machine, buildSessionStateCommand(session.TMUXSessionName))
-	stateOutput, err := r.transport.Run(ctx, machine, stateCommand, "")
+	stateOutput, err := r.runWithTimeout(ctx, captureOutputTimeout, machine, "inspect tmux session state", stateCommand, "")
 	if err != nil {
-		return OutputWindow{}, fmt.Errorf("inspect tmux session state: %w", err)
+		return OutputWindow{}, err
 	}
 	state, err := parseSessionState(stateOutput)
 	if err != nil {
@@ -65,9 +78,9 @@ func (r *SSHRunner) CaptureOutput(ctx context.Context, session RemoteSession) (O
 	}
 
 	command := wrapRemoteCommand(machine, buildCaptureCommand(session.TMUXSessionName))
-	output, err := r.transport.Run(ctx, machine, command, "")
+	output, err := r.runWithTimeout(ctx, captureOutputTimeout, machine, "capture tmux output", command, "")
 	if err != nil {
-		return OutputWindow{}, fmt.Errorf("capture tmux output: %w", err)
+		return OutputWindow{}, err
 	}
 
 	summary := strings.TrimSpace(output)
@@ -85,8 +98,8 @@ func (r *SSHRunner) SendInteractiveInput(ctx context.Context, session RemoteSess
 	}
 
 	command := wrapRemoteCommand(machine, buildSendKeysCommand(session.TMUXSessionName, input))
-	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
-		return fmt.Errorf("send tmux input: %w", err)
+	if _, err := r.runWithTimeout(ctx, sendInteractiveTimeout, machine, "send tmux input", command, ""); err != nil {
+		return err
 	}
 	return nil
 }
@@ -98,11 +111,11 @@ func (r *SSHRunner) HasSession(ctx context.Context, session RemoteSession) (bool
 	}
 
 	command := wrapRemoteCommand(machine, buildHasSessionCommand(session.TMUXSessionName))
-	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
+	if _, err := r.runWithTimeout(ctx, hasSessionTimeout, machine, "probe tmux session", command, ""); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "can't find session") {
 			return false, nil
 		}
-		return false, fmt.Errorf("probe tmux session: %w", err)
+		return false, err
 	}
 	return true, nil
 }
@@ -117,8 +130,8 @@ func (r *SSHRunner) ResumeLastCodexSession(ctx context.Context, session RemoteSe
 	}
 
 	command := wrapRemoteCommand(machine, buildResumeLastCommand(session.TMUXSessionName, session.Workdir, machine.ShellInit))
-	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
-		return fmt.Errorf("resume last codex session: %w", err)
+	if _, err := r.runWithTimeout(ctx, resumeLastSessionTimeout, machine, "resume last codex session", command, ""); err != nil {
+		return err
 	}
 	return nil
 }
@@ -130,10 +143,24 @@ func (r *SSHRunner) StopSession(ctx context.Context, session RemoteSession) erro
 	}
 
 	command := wrapRemoteCommand(machine, buildStopCommand(session.TMUXSessionName))
-	if _, err := r.transport.Run(ctx, machine, command, ""); err != nil {
-		return fmt.Errorf("stop tmux session: %w", err)
+	if _, err := r.runWithTimeout(ctx, stopSessionTimeout, machine, "stop tmux session", command, ""); err != nil {
+		return err
 	}
 	return nil
+}
+
+func (r *SSHRunner) runWithTimeout(parent context.Context, timeout time.Duration, machine MachineConfig, operation string, command string, stdin string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	output, err := r.transport.Run(ctx, machine, command, stdin)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("%s: %w", operation, ErrRemoteCommandTimeout)
+		}
+		return "", fmt.Errorf("%s: %w", operation, err)
+	}
+	return output, nil
 }
 
 type shellSSHTransport struct{}

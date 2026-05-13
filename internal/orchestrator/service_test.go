@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -77,6 +78,98 @@ func TestTickMovesPendingTaskToPreparingWorkspace(t *testing.T) {
 	}
 	if persisted.Status != StatusPreparingWorkspace {
 		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusPreparingWorkspace)
+	}
+}
+
+func TestTickMarksRunningTaskDetachedWhenCaptureTimesOut(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-timeout",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Investigate timeout",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-timeout",
+		RemoteCodexSessionID: "session-timeout",
+	})
+	runner := service.runner.(*fakeServiceRunner)
+	runner.captureErr = fmt.Errorf("capture tmux output: %w", ErrRemoteCommandTimeout)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusDetached {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusDetached)
+	}
+}
+
+func TestTickTimeoutOnOneTaskDoesNotBlockNextTask(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	runningTask := seedTask(t, store, TaskRun{
+		TaskID:               "task-running-timeout",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Task one",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-running-timeout",
+		RemoteCodexSessionID: "session-running-timeout",
+	})
+	pendingTask := seedTask(t, store, TaskRun{
+		TaskID:       "task-pending-next",
+		TemplateID:   "feature_dev",
+		RepositoryID: "repo_backend",
+		MachineID:    "machine_b",
+		Status:       StatusPending,
+		UserRequest:  "Task two",
+		CreatedBy:    "tester",
+	})
+	runner := service.runner.(*fakeServiceRunner)
+	runner.captureErr = fmt.Errorf("capture tmux output: %w", ErrRemoteCommandTimeout)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("first TickOnce returned error: %v", err)
+	}
+	runner.captureErr = nil
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("second TickOnce returned error: %v", err)
+	}
+
+	persistedRunning, err := store.GetTask(ctx, runningTask.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask(running) returned error: %v", err)
+	}
+	if persistedRunning.Status != StatusDetached {
+		t.Fatalf("persistedRunning.Status = %q, want %q", persistedRunning.Status, StatusDetached)
+	}
+
+	persistedPending, err := store.GetTask(ctx, pendingTask.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask(pending) returned error: %v", err)
+	}
+	if persistedPending.Status != StatusPreparingWorkspace {
+		t.Fatalf("persistedPending.Status = %q, want %q", persistedPending.Status, StatusPreparingWorkspace)
 	}
 }
 
@@ -1020,38 +1113,62 @@ func writeWorkflowFixture(t *testing.T, body string) string {
 type fakeServiceRunner struct {
 	calls []string
 
-	startSession RemoteSession
-	outputWindow OutputWindow
-	hasSession   bool
+	startSession  RemoteSession
+	outputWindow  OutputWindow
+	hasSession    bool
+	startErr      error
+	captureErr    error
+	sendErr       error
+	hasSessionErr error
+	resumeErr     error
+	stopErr       error
 }
 
 func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartRequest) (RemoteSession, error) {
 	f.calls = append(f.calls, "start")
+	if f.startErr != nil {
+		return RemoteSession{}, f.startErr
+	}
 	return f.startSession, nil
 }
 
 func (f *fakeServiceRunner) SendInteractiveInput(context.Context, RemoteSession, string) error {
 	f.calls = append(f.calls, "send")
+	if f.sendErr != nil {
+		return f.sendErr
+	}
 	return nil
 }
 
 func (f *fakeServiceRunner) CaptureOutput(context.Context, RemoteSession) (OutputWindow, error) {
 	f.calls = append(f.calls, "capture")
+	if f.captureErr != nil {
+		return OutputWindow{}, f.captureErr
+	}
 	return f.outputWindow, nil
 }
 
 func (f *fakeServiceRunner) HasSession(context.Context, RemoteSession) (bool, error) {
 	f.calls = append(f.calls, "has-session")
+	if f.hasSessionErr != nil {
+		return false, f.hasSessionErr
+	}
 	return f.hasSession, nil
 }
 
 func (f *fakeServiceRunner) ResumeLastCodexSession(context.Context, RemoteSession) error {
 	f.calls = append(f.calls, "resume")
+	if f.resumeErr != nil {
+		return f.resumeErr
+	}
 	return nil
 }
 
 func (f *fakeServiceRunner) StopSession(context.Context, RemoteSession) error {
 	f.calls = append(f.calls, "stop")
+	if f.stopErr != nil {
+		return f.stopErr
+	}
 	return nil
 }
 

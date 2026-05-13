@@ -222,6 +222,14 @@ func (s *Service) startInteractiveSession(ctx context.Context, task TaskRun) err
 		WorkflowContent:     workflowText,
 	})
 	if err != nil {
+		if errors.Is(err, ErrRemoteCommandTimeout) {
+			task.Status = StatusFailed
+			task.UpdatedAt = s.now()
+			if updateErr := s.store.UpdateTask(ctx, task); updateErr != nil {
+				return updateErr
+			}
+			return s.appendEvent(ctx, task.TaskID, "task_failed", "remote session startup timed out")
+		}
 		return fmt.Errorf("start remote session for task %q: %w", task.TaskID, err)
 	}
 
@@ -239,6 +247,9 @@ func (s *Service) startInteractiveSession(ctx context.Context, task TaskRun) err
 func (s *Service) recoverDetachedTask(ctx context.Context, task TaskRun) error {
 	session, err := ReconnectInteractiveSession(ctx, s.runner, task)
 	if err != nil {
+		if errors.Is(err, ErrRemoteCommandTimeout) {
+			return s.appendEvent(ctx, task.TaskID, "task_reconnect_timeout", "reconnect probe timed out")
+		}
 		return err
 	}
 
@@ -269,6 +280,9 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 
 	window, err := s.runner.CaptureOutput(ctx, sessionFromTask(task))
 	if err != nil {
+		if errors.Is(err, ErrRemoteCommandTimeout) {
+			return s.markTaskDetached(ctx, task, "remote session probe timed out")
+		}
 		return fmt.Errorf("read remote output for task %q: %w", task.TaskID, err)
 	}
 	previousDigest := task.LastScreenDigest
@@ -282,6 +296,9 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 			goto decide
 		}
 		if err := s.runner.ResumeLastCodexSession(ctx, sessionFromTask(task)); err != nil {
+			if errors.Is(err, ErrRemoteCommandTimeout) {
+				return s.markTaskDetached(ctx, task, "remote session resume timed out")
+			}
 			return fmt.Errorf("resume codex session for task %q: %w", task.TaskID, err)
 		}
 		task.LastInput = systemResumeLastInput
@@ -300,6 +317,9 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		}
 		if response.AutoInput != "" {
 			if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), response.AutoInput); err != nil {
+				if errors.Is(err, ErrRemoteCommandTimeout) {
+					return s.markTaskDetached(ctx, task, "remote session auto-response timed out")
+				}
 				return fmt.Errorf("send terminal responder input for task %q: %w", task.TaskID, err)
 			}
 			task.ActiveResponderName = response.Name
@@ -388,6 +408,9 @@ decide:
 		reply := strings.TrimSpace(firstNonEmpty(result.CodexReply, result.NextInput))
 		if reply != "" {
 			if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), reply); err != nil {
+				if errors.Is(err, ErrRemoteCommandTimeout) {
+					return s.markTaskDetached(ctx, task, "remote session reply timed out")
+				}
 				return fmt.Errorf("send remote input for task %q: %w", task.TaskID, err)
 			}
 			task.LastInput = reply
@@ -417,6 +440,15 @@ decide:
 		return s.store.UpdateTask(ctx, task)
 	}
 	return fmt.Errorf("unsupported decision action %q for task %q", result.Action, task.TaskID)
+}
+
+func (s *Service) markTaskDetached(ctx context.Context, task TaskRun, message string) error {
+	task.Status = StatusDetached
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return err
+	}
+	return s.appendEvent(ctx, task.TaskID, "task_detached", message)
 }
 
 func (s *Service) lookupTemplate(templateID string) (*TemplateConfig, error) {
