@@ -104,6 +104,19 @@ func (r *SSHRunner) SendInteractiveInput(ctx context.Context, session RemoteSess
 	return nil
 }
 
+func (r *SSHRunner) SendInteractiveKey(ctx context.Context, session RemoteSession, key string) error {
+	machine, err := r.machineResolver(session.MachineID)
+	if err != nil {
+		return err
+	}
+
+	command := wrapRemoteCommand(machine, buildSendKeyCommand(session.TMUXSessionName, key))
+	if _, err := r.runWithTimeout(ctx, sendInteractiveTimeout, machine, "send tmux key", command, ""); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *SSHRunner) HasSession(ctx context.Context, session RemoteSession) (bool, error) {
 	machine, err := r.machineResolver(session.MachineID)
 	if err != nil {
@@ -245,6 +258,10 @@ func buildSessionStateCommand(sessionName string) string {
 
 func buildSendKeysCommand(sessionName, input string) string {
 	return fmt.Sprintf("tmux send-keys -t %s -- %s Enter", shellQuote(sessionName), shellQuote(input))
+}
+
+func buildSendKeyCommand(sessionName, key string) string {
+	return fmt.Sprintf("tmux send-keys -t %s %s", shellQuote(sessionName), shellQuote(key))
 }
 
 func buildResumeLastCommand(sessionName, workdir string, shellInit []string) string {

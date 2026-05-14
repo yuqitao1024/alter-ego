@@ -345,6 +345,25 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 			}
 			return nil
 		}
+		if response.AutoKey != "" {
+			if err := s.runner.SendInteractiveKey(ctx, sessionFromTask(task), response.AutoKey); err != nil {
+				if errors.Is(err, ErrRemoteCommandTimeout) {
+					return s.markTaskDetached(ctx, task, "remote session auto-key timed out")
+				}
+				return fmt.Errorf("send terminal responder key for task %q: %w", task.TaskID, err)
+			}
+			task.ActiveResponderName = response.Name
+			task.ActiveResponderScreenDigest = task.LastScreenDigest
+			task.LastInput = "[key] " + response.AutoKey
+			task.UpdatedAt = s.now()
+			if err := s.store.UpdateTask(ctx, task); err != nil {
+				return err
+			}
+			if err := s.appendEvent(ctx, task.TaskID, "terminal_responder_applied", response.Name); err != nil {
+				return err
+			}
+			return nil
+		}
 		if response.Question != nil {
 			task.Status = StatusWaitingUserInput
 			task.ActiveResponderName = response.Name

@@ -79,6 +79,11 @@ func (f *fakeRemoteRunner) SendInteractiveInput(context.Context, RemoteSession, 
 	return nil
 }
 
+func (f *fakeRemoteRunner) SendInteractiveKey(context.Context, RemoteSession, string) error {
+	f.calls = append(f.calls, "send-key")
+	return nil
+}
+
 func (f *fakeRemoteRunner) HasSession(context.Context, RemoteSession) (bool, error) {
 	f.calls = append(f.calls, "has-session")
 	return f.hasSession, nil

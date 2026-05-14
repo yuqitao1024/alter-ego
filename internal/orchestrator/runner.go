@@ -10,6 +10,7 @@ type RemoteRunner interface {
 	StartInteractiveSession(ctx context.Context, req StartRequest) (RemoteSession, error)
 	CaptureOutput(ctx context.Context, session RemoteSession) (OutputWindow, error)
 	SendInteractiveInput(ctx context.Context, session RemoteSession, input string) error
+	SendInteractiveKey(ctx context.Context, session RemoteSession, key string) error
 	HasSession(ctx context.Context, session RemoteSession) (bool, error)
 	ResumeLastCodexSession(ctx context.Context, session RemoteSession) error
 	StopSession(ctx context.Context, session RemoteSession) error

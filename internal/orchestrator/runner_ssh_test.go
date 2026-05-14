@@ -138,6 +138,29 @@ func TestSSHRunnerSendInputUsesSendKeys(t *testing.T) {
 	}
 }
 
+func TestSSHRunnerSendKeyUsesSendKeysWithoutEnter(t *testing.T) {
+	t.Parallel()
+
+	transport := &fakeSSHTransport{}
+	runner := NewSSHRunner(transport)
+	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh"}}
+	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
+
+	err := runner.SendInteractiveKey(context.Background(), RemoteSession{
+		MachineID:       "machine_a",
+		TMUXSessionName: "alterego-task-escape",
+	}, "Escape")
+	if err != nil {
+		t.Fatalf("SendInteractiveKey returned error: %v", err)
+	}
+	if !strings.Contains(transport.lastCommand, "tmux send-keys -t 'alterego-task-escape' 'Escape'") {
+		t.Fatalf("command = %q, want send-keys Escape", transport.lastCommand)
+	}
+	if strings.Contains(transport.lastCommand, "Enter") {
+		t.Fatalf("command = %q, want no Enter for raw key send", transport.lastCommand)
+	}
+}
+
 func TestSSHRunnerHasSessionUsesTMUXHasSession(t *testing.T) {
 	t.Parallel()
 

@@ -1020,6 +1020,56 @@ You've hit your usage limit. Upgrade to Pro, purchase more credits or try again 
 	}
 }
 
+func TestTickDismissesPlanPromptWithEscape(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-plan-prompt",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-plan-prompt",
+		RemoteCodexSessionID: "session-plan-prompt",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: `Create a plan?
+shift + tab use Plan mode
+esc dismiss`,
+		Summary: "Create a plan? esc dismiss",
+	}
+	decider := service.decider.(*fakeDecisionEngine)
+	runner := service.runner.(*fakeServiceRunner)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if persisted.LastInput != "[key] Escape" {
+		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, "[key] Escape")
+	}
+	if runner.lastSentKey != "Escape" {
+		t.Fatalf("runner.lastSentKey = %q, want %q", runner.lastSentKey, "Escape")
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
+}
+
 func TestReplyResumesWaitingTask(t *testing.T) {
 	t.Parallel()
 
@@ -1420,6 +1470,8 @@ type fakeServiceRunner struct {
 	startSession  RemoteSession
 	outputWindow  OutputWindow
 	hasSession    bool
+	lastSentInput string
+	lastSentKey   string
 	startErr      error
 	captureErr    error
 	sendErr       error
@@ -1436,8 +1488,18 @@ func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartReques
 	return f.startSession, nil
 }
 
-func (f *fakeServiceRunner) SendInteractiveInput(context.Context, RemoteSession, string) error {
+func (f *fakeServiceRunner) SendInteractiveInput(_ context.Context, _ RemoteSession, input string) error {
 	f.calls = append(f.calls, "send")
+	f.lastSentInput = input
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	return nil
+}
+
+func (f *fakeServiceRunner) SendInteractiveKey(_ context.Context, _ RemoteSession, key string) error {
+	f.calls = append(f.calls, "send-key")
+	f.lastSentKey = key
 	if f.sendErr != nil {
 		return f.sendErr
 	}
