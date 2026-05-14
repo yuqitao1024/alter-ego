@@ -64,10 +64,13 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			last_resolved_responder_name,
 			last_resolved_screen_digest,
 			responder_cooldown_until,
+			last_decision_screen_digest,
+			last_decision_action,
+			decision_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
@@ -87,6 +90,9 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		task.LastResolvedResponderName,
 		task.LastResolvedScreenDigest,
 		formatOptionalTime(task.ResponderCooldownUntil),
+		task.LastDecisionScreenDigest,
+		task.LastDecisionAction,
+		formatOptionalTime(task.DecisionCooldownUntil),
 		awaitingQuestion,
 		task.CreatedAt.UTC().Format(time.RFC3339Nano),
 		task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -123,6 +129,9 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			last_resolved_responder_name = ?,
 			last_resolved_screen_digest = ?,
 			responder_cooldown_until = ?,
+			last_decision_screen_digest = ?,
+			last_decision_action = ?,
+			decision_cooldown_until = ?,
 			awaiting_question = ?,
 			created_at = ?,
 			updated_at = ?
@@ -145,6 +154,9 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		task.LastResolvedResponderName,
 		task.LastResolvedScreenDigest,
 		formatOptionalTime(task.ResponderCooldownUntil),
+		task.LastDecisionScreenDigest,
+		task.LastDecisionAction,
+		formatOptionalTime(task.DecisionCooldownUntil),
 		awaitingQuestion,
 		task.CreatedAt.UTC().Format(time.RFC3339Nano),
 		task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -186,6 +198,9 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			last_resolved_responder_name,
 			last_resolved_screen_digest,
 			responder_cooldown_until,
+			last_decision_screen_digest,
+			last_decision_action,
+			decision_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
@@ -221,6 +236,9 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			last_resolved_responder_name,
 			last_resolved_screen_digest,
 			responder_cooldown_until,
+			last_decision_screen_digest,
+			last_decision_action,
+			decision_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
@@ -438,6 +456,9 @@ func (s *Store) init(ctx context.Context) error {
 			last_resolved_responder_name TEXT NOT NULL DEFAULT '',
 			last_resolved_screen_digest TEXT NOT NULL DEFAULT '',
 			responder_cooldown_until TEXT,
+			last_decision_screen_digest TEXT NOT NULL DEFAULT '',
+			last_decision_action TEXT NOT NULL DEFAULT '',
+			decision_cooldown_until TEXT,
 			awaiting_question TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -477,6 +498,9 @@ func (s *Store) init(ctx context.Context) error {
 		`ALTER TABLE tasks ADD COLUMN last_resolved_responder_name TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN last_resolved_screen_digest TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN responder_cooldown_until TEXT`,
+		`ALTER TABLE tasks ADD COLUMN last_decision_screen_digest TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN last_decision_action TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN decision_cooldown_until TEXT`,
 	}
 	for _, statement := range migrations {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
@@ -496,6 +520,7 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	var status string
 	var awaitingQuestion sql.NullString
 	var responderCooldownUntil sql.NullString
+	var decisionCooldownUntil sql.NullString
 	var createdAt string
 	var updatedAt string
 
@@ -518,6 +543,9 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&task.LastResolvedResponderName,
 		&task.LastResolvedScreenDigest,
 		&responderCooldownUntil,
+		&task.LastDecisionScreenDigest,
+		&task.LastDecisionAction,
+		&decisionCooldownUntil,
 		&awaitingQuestion,
 		&createdAt,
 		&updatedAt,
@@ -544,6 +572,10 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	task.ResponderCooldownUntil, err = parseOptionalTime(responderCooldownUntil)
 	if err != nil {
 		return TaskRun{}, fmt.Errorf("parse responder_cooldown_until: %w", err)
+	}
+	task.DecisionCooldownUntil, err = parseOptionalTime(decisionCooldownUntil)
+	if err != nil {
+		return TaskRun{}, fmt.Errorf("parse decision_cooldown_until: %w", err)
 	}
 
 	return task, nil

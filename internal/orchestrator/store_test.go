@@ -62,6 +62,10 @@ func TestStoreUpdatesTaskStatusAndSessionFields(t *testing.T) {
 	task.LastResolvedScreenDigest = "digest:resolved"
 	cooldown := task.UpdatedAt.Add(30 * time.Second)
 	task.ResponderCooldownUntil = &cooldown
+	task.LastDecisionScreenDigest = "digest:decision"
+	task.LastDecisionAction = DecisionActionWait
+	decisionCooldown := task.UpdatedAt.Add(45 * time.Second)
+	task.DecisionCooldownUntil = &decisionCooldown
 	task.UpdatedAt = task.UpdatedAt.Add(2 * time.Minute)
 	if err := store.UpdateTask(ctx, task); err != nil {
 		t.Fatalf("UpdateTask returned error: %v", err)
@@ -307,12 +311,25 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	if got.LastResolvedScreenDigest != want.LastResolvedScreenDigest {
 		t.Fatalf("LastResolvedScreenDigest = %q, want %q", got.LastResolvedScreenDigest, want.LastResolvedScreenDigest)
 	}
+	if got.LastDecisionScreenDigest != want.LastDecisionScreenDigest {
+		t.Fatalf("LastDecisionScreenDigest = %q, want %q", got.LastDecisionScreenDigest, want.LastDecisionScreenDigest)
+	}
+	if got.LastDecisionAction != want.LastDecisionAction {
+		t.Fatalf("LastDecisionAction = %q, want %q", got.LastDecisionAction, want.LastDecisionAction)
+	}
 	switch {
 	case got.ResponderCooldownUntil == nil && want.ResponderCooldownUntil == nil:
 	case got.ResponderCooldownUntil == nil || want.ResponderCooldownUntil == nil:
 		t.Fatalf("ResponderCooldownUntil = %v, want %v", got.ResponderCooldownUntil, want.ResponderCooldownUntil)
 	case !got.ResponderCooldownUntil.Equal(*want.ResponderCooldownUntil):
 		t.Fatalf("ResponderCooldownUntil = %s, want %s", got.ResponderCooldownUntil, want.ResponderCooldownUntil)
+	}
+	switch {
+	case got.DecisionCooldownUntil == nil && want.DecisionCooldownUntil == nil:
+	case got.DecisionCooldownUntil == nil || want.DecisionCooldownUntil == nil:
+		t.Fatalf("DecisionCooldownUntil = %v, want %v", got.DecisionCooldownUntil, want.DecisionCooldownUntil)
+	case !got.DecisionCooldownUntil.Equal(*want.DecisionCooldownUntil):
+		t.Fatalf("DecisionCooldownUntil = %s, want %s", got.DecisionCooldownUntil, want.DecisionCooldownUntil)
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("CreatedAt = %s, want %s", got.CreatedAt, want.CreatedAt)

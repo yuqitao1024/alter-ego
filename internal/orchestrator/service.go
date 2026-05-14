@@ -21,6 +21,7 @@ type Service struct {
 }
 
 const resolvedResponderCooldown = 10 * time.Second
+const decisionArbitrationCooldown = 60 * time.Second
 const systemResumeLastInput = "[system] codex resume --last"
 
 type TaskNotifier interface {
@@ -361,6 +362,21 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 	}
 
 decide:
+	if shouldSkipDecisionForWorkingWindow(window) {
+		task.Status = StatusRunning
+		task.ActiveResponderName = ""
+		task.ActiveResponderScreenDigest = ""
+		task.UpdatedAt = s.now()
+		return s.store.UpdateTask(ctx, task)
+	}
+	if s.shouldSkipDecisionArbitration(task) {
+		task.Status = StatusRunning
+		task.ActiveResponderName = ""
+		task.ActiveResponderScreenDigest = ""
+		task.UpdatedAt = s.now()
+		return s.store.UpdateTask(ctx, task)
+	}
+
 	result, err := s.decider.DecideNextStep(ctx, DecisionContext{
 		Task:         task,
 		WorkflowText: workflowText,
@@ -372,6 +388,10 @@ decide:
 	}
 
 	task.LastOutputSummary = coalesceString(result.Summary, task.LastOutputSummary)
+	task.LastDecisionScreenDigest = task.LastScreenDigest
+	task.LastDecisionAction = result.Action
+	decisionCooldownUntil := s.now().Add(decisionArbitrationCooldown)
+	task.DecisionCooldownUntil = &decisionCooldownUntil
 	switch result.Action {
 	case DecisionActionAskUser:
 		question := result.Question
@@ -530,4 +550,40 @@ func (s *Service) shouldIgnoreResolvedResponder(task TaskRun, response TerminalR
 		return false
 	}
 	return s.now().Before(*task.ResponderCooldownUntil)
+}
+
+func (s *Service) shouldSkipDecisionArbitration(task TaskRun) bool {
+	if task.LastDecisionScreenDigest == "" || task.DecisionCooldownUntil == nil {
+		return false
+	}
+	if task.LastDecisionScreenDigest != task.LastScreenDigest {
+		return false
+	}
+	return s.now().Before(*task.DecisionCooldownUntil)
+}
+
+func shouldSkipDecisionForWorkingWindow(window OutputWindow) bool {
+	if !window.SessionState.CodexActive() {
+		return false
+	}
+
+	text := strings.ToLower(strings.TrimSpace(window.RawOutput + "\n" + window.Summary))
+	switch {
+	case strings.Contains(text, "esc to interrupt"):
+		return true
+	case strings.Contains(text, "\nworking"):
+		return true
+	case strings.HasPrefix(text, "working"):
+		return true
+	case strings.Contains(text, " working "):
+		return true
+	case strings.Contains(text, "applying patch"):
+		return true
+	case strings.Contains(text, "running tests"):
+		return true
+	case strings.Contains(text, "reading file"):
+		return true
+	default:
+		return false
+	}
 }

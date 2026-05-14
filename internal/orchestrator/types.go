@@ -35,6 +35,9 @@ type TaskRun struct {
 	LastResolvedResponderName   string
 	LastResolvedScreenDigest    string
 	ResponderCooldownUntil      *time.Time
+	LastDecisionScreenDigest    string
+	LastDecisionAction          string
+	DecisionCooldownUntil       *time.Time
 	AwaitingQuestion            *AwaitingQuestion
 	CreatedAt                   time.Time
 	UpdatedAt                   time.Time

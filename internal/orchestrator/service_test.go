@@ -307,6 +307,160 @@ Which approach should I take for the implementation?
 	}
 }
 
+func TestTickSkipsDecisionModelWhileCodexIsStillWorking(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-working-skip",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-working-skip",
+		RemoteCodexSessionID: "session-working-skip",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: "Working\nPress Esc to interrupt",
+		Summary:   "Working",
+		SessionState: SessionState{
+			CurrentCommand: "codex",
+		},
+	}
+	decider := service.decider.(*fakeDecisionEngine)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
+}
+
+func TestTickSkipsDecisionModelForSameScreenDuringCooldown(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	now := time.Date(2026, 5, 14, 1, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
+
+	ctx := context.Background()
+	window := OutputWindow{
+		RawOutput: "Need operator confirmation",
+		Summary:   "Need operator confirmation",
+		SessionState: SessionState{
+			CurrentCommand: "codex",
+		},
+	}
+	cooldown := now.Add(30 * time.Second)
+	task := seedTask(t, store, TaskRun{
+		TaskID:                    "task-decision-cooldown",
+		TemplateID:                "feature_dev",
+		RepositoryID:              "repo_backend",
+		MachineID:                 "machine_a",
+		Status:                    StatusRunning,
+		UserRequest:               "Implement orchestrator",
+		CreatedBy:                 "tester",
+		RemoteWorkdir:             "/srv/backend",
+		TMUXSessionName:           "alterego-task-decision-cooldown",
+		RemoteCodexSessionID:      "session-decision-cooldown",
+		LastScreenDigest:          ScreenDigest(window),
+		LastDecisionScreenDigest:  ScreenDigest(window),
+		LastDecisionAction:        DecisionActionWait,
+		DecisionCooldownUntil:     &cooldown,
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = window
+	decider := service.decider.(*fakeDecisionEngine)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	}
+}
+
+func TestTickRechecksDecisionModelAfterDecisionCooldownExpires(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	now := time.Date(2026, 5, 14, 1, 5, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
+
+	ctx := context.Background()
+	window := OutputWindow{
+		RawOutput: "Need operator confirmation",
+		Summary:   "Need operator confirmation",
+		SessionState: SessionState{
+			CurrentCommand: "codex",
+		},
+	}
+	expired := now.Add(-time.Second)
+	task := seedTask(t, store, TaskRun{
+		TaskID:                    "task-decision-recheck",
+		TemplateID:                "feature_dev",
+		RepositoryID:              "repo_backend",
+		MachineID:                 "machine_a",
+		Status:                    StatusRunning,
+		UserRequest:               "Implement orchestrator",
+		CreatedBy:                 "tester",
+		RemoteWorkdir:             "/srv/backend",
+		TMUXSessionName:           "alterego-task-decision-recheck",
+		RemoteCodexSessionID:      "session-decision-recheck",
+		LastScreenDigest:          ScreenDigest(window),
+		LastDecisionScreenDigest:  ScreenDigest(window),
+		LastDecisionAction:        DecisionActionWait,
+		DecisionCooldownUntil:     &expired,
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = window
+	decider := service.decider.(*fakeDecisionEngine)
+	decider.result = DecisionResult{
+		Action:  DecisionActionWait,
+		Summary: "Still waiting",
+	}
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if decider.callCount != 1 {
+		t.Fatalf("decider.callCount = %d, want 1", decider.callCount)
+	}
+	if persisted.LastDecisionScreenDigest != ScreenDigest(window) {
+		t.Fatalf("persisted.LastDecisionScreenDigest = %q, want %q", persisted.LastDecisionScreenDigest, ScreenDigest(window))
+	}
+}
+
 func TestTickKeepsTaskRunningWhenDecisionEngineReturnsWait(t *testing.T) {
 	t.Parallel()
 
