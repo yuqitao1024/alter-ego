@@ -5,14 +5,15 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type TerminalResponse struct {
-	Name     string
-	Handled  bool
+	Name      string
+	Handled   bool
 	AutoInput string
-	AutoKey  string
-	Question *AwaitingQuestion
+	AutoKey   string
+	Question  *AwaitingQuestion
 }
 
 func EvaluateTerminalResponse(task TaskRun, window OutputWindow, now time.Time) TerminalResponse {
@@ -97,10 +98,10 @@ func looksLikeUsageLimitPrompt(text string) bool {
 }
 
 func looksLikePlanPrompt(text string) bool {
-	return strings.Contains(text, "create a plan?") &&
-		strings.Contains(text, "use plan mode") &&
-		strings.Contains(text, "esc") &&
-		strings.Contains(text, "dismiss")
+	normalized := normalizeTerminalPrompt(text)
+	return strings.Contains(normalized, "create a plan") &&
+		strings.Contains(normalized, "use plan mode") &&
+		strings.Contains(normalized, "esc dismiss")
 }
 
 func firstNonEmpty(values ...string) string {
@@ -110,4 +111,21 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeTerminalPrompt(text string) string {
+	var b strings.Builder
+	lastSpace := true
+	for _, r := range strings.ToLower(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastSpace = false
+			continue
+		}
+		if !lastSpace {
+			b.WriteByte(' ')
+			lastSpace = true
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
