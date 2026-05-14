@@ -307,6 +307,156 @@ Which approach should I take for the implementation?
 	}
 }
 
+func TestTickPromotesPlanningTaskToExecutingOnModelReply(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-phase-promotion",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		Phase:                TaskPhasePlanning,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-phase-promotion",
+		RemoteCodexSessionID: "session-phase-promotion",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: "Ready to start implementation",
+		Summary:   "Ready to start implementation",
+		SessionState: SessionState{
+			CurrentCommand: "codex",
+		},
+	}
+	service.decider.(*fakeDecisionEngine).result = DecisionResult{
+		Action:    DecisionActionReplyToCodex,
+		NextPhase: TaskPhaseExecuting,
+		CodexReply: "Start coding now.",
+		Summary:   "Implementation starts now",
+	}
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Phase != TaskPhaseExecuting {
+		t.Fatalf("persisted.Phase = %q, want %q", persisted.Phase, TaskPhaseExecuting)
+	}
+}
+
+func TestTickUsesFixedContinueReplyDuringExecuting(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-executing-continue",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		Phase:                TaskPhaseExecuting,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-executing-continue",
+		RemoteCodexSessionID: "session-executing-continue",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: "Waiting for a short continuation",
+		Summary:   "Waiting for a short continuation",
+		SessionState: SessionState{
+			CurrentCommand: "codex",
+		},
+	}
+	runner := service.runner.(*fakeServiceRunner)
+	service.decider.(*fakeDecisionEngine).result = DecisionResult{
+		Action:     DecisionActionReplyToCodex,
+		CodexReply: "Long detailed plan that should be ignored.",
+		Summary:    "Continue execution",
+	}
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.LastInput != executingContinueReply {
+		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, executingContinueReply)
+	}
+	if len(runner.calls) < 2 || runner.calls[1] != "send" {
+		t.Fatalf("runner.calls = %v, want capture then send", runner.calls)
+	}
+}
+
+func TestTickForcesUserApprovalBeforeReturningExecutingTaskToPlanning(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-phase-regression",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		Phase:                TaskPhaseExecuting,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-phase-regression",
+		RemoteCodexSessionID: "session-phase-regression",
+	})
+	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
+		RawOutput: "Need to revisit the plan",
+		Summary:   "Need to revisit the plan",
+		SessionState: SessionState{
+			CurrentCommand: "codex",
+		},
+	}
+	service.decider.(*fakeDecisionEngine).result = DecisionResult{
+		Action:    DecisionActionReplyToCodex,
+		NextPhase: TaskPhasePlanning,
+		Summary:   "Need to reopen planning",
+	}
+	notifier := service.notifier.(*fakeTaskNotifier)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.Phase != TaskPhaseExecuting {
+		t.Fatalf("persisted.Phase = %q, want %q", persisted.Phase, TaskPhaseExecuting)
+	}
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	}
+}
+
 func TestTickSkipsDecisionModelWhileCodexIsStillWorking(t *testing.T) {
 	t.Parallel()
 

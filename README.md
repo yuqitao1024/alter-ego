@@ -135,6 +135,13 @@ Interactive task lifecycle:
 8. `failed` when startup, recovery, or remote execution cannot continue
 9. `stopped` when the operator explicitly stops the task
 
+Each task also has a long-lived phase:
+
+- `planning` for requirement discussion, spec writing, and plan writing
+- `executing` for development, testing, build, commit, push, and PR work
+
+Once a task enters `executing`, it cannot automatically return to `planning`. Re-entering planning must first go through `waiting_user_input` and explicit operator approval in Lark.
+
 Task state and operator audit data are stored in SQLite:
 
 - `tasks`
@@ -148,12 +155,16 @@ Task decision flow:
 1. probe the current `tmux` pane state and capture the current screen tail;
 2. run deterministic responders for known terminal handshakes;
 3. if the pane is still alive but Codex has dropped back to the shell, issue one controlled `codex resume --last`;
-4. if no responder applies, send the workflow, task context, and terminal excerpt to the configured LLM;
-5. the LLM must return one of:
+4. if Codex is clearly still working, do not call the model arbitrator;
+5. if the same screen digest was arbitrated recently, do not call the model again until the cooldown expires;
+6. otherwise send the workflow, task context, and terminal excerpt to the configured LLM;
+7. the LLM must return one of:
    - `wait`
    - `reply_to_codex`
    - `ask_user`
    - `complete_task`
+
+`wait` is not a persisted task state. It is only a one-tick decision outcome that leaves the task in `running` without sending any new input.
 
 Run locally:
 

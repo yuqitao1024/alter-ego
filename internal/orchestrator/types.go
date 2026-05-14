@@ -3,6 +3,7 @@ package orchestrator
 import "time"
 
 type TaskStatus string
+type TaskPhase string
 
 const (
 	StatusPending            TaskStatus = "pending"
@@ -16,12 +17,18 @@ const (
 	StatusStopped            TaskStatus = "stopped"
 )
 
+const (
+	TaskPhasePlanning  TaskPhase = "planning"
+	TaskPhaseExecuting TaskPhase = "executing"
+)
+
 type TaskRun struct {
 	TaskID                      string
 	TemplateID                  string
 	RepositoryID                string
 	MachineID                   string
 	Status                      TaskStatus
+	Phase                       TaskPhase
 	UserRequest                 string
 	CreatedBy                   string
 	RemoteWorkdir               string

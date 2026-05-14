@@ -244,6 +244,7 @@ func sampleTaskRun(taskID string, status TaskStatus) TaskRun {
 		RepositoryID:         "repo_backend",
 		MachineID:            "machine_a",
 		Status:               status,
+		Phase:                TaskPhasePlanning,
 		UserRequest:          "Implement persisted store",
 		CreatedBy:            "user_123",
 		RemoteWorkdir:        "",
@@ -274,6 +275,9 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	}
 	if got.Status != want.Status {
 		t.Fatalf("Status = %q, want %q", got.Status, want.Status)
+	}
+	if got.Phase != want.Phase {
+		t.Fatalf("Phase = %q, want %q", got.Phase, want.Phase)
 	}
 	if got.RemoteWorkdir != want.RemoteWorkdir {
 		t.Fatalf("RemoteWorkdir = %q, want %q", got.RemoteWorkdir, want.RemoteWorkdir)

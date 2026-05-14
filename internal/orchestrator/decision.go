@@ -15,6 +15,10 @@ const fixedDecisionRules = `You are Alter Ego's remote Codex task coordinator.
 - If Codex is still working, return wait.
 - If Codex is waiting for a direct operator answer, either ask the user or reply to Codex directly.
 - If the task is already complete and Codex is only waiting for the next operator instruction, return complete_task.
+- planning phase covers requirement discussion, scope clarification, spec writing, plan writing, and solution comparison.
+- executing phase starts once Codex has entered development or testing work.
+- once a task is in executing, you must not move it back to planning on your own. Re-entering planning requires ask_user so the human can approve it in Lark.
+- in executing, do not generate detailed step-by-step implementation instructions unless the user explicitly re-approved a return to planning.
 - Return strict JSON with one action: reply_to_codex, ask_user, complete_task, or wait.
 - Return exactly one JSON object.
 - Do not wrap the JSON in Markdown code fences.
@@ -38,6 +42,7 @@ type DecisionContext struct {
 type DecisionResult struct {
 	Action       string
 	DecisionType string
+	NextPhase    TaskPhase
 	NextInput    string
 	CodexReply   string
 	Summary      string
@@ -65,6 +70,7 @@ func NewModelDecisionEngine(model DecisionModel) *ModelDecisionEngine {
 type decisionPayload struct {
 	Action       string `json:"action"`
 	DecisionType string `json:"decision_type"`
+	NextPhase    string `json:"next_phase"`
 	Summary      string `json:"summary"`
 	CodexReply   string `json:"codex_reply"`
 	UserQuestion string `json:"user_question"`
@@ -74,6 +80,7 @@ func (p *decisionPayload) UnmarshalJSON(data []byte) error {
 	type rawDecisionPayload struct {
 		Action       string          `json:"action"`
 		DecisionType json.RawMessage `json:"decision_type"`
+		NextPhase    string          `json:"next_phase"`
 		Summary      string          `json:"summary"`
 		CodexReply   string          `json:"codex_reply"`
 		UserQuestion string          `json:"user_question"`
@@ -85,6 +92,7 @@ func (p *decisionPayload) UnmarshalJSON(data []byte) error {
 	}
 
 	p.Action = raw.Action
+	p.NextPhase = raw.NextPhase
 	p.Summary = raw.Summary
 	p.CodexReply = raw.CodexReply
 	p.UserQuestion = raw.UserQuestion
@@ -135,6 +143,7 @@ func (e *ModelDecisionEngine) DecideNextStep(ctx context.Context, in DecisionCon
 	result := DecisionResult{
 		Action:       strings.TrimSpace(payload.Action),
 		DecisionType: strings.TrimSpace(payload.DecisionType),
+		NextPhase:    normalizeTaskPhaseValue(payload.NextPhase),
 		Summary:      strings.TrimSpace(payload.Summary),
 		CodexReply:   strings.TrimSpace(payload.CodexReply),
 	}
@@ -187,6 +196,8 @@ func BuildDecisionPrompt(in DecisionContext) string {
 	builder.WriteString(in.Task.MachineID)
 	builder.WriteString("\nremote_codex_session_id: ")
 	builder.WriteString(in.Task.RemoteCodexSessionID)
+	builder.WriteString("\ntask_phase: ")
+	builder.WriteString(string(normalizeTaskPhase(in.Task)))
 	builder.WriteString("\nuser_request: ")
 	builder.WriteString(userRequest)
 	builder.WriteString("\nlast_input: ")
@@ -202,11 +213,22 @@ func BuildDecisionPrompt(in DecisionContext) string {
 	builder.WriteString("\ncompletion_rule: If the requested workflow is already complete and Codex only needs another operator prompt, return complete_task.")
 	builder.WriteString("\nraw_terminal_excerpt:\n")
 	builder.WriteString(strings.TrimSpace(in.OutputWindow.RawOutput))
-	builder.WriteString("\n\nReturn exactly one JSON object with fields: action, decision_type, summary, codex_reply, user_question.")
+	builder.WriteString("\n\nReturn exactly one JSON object with fields: action, decision_type, next_phase, summary, codex_reply, user_question.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
 	builder.WriteString("\nThe response must be valid JSON parsable by Go's encoding/json package.")
 	return builder.String()
+}
+
+func normalizeTaskPhaseValue(raw string) TaskPhase {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(TaskPhaseExecuting):
+		return TaskPhaseExecuting
+	case string(TaskPhasePlanning):
+		return TaskPhasePlanning
+	default:
+		return ""
+	}
 }
 
 func extractJSONPayload(raw string) string {

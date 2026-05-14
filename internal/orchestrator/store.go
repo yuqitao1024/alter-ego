@@ -51,6 +51,7 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			repository_id,
 			machine_id,
 			status,
+			phase,
 			user_request,
 			created_by,
 			remote_workdir,
@@ -70,13 +71,14 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			awaiting_question,
 			created_at,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
 		task.RepositoryID,
 		task.MachineID,
 		task.Status,
+		task.Phase,
 		task.UserRequest,
 		task.CreatedBy,
 		task.RemoteWorkdir,
@@ -116,6 +118,7 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			repository_id = ?,
 			machine_id = ?,
 			status = ?,
+			phase = ?,
 			user_request = ?,
 			created_by = ?,
 			remote_workdir = ?,
@@ -141,6 +144,7 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		task.RepositoryID,
 		task.MachineID,
 		task.Status,
+		task.Phase,
 		task.UserRequest,
 		task.CreatedBy,
 		task.RemoteWorkdir,
@@ -185,6 +189,7 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			repository_id,
 			machine_id,
 			status,
+			phase,
 			user_request,
 			created_by,
 			remote_workdir,
@@ -223,6 +228,7 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			repository_id,
 			machine_id,
 			status,
+			phase,
 			user_request,
 			created_by,
 			remote_workdir,
@@ -443,6 +449,7 @@ func (s *Store) init(ctx context.Context) error {
 			repository_id TEXT NOT NULL,
 			machine_id TEXT NOT NULL,
 			status TEXT NOT NULL,
+			phase TEXT NOT NULL DEFAULT 'planning',
 			user_request TEXT NOT NULL,
 			created_by TEXT NOT NULL,
 			remote_workdir TEXT NOT NULL,
@@ -501,6 +508,7 @@ func (s *Store) init(ctx context.Context) error {
 		`ALTER TABLE tasks ADD COLUMN last_decision_screen_digest TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN last_decision_action TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN decision_cooldown_until TEXT`,
+		`ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'planning'`,
 	}
 	for _, statement := range migrations {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
@@ -518,6 +526,7 @@ type taskScanner interface {
 func scanTask(scanner taskScanner) (TaskRun, error) {
 	var task TaskRun
 	var status string
+	var phase string
 	var awaitingQuestion sql.NullString
 	var responderCooldownUntil sql.NullString
 	var decisionCooldownUntil sql.NullString
@@ -530,6 +539,7 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&task.RepositoryID,
 		&task.MachineID,
 		&status,
+		&phase,
 		&task.UserRequest,
 		&task.CreatedBy,
 		&task.RemoteWorkdir,
@@ -555,6 +565,7 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	}
 
 	task.Status = TaskStatus(status)
+	task.Phase = TaskPhase(phase)
 
 	task.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {

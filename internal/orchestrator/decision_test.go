@@ -144,7 +144,7 @@ func TestModelDecisionEngineReturnsReplyToCodex(t *testing.T) {
 	t.Parallel()
 
 	engine := NewModelDecisionEngine(&fakeDecisionModel{
-		response: `{"action":"reply_to_codex","decision_type":"none","summary":"Continue with issue 30","codex_reply":"切回 issue #30 继续开发。"}`,
+		response: `{"action":"reply_to_codex","decision_type":"none","next_phase":"executing","summary":"Continue with issue 30","codex_reply":"切回 issue #30 继续开发。"}`,
 	})
 
 	result, err := engine.DecideNextStep(t.Context(), DecisionContext{
@@ -164,6 +164,9 @@ func TestModelDecisionEngineReturnsReplyToCodex(t *testing.T) {
 	}
 	if result.CodexReply != "切回 issue #30 继续开发。" {
 		t.Fatalf("CodexReply = %q", result.CodexReply)
+	}
+	if result.NextPhase != TaskPhaseExecuting {
+		t.Fatalf("NextPhase = %q, want %q", result.NextPhase, TaskPhaseExecuting)
 	}
 }
 

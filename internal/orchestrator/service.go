@@ -23,6 +23,7 @@ type Service struct {
 const resolvedResponderCooldown = 10 * time.Second
 const decisionArbitrationCooldown = 60 * time.Second
 const systemResumeLastInput = "[system] codex resume --last"
+const executingContinueReply = "Continue according to the already confirmed plan and current workflow. Do not reopen planning. If you truly need to change scope or approach, stop and ask the user explicitly."
 
 type TaskNotifier interface {
 	NotifyTaskQuestion(ctx context.Context, task TaskRun) error
@@ -66,6 +67,7 @@ func (s *Service) StartTask(ctx context.Context, templateID, createdBy, userRequ
 		RepositoryID: template.Repository.ID,
 		MachineID:    machineID,
 		Status:       StatusPending,
+		Phase:        TaskPhasePlanning,
 		UserRequest:  userRequest,
 		CreatedBy:    createdBy,
 		CreatedAt:    now,
@@ -126,6 +128,9 @@ func (s *Service) Reply(ctx context.Context, taskID, text string) error {
 	task.Status = StatusRunning
 	task.AwaitingQuestion = nil
 	task.LastInput = text
+	if wantsExecutionPhase(text) {
+		task.Phase = TaskPhaseExecuting
+	}
 	task.LastResolvedResponderName = task.ActiveResponderName
 	task.LastResolvedScreenDigest = task.ActiveResponderScreenDigest
 	cooldownUntil := s.now().Add(resolvedResponderCooldown)
@@ -269,6 +274,11 @@ func (s *Service) recoverDetachedTask(ctx context.Context, task TaskRun) error {
 }
 
 func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
+	task.Phase = normalizeTaskPhase(task)
+	if task.Phase == TaskPhasePlanning && wantsExecutionPhase(task.LastInput) {
+		task.Phase = TaskPhaseExecuting
+	}
+
 	template, err := s.lookupTemplate(task.TemplateID)
 	if err != nil {
 		return err
@@ -392,6 +402,10 @@ decide:
 	task.LastDecisionAction = result.Action
 	decisionCooldownUntil := s.now().Add(decisionArbitrationCooldown)
 	task.DecisionCooldownUntil = &decisionCooldownUntil
+	result = s.enforcePhasePolicy(task, result, window)
+	if result.NextPhase != "" {
+		task.Phase = result.NextPhase
+	}
 	switch result.Action {
 	case DecisionActionAskUser:
 		question := result.Question
@@ -426,6 +440,9 @@ decide:
 		return nil
 	case DecisionActionReplyToCodex:
 		reply := strings.TrimSpace(firstNonEmpty(result.CodexReply, result.NextInput))
+		if task.Phase == TaskPhaseExecuting {
+			reply = executingContinueReply
+		}
 		if reply != "" {
 			if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), reply); err != nil {
 				if errors.Is(err, ErrRemoteCommandTimeout) {
@@ -552,6 +569,31 @@ func (s *Service) shouldIgnoreResolvedResponder(task TaskRun, response TerminalR
 	return s.now().Before(*task.ResponderCooldownUntil)
 }
 
+func (s *Service) enforcePhasePolicy(task TaskRun, result DecisionResult, window OutputWindow) DecisionResult {
+	currentPhase := normalizeTaskPhase(task)
+
+	if result.NextPhase == "" {
+		result.NextPhase = currentPhase
+	}
+
+	if currentPhase == TaskPhaseExecuting && result.NextPhase == TaskPhasePlanning {
+		result.Action = DecisionActionAskUser
+		result.DecisionType = firstNonEmpty(result.DecisionType, "scope_confirmation")
+		result.NextPhase = TaskPhaseExecuting
+		if result.Question == nil {
+			result.Question = &AwaitingQuestion{
+				QuestionText:   "Codex wants to reopen planning during execution. Reply in Lark only if you want to allow a return to planning.",
+				OptionsSummary: "",
+				ContextExcerpt: firstNonEmpty(strings.TrimSpace(window.Summary), strings.TrimSpace(task.LastOutputSummary)),
+				QuestionType:   result.DecisionType,
+				AskedAt:        s.now(),
+			}
+		}
+	}
+
+	return result
+}
+
 func (s *Service) shouldSkipDecisionArbitration(task TaskRun) bool {
 	if task.LastDecisionScreenDigest == "" || task.DecisionCooldownUntil == nil {
 		return false
@@ -560,6 +602,37 @@ func (s *Service) shouldSkipDecisionArbitration(task TaskRun) bool {
 		return false
 	}
 	return s.now().Before(*task.DecisionCooldownUntil)
+}
+
+func normalizeTaskPhase(task TaskRun) TaskPhase {
+	if task.Phase == TaskPhaseExecuting {
+		return TaskPhaseExecuting
+	}
+	return TaskPhasePlanning
+}
+
+func wantsExecutionPhase(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"implement",
+		"build",
+		"test",
+		"commit",
+		"push",
+		"pull request",
+		"create pr",
+		"execute these steps",
+		"work directly on main branch",
+		"start with step 1",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldSkipDecisionForWorkingWindow(window OutputWindow) bool {

@@ -209,6 +209,7 @@ Each task instance persists at least:
 - `repository_id`
 - `machine_id`
 - `status`
+- `phase`
 - `user_request`
 - `created_by`
 - `remote_workdir`
@@ -270,6 +271,37 @@ When a terminal responder raises `waiting_user_input`, the orchestrator persists
 
 Completion is also an explicit decision boundary. If Codex has finished the requested workflow and is merely waiting for another operator instruction, the arbitrator may return `complete_task`, in which case the orchestrator records the final summary, marks the task `completed`, and stops advancing the session.
 
+### Phase Model
+
+In addition to `status`, each task has a long-lived phase:
+
+- `planning`
+- `executing`
+
+`planning` covers:
+
+- requirement discussion;
+- scope clarification;
+- solution comparison;
+- spec writing;
+- plan writing.
+
+`executing` starts once Codex has entered development or testing work, including:
+
+- code edits;
+- test execution;
+- builds;
+- commits;
+- branch push;
+- PR creation.
+
+Phase rules:
+
+- new tasks start in `planning`;
+- once a task enters `executing`, it must not automatically return to `planning`;
+- any attempt to reopen planning from `executing` must first become `waiting_user_input` and require explicit user approval in Lark;
+- `wait` is not a persisted task state. It is only a one-tick decision outcome that keeps the task `running` without sending any new input.
+
 ## Remote Startup Model
 
 Task startup is deterministic code, not workflow prose.
@@ -301,7 +333,9 @@ Scheduling rules:
   - capture recent output from the remote `tmux` session;
   - run deterministic responders first;
   - if `tmux` is still alive but Codex has dropped back to the shell, issue one controlled `codex resume --last`;
-  - if no responder applies, invoke the model arbitrator;
+  - if no responder applies and Codex is still visibly working, do not invoke the model arbitrator;
+  - if no responder applies and the same screen digest was already arbitrated recently, do not invoke the model arbitrator again until the arbitration cooldown expires;
+  - otherwise invoke the model arbitrator;
   - optionally send one next input.
 
 ## Remote Session Model
@@ -380,6 +414,7 @@ The arbitrator prompt must also define the expected structured result. A first-v
 {
   "action": "reply_to_codex" | "ask_user" | "complete_task" | "wait",
   "decision_type": "requirement_clarification" | "scope_confirmation" | "implementation_solution_choice" | "missing_context" | "none",
+  "next_phase": "planning" | "executing" | "",
   "summary": "string",
   "codex_reply": "string",
   "user_question": "string"
@@ -392,6 +427,13 @@ Interpretation:
 - `ask_user`: set `waiting_user_input`, persist the question, and notify the user in Lark;
 - `complete_task`: record `summary`, mark the task `completed`, and stop advancing the session;
 - `wait`: take no action and keep the task `running`.
+
+Phase interpretation rules:
+
+- in `planning`, the arbitrator may return `reply_to_codex` and optionally promote the task to `executing`;
+- in `executing`, the arbitrator must not freely re-plan the task;
+- if `executing` needs to return to planning, the arbitrator must return `ask_user` so the user can explicitly approve re-entering planning;
+- in `executing`, any direct reply back into Codex should be a narrow continuation signal such as "continue according to the confirmed plan", not a fresh detailed implementation plan.
 
 The remote task subsystem requires a configured LLM provider and model. Without `ALTER_EGO_LLM_API_KEY` and `ALTER_EGO_LLM_MODEL`, task orchestration must fail fast at startup rather than silently degrading to heuristic behavior.
 

@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current non-interactive remote Codex control path with a `SSH + tmux + codex` interactive runner that preserves multi-turn requirement discussion and long-lived remote task sessions.
 
-**Architecture:** Keep Lark as the command gateway and SQLite as the persistence layer. Preserve the existing orchestrator shape, but replace the `exec/resume` runner model with a `tmux`-backed interactive session model. Task startup remains deterministic code; ongoing progress is driven by `tmux` pane-state probes, `tmux capture-pane`, `tmux send-keys`, and `tmux has-session`. If the pane survives but Codex exits back to the shell, the runner should issue one controlled `codex resume --last` before handing control back to model arbitration. Deterministic terminal responders stay rule-based, but every non-deterministic Codex screen is arbitrated by the configured LLM. There is no heuristic business-decision fallback.
+**Architecture:** Keep Lark as the command gateway and SQLite as the persistence layer. Preserve the existing orchestrator shape, but replace the `exec/resume` runner model with a `tmux`-backed interactive session model. Task startup remains deterministic code; ongoing progress is driven by `tmux` pane-state probes, `tmux capture-pane`, `tmux send-keys`, and `tmux has-session`. If the pane survives but Codex exits back to the shell, the runner should issue one controlled `codex resume --last` before handing control back to model arbitration. Deterministic terminal responders stay rule-based, but every non-deterministic Codex screen is arbitrated by the configured LLM. There is no heuristic business-decision fallback. Each task also carries a long-lived phase: `planning` for requirement/spec/plan work, and `executing` for development/test/build/commit/PR work. Once a task enters `executing`, it must not automatically return to `planning`; that transition must go through `waiting_user_input` and explicit operator approval in Lark.
 
 **Tech Stack:** Go 1.23+, standard library, `database/sql` with `modernc.org/sqlite`, existing Lark adapter, SSH transport layer, remote `tmux`, remote `codex`
 
@@ -13,9 +13,9 @@
 ## File Structure
 
 - Modify: `internal/orchestrator/types.go`
-  - Replace exec/resume-oriented remote session fields with TTY-oriented session metadata, including terminal responder convergence fields.
+  - Replace exec/resume-oriented remote session fields with TTY-oriented session metadata, including terminal responder convergence fields and the persisted task phase.
 - Modify: `internal/orchestrator/store.go`
-  - Persist `tmux_session_name`, screen-tracking fields, and responder cooldown metadata.
+  - Persist `tmux_session_name`, screen-tracking fields, responder cooldown metadata, decision cooldown metadata, and task phase.
 - Modify: `internal/orchestrator/store_test.go`
   - Update persisted field coverage for the new task model.
 - Modify: `internal/orchestrator/runner.go`
@@ -27,11 +27,11 @@
 - Modify: `internal/orchestrator/runner_ssh_test.go`
   - Tests for startup command shape, `capture-pane`, `send-keys`, `has-session`, and `machine.shell_init`.
 - Modify: `internal/orchestrator/decision.go`
-  - Expand escalation categories beyond implementation-solution choice.
+  - Expand escalation categories beyond implementation-solution choice and add `next_phase` handling.
 - Modify: `internal/orchestrator/decision_test.go`
   - Add tests for clarification and scope confirmation detection.
 - Modify: `internal/orchestrator/service.go`
-  - Replace exec-oriented tick behavior with interactive capture/send behavior.
+  - Replace exec-oriented tick behavior with interactive capture/send behavior, phase transitions, and phase-based arbitration limits.
 - Modify: `internal/orchestrator/service_test.go`
   - Update lifecycle tests for `preparing_workspace`, `starting_session`, `waiting_user_input`, and detach/reconnect.
 - Modify: `internal/orchestrator/config.go`
@@ -244,6 +244,7 @@ go test -count=1 ./internal/orchestrator
 Expected: FAIL because the decision path still relies on heuristic business-decision handling rather than mandatory model arbitration.
 
 - [ ] **Step 3: Implement the arbitration changes**
+ - [ ] **Step 3: Implement the arbitration changes**
 
 Update:
 
@@ -252,6 +253,7 @@ Update:
 - model-backed arbitrator using the configured LLM provider
 - completion signaling when Codex has finished the requested workflow and is only awaiting further operator input
 - startup validation that task orchestration has a configured model provider, API key, and model name
+- structured `next_phase` output so planning can promote to executing without adding a new persisted task status
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -295,6 +297,7 @@ go test -count=1 ./internal/orchestrator
 Expected: FAIL because the service still assumes exec/resume-style behavior.
 
 - [ ] **Step 3: Implement the lifecycle changes**
+ - [ ] **Step 3: Implement the lifecycle changes**
 
 Update the service so that:
 
@@ -308,6 +311,14 @@ Update the service so that:
 - repeated `capture-pane` output for the same responder/screen digest is ignored during cooldown so stale screens do not immediately re-open the same question
 - every non-responder prompt invokes model arbitration
 - model arbitration may either ask the user, reply directly to Codex, or mark the task completed
+- tasks persist a long-lived phase:
+  - `planning` for requirement discussion, spec writing, and plan writing
+  - `executing` for development, testing, build, commit, push, and PR work
+- once a task is in `executing`, it must not automatically return to `planning`
+- if execution needs to reopen planning, the service must force `waiting_user_input` and explicit operator approval
+- when Codex is clearly still working, skip model arbitration entirely
+- when the same screen digest was already arbitrated recently, skip repeated model arbitration until a cooldown expires
+- during `executing`, any direct reply to Codex must be a narrow continuation instruction rather than a fresh detailed implementation plan
 
 - [ ] **Step 4: Run test to verify it passes**
 
