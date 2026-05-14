@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current non-interactive remote Codex control path with a `SSH + tmux + codex` interactive runner that preserves multi-turn requirement discussion and long-lived remote task sessions.
 
-**Architecture:** Keep Lark as the command gateway and SQLite as the persistence layer. Preserve the existing orchestrator shape, but replace the `exec/resume` runner model with a `tmux`-backed interactive session model. Task startup remains deterministic code; ongoing progress is driven by `tmux` pane-state probes, `tmux capture-pane`, `tmux send-keys`, and `tmux has-session`. If the pane survives but Codex exits back to the shell, the runner should issue one controlled `codex resume --last` before handing control back to model arbitration. Deterministic terminal responders stay rule-based, but every non-deterministic Codex screen is arbitrated by the configured LLM. There is no heuristic business-decision fallback. Each task also carries a long-lived phase: `planning` for requirement/spec/plan work, and `executing` for development/test/build/commit/PR work. Once a task enters `executing`, it must not automatically return to `planning`; that transition must go through `waiting_user_input` and explicit operator approval in Lark.
+**Architecture:** Keep Lark as the command gateway and SQLite as the persistence layer. Preserve the existing orchestrator shape, but replace the `exec/resume` runner model with a `tmux`-backed interactive session model. Task startup remains deterministic code; ongoing progress is driven by `tmux` pane-state probes, `tmux capture-pane`, `tmux send-keys`, and `tmux has-session`. If the pane survives but Codex exits back to the shell, the runner should issue one controlled `codex resume --last` before handing control back to model arbitration. Deterministic terminal responders stay rule-based, but every non-deterministic Codex screen is arbitrated by the configured LLM. There is no heuristic business-decision fallback. Each task also carries a long-lived phase: `planning` for requirement/spec/plan work, and `executing` for development/test/build/commit/PR work. Once a task enters `executing`, it must not automatically return to `planning`; that transition must go through `waiting_user_input` and explicit operator approval in Lark. Some responders also queue deterministic post-responder actions, such as dismissing Codex's `Create a plan?` prompt and then sending exactly one fixed continuation reply before model arbitration resumes.
 
 **Tech Stack:** Go 1.23+, standard library, `database/sql` with `modernc.org/sqlite`, existing Lark adapter, SSH transport layer, remote `tmux`, remote `codex`
 
@@ -13,9 +13,9 @@
 ## File Structure
 
 - Modify: `internal/orchestrator/types.go`
-  - Replace exec/resume-oriented remote session fields with TTY-oriented session metadata, including terminal responder convergence fields and the persisted task phase.
+  - Replace exec/resume-oriented remote session fields with TTY-oriented session metadata, including terminal responder convergence fields, deterministic post-responder action fields, and the persisted task phase.
 - Modify: `internal/orchestrator/store.go`
-  - Persist `tmux_session_name`, screen-tracking fields, responder cooldown metadata, decision cooldown metadata, and task phase.
+  - Persist `tmux_session_name`, screen-tracking fields, responder cooldown metadata, deterministic post-responder action metadata, decision cooldown metadata, and task phase.
 - Modify: `internal/orchestrator/store_test.go`
   - Update persisted field coverage for the new task model.
 - Modify: `internal/orchestrator/runner.go`
@@ -309,6 +309,8 @@ Update the service so that:
 - terminal responder escalations persist responder name and screen digest
 - `/task reply` records the resolved responder and starts a short cooldown window
 - repeated `capture-pane` output for the same responder/screen digest is ignored during cooldown so stale screens do not immediately re-open the same question
+- deterministic post-responder actions run before model arbitration and may send one fixed continuation reply
+- after that fixed continuation reply, identical static screens in `executing` are treated as `wait` instead of re-entering model arbitration
 - every non-responder prompt invokes model arbitration
 - model arbitration may either ask the user, reply directly to Codex, or mark the task completed
 - tasks persist a long-lived phase:

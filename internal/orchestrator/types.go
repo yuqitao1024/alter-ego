@@ -23,31 +23,33 @@ const (
 )
 
 type TaskRun struct {
-	TaskID                      string
-	TemplateID                  string
-	RepositoryID                string
-	MachineID                   string
-	Status                      TaskStatus
-	Phase                       TaskPhase
-	UserRequest                 string
-	CreatedBy                   string
-	RemoteWorkdir               string
-	TMUXSessionName             string
-	RemoteCodexSessionID        string
-	LastInput                   string
-	LastOutputSummary           string
-	LastScreenDigest            string
-	ActiveResponderName         string
-	ActiveResponderScreenDigest string
-	LastResolvedResponderName   string
-	LastResolvedScreenDigest    string
-	ResponderCooldownUntil      *time.Time
-	LastDecisionScreenDigest    string
-	LastDecisionAction          string
-	DecisionCooldownUntil       *time.Time
-	AwaitingQuestion            *AwaitingQuestion
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
+	TaskID                       string
+	TemplateID                   string
+	RepositoryID                 string
+	MachineID                    string
+	Status                       TaskStatus
+	Phase                        TaskPhase
+	UserRequest                  string
+	CreatedBy                    string
+	RemoteWorkdir                string
+	TMUXSessionName              string
+	RemoteCodexSessionID         string
+	LastInput                    string
+	LastOutputSummary            string
+	LastScreenDigest             string
+	ActiveResponderName          string
+	ActiveResponderScreenDigest  string
+	LastResolvedResponderName    string
+	LastResolvedScreenDigest     string
+	ResponderCooldownUntil       *time.Time
+	PendingPostResponderAction   string
+	LastContinuationScreenDigest string
+	LastDecisionScreenDigest     string
+	LastDecisionAction           string
+	DecisionCooldownUntil        *time.Time
+	AwaitingQuestion             *AwaitingQuestion
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
 }
 
 type AwaitingQuestion struct {

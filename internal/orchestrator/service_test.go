@@ -335,10 +335,10 @@ func TestTickPromotesPlanningTaskToExecutingOnModelReply(t *testing.T) {
 		},
 	}
 	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:    DecisionActionReplyToCodex,
-		NextPhase: TaskPhaseExecuting,
+		Action:     DecisionActionReplyToCodex,
+		NextPhase:  TaskPhaseExecuting,
 		CodexReply: "Start coding now.",
-		Summary:   "Implementation starts now",
+		Summary:    "Implementation starts now",
 	}
 
 	if err := service.TickOnce(ctx); err != nil {
@@ -465,12 +465,18 @@ func TestTickSendsOneContinuationAfterDismissingPlanPromptInExecuting(t *testing
 	if persisted.LastInput != executingContinueReply {
 		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, executingContinueReply)
 	}
+	if persisted.PendingPostResponderAction != "" {
+		t.Fatalf("persisted.PendingPostResponderAction = %q, want empty", persisted.PendingPostResponderAction)
+	}
+	if persisted.LastContinuationScreenDigest != ScreenDigest(runner.outputWindow) {
+		t.Fatalf("persisted.LastContinuationScreenDigest = %q, want %q", persisted.LastContinuationScreenDigest, ScreenDigest(runner.outputWindow))
+	}
 	wantCalls := []string{"capture", "send-key", "capture", "send", "capture"}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("runner.calls = %v, want %v", runner.calls, wantCalls)
 	}
-	if decider.callCount != 1 {
-		t.Fatalf("decider.callCount = %d, want 1", decider.callCount)
+	if decider.callCount != 0 {
+		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
 	}
 }
 
@@ -590,20 +596,20 @@ func TestTickSkipsDecisionModelForSameScreenDuringCooldown(t *testing.T) {
 	}
 	cooldown := now.Add(30 * time.Second)
 	task := seedTask(t, store, TaskRun{
-		TaskID:                    "task-decision-cooldown",
-		TemplateID:                "feature_dev",
-		RepositoryID:              "repo_backend",
-		MachineID:                 "machine_a",
-		Status:                    StatusRunning,
-		UserRequest:               "Implement orchestrator",
-		CreatedBy:                 "tester",
-		RemoteWorkdir:             "/srv/backend",
-		TMUXSessionName:           "alterego-task-decision-cooldown",
-		RemoteCodexSessionID:      "session-decision-cooldown",
-		LastScreenDigest:          ScreenDigest(window),
-		LastDecisionScreenDigest:  ScreenDigest(window),
-		LastDecisionAction:        DecisionActionWait,
-		DecisionCooldownUntil:     &cooldown,
+		TaskID:                   "task-decision-cooldown",
+		TemplateID:               "feature_dev",
+		RepositoryID:             "repo_backend",
+		MachineID:                "machine_a",
+		Status:                   StatusRunning,
+		UserRequest:              "Implement orchestrator",
+		CreatedBy:                "tester",
+		RemoteWorkdir:            "/srv/backend",
+		TMUXSessionName:          "alterego-task-decision-cooldown",
+		RemoteCodexSessionID:     "session-decision-cooldown",
+		LastScreenDigest:         ScreenDigest(window),
+		LastDecisionScreenDigest: ScreenDigest(window),
+		LastDecisionAction:       DecisionActionWait,
+		DecisionCooldownUntil:    &cooldown,
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = window
 	decider := service.decider.(*fakeDecisionEngine)
@@ -643,20 +649,20 @@ func TestTickRechecksDecisionModelAfterDecisionCooldownExpires(t *testing.T) {
 	}
 	expired := now.Add(-time.Second)
 	task := seedTask(t, store, TaskRun{
-		TaskID:                    "task-decision-recheck",
-		TemplateID:                "feature_dev",
-		RepositoryID:              "repo_backend",
-		MachineID:                 "machine_a",
-		Status:                    StatusRunning,
-		UserRequest:               "Implement orchestrator",
-		CreatedBy:                 "tester",
-		RemoteWorkdir:             "/srv/backend",
-		TMUXSessionName:           "alterego-task-decision-recheck",
-		RemoteCodexSessionID:      "session-decision-recheck",
-		LastScreenDigest:          ScreenDigest(window),
-		LastDecisionScreenDigest:  ScreenDigest(window),
-		LastDecisionAction:        DecisionActionWait,
-		DecisionCooldownUntil:     &expired,
+		TaskID:                   "task-decision-recheck",
+		TemplateID:               "feature_dev",
+		RepositoryID:             "repo_backend",
+		MachineID:                "machine_a",
+		Status:                   StatusRunning,
+		UserRequest:              "Implement orchestrator",
+		CreatedBy:                "tester",
+		RemoteWorkdir:            "/srv/backend",
+		TMUXSessionName:          "alterego-task-decision-recheck",
+		RemoteCodexSessionID:     "session-decision-recheck",
+		LastScreenDigest:         ScreenDigest(window),
+		LastDecisionScreenDigest: ScreenDigest(window),
+		LastDecisionAction:       DecisionActionWait,
+		DecisionCooldownUntil:    &expired,
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = window
 	decider := service.decider.(*fakeDecisionEngine)

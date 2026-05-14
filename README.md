@@ -154,17 +154,20 @@ Task decision flow:
 
 1. probe the current `tmux` pane state and capture the current screen tail;
 2. run deterministic responders for known terminal handshakes;
-3. if the pane is still alive but Codex has dropped back to the shell, issue one controlled `codex resume --last`;
-4. if Codex is clearly still working, do not call the model arbitrator;
-5. if the same screen digest was arbitrated recently, do not call the model again until the cooldown expires;
-6. otherwise send the workflow, task context, and terminal excerpt to the configured LLM;
-7. the LLM must return one of:
+3. if a responder queued a deterministic follow-up action, execute that follow-up before any model arbitration;
+4. if the pane is still alive but Codex has dropped back to the shell, issue one controlled `codex resume --last`;
+5. if Codex is clearly still working, do not call the model arbitrator;
+6. if the same screen digest was arbitrated recently, do not call the model again until the cooldown expires;
+7. otherwise send the workflow, task context, and terminal excerpt to the configured LLM;
+8. the LLM must return one of:
    - `wait`
    - `reply_to_codex`
    - `ask_user`
    - `complete_task`
 
 `wait` is not a persisted task state. It is only a one-tick decision outcome that leaves the task in `running` without sending any new input.
+
+Deterministic follow-up actions are used for Codex TUI prompts that need a short fixed sequence rather than model arbitration. For example, dismissing `Create a plan?` during `executing` queues exactly one continuation reply on the next tick, and identical post-continuation screens are treated as `wait`.
 
 Run locally:
 

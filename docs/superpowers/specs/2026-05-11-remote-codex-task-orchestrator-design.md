@@ -223,6 +223,8 @@ Each task instance persists at least:
 - `last_resolved_responder_name`
 - `last_resolved_screen_digest`
 - `responder_cooldown_until`
+- `pending_post_responder_action`
+- `last_continuation_screen_digest`
 - `awaiting_question`
 - `created_at`
 - `updated_at`
@@ -268,6 +270,8 @@ Representative transitions:
 - `pending/preparing_workspace/starting_session/running/waiting_user_input/detached -> stopped`
 
 When a terminal responder raises `waiting_user_input`, the orchestrator persists both the responder name and the current screen digest. After the user replies, the task returns to `running`, but the responder/screen pair is marked as resolved and enters a short cooldown window. During that window, the orchestrator ignores the same responder on the same screen digest so stale `tmux capture-pane` output does not immediately re-escalate the task.
+
+Some responders also need a deterministic follow-up sequence. For example, dismissing Codex's `Create a plan?` prompt during `executing` should persist a pending post-responder action that sends exactly one fixed continuation reply on the next tick. Once that continuation is sent, identical post-continuation screens should be treated as `wait` rather than re-entering model arbitration.
 
 Completion is also an explicit decision boundary. If Codex has finished the requested workflow and is merely waiting for another operator instruction, the arbitrator may return `complete_task`, in which case the orchestrator records the final summary, marks the task `completed`, and stops advancing the session.
 
@@ -332,8 +336,10 @@ Scheduling rules:
   - probe the current `tmux` pane state;
   - capture recent output from the remote `tmux` session;
   - run deterministic responders first;
+  - if a responder queued a deterministic follow-up action, execute that action before any model arbitration;
   - if `tmux` is still alive but Codex has dropped back to the shell, issue one controlled `codex resume --last`;
   - if no responder applies and Codex is still visibly working, do not invoke the model arbitrator;
+  - if the task is in `executing` and the current screen is identical to the last screen immediately after a fixed continuation reply, treat the turn as `wait`;
   - if no responder applies and the same screen digest was already arbitrated recently, do not invoke the model arbitrator again until the arbitration cooldown expires;
   - otherwise invoke the model arbitrator;
   - optionally send one next input.
