@@ -404,6 +404,76 @@ func TestTickUsesFixedContinueReplyDuringExecuting(t *testing.T) {
 	}
 }
 
+func TestTickSendsOneContinuationAfterDismissingPlanPromptInExecuting(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-plan-dismiss-continue",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		Phase:                TaskPhaseExecuting,
+		UserRequest:          "Implement orchestrator",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-plan-dismiss-continue",
+		RemoteCodexSessionID: "session-plan-dismiss-continue",
+	})
+	runner := service.runner.(*fakeServiceRunner)
+	runner.outputWindow = OutputWindow{
+		RawOutput: "Create a plan?  shift + tab use Plan mode   esc dismiss",
+		Summary:   "Create a plan prompt is visible",
+		SessionState: SessionState{
+			CurrentCommand: "codex",
+		},
+	}
+	decider := service.decider.(*fakeDecisionEngine)
+	decider.result = DecisionResult{
+		Action:  DecisionActionWait,
+		Summary: "Still waiting",
+	}
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("first TickOnce returned error: %v", err)
+	}
+
+	runner.outputWindow = OutputWindow{
+		RawOutput: "Static codex screen after dismiss",
+		Summary:   "Static codex screen after dismiss",
+		SessionState: SessionState{
+			CurrentCommand: "codex",
+		},
+	}
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("second TickOnce returned error: %v", err)
+	}
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("third TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.LastInput != executingContinueReply {
+		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, executingContinueReply)
+	}
+	wantCalls := []string{"capture", "send-key", "capture", "send", "capture"}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("runner.calls = %v, want %v", runner.calls, wantCalls)
+	}
+	if decider.callCount != 1 {
+		t.Fatalf("decider.callCount = %d, want 1", decider.callCount)
+	}
+}
+
 func TestTickForcesUserApprovalBeforeReturningExecutingTaskToPlanning(t *testing.T) {
 	t.Parallel()
 

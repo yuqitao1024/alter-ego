@@ -390,6 +390,24 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		return s.store.UpdateTask(ctx, task)
 	}
 
+	if s.shouldSendPostPlanDismissContinue(task, previousDigest) {
+		if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), executingContinueReply); err != nil {
+			if errors.Is(err, ErrRemoteCommandTimeout) {
+				return s.markTaskDetached(ctx, task, "remote session continuation timed out after plan dismissal")
+			}
+			return fmt.Errorf("send post-plan continuation for task %q: %w", task.TaskID, err)
+		}
+		task.LastInput = executingContinueReply
+		task.ActiveResponderName = ""
+		task.ActiveResponderScreenDigest = ""
+		task.Status = StatusRunning
+		task.UpdatedAt = s.now()
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, task.TaskID, "plan_prompt_continued", "dismissed codex plan prompt and resumed confirmed execution flow")
+	}
+
 decide:
 	if shouldSkipDecisionForWorkingWindow(window) {
 		task.Status = StatusRunning
@@ -586,6 +604,22 @@ func (s *Service) shouldIgnoreResolvedResponder(task TaskRun, response TerminalR
 		return false
 	}
 	return s.now().Before(*task.ResponderCooldownUntil)
+}
+
+func (s *Service) shouldSendPostPlanDismissContinue(task TaskRun, previousDigest string) bool {
+	if normalizeTaskPhase(task) != TaskPhaseExecuting {
+		return false
+	}
+	if task.ActiveResponderName != "plan_prompt_dismiss" {
+		return false
+	}
+	if strings.TrimSpace(task.LastInput) != "[key] Escape" {
+		return false
+	}
+	if strings.TrimSpace(task.ActiveResponderScreenDigest) == "" {
+		return false
+	}
+	return task.ActiveResponderScreenDigest != task.LastScreenDigest || previousDigest != task.LastScreenDigest
 }
 
 func (s *Service) enforcePhasePolicy(task TaskRun, result DecisionResult, window OutputWindow) DecisionResult {
