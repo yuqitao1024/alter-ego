@@ -271,7 +271,7 @@ Representative transitions:
 
 When a terminal responder raises `waiting_user_input`, the orchestrator persists both the responder name and the current screen digest. After the user replies, the task returns to `running`, but the responder/screen pair is marked as resolved and enters a short cooldown window. During that window, the orchestrator ignores the same responder on the same screen digest so stale `tmux capture-pane` output does not immediately re-escalate the task.
 
-Some responders also need a deterministic follow-up sequence. For example, dismissing Codex's `Create a plan?` prompt during `executing` should persist a pending post-responder action that sends exactly one fixed continuation reply on the next tick. Once that continuation is sent, identical post-continuation screens should be treated as `wait` rather than re-entering model arbitration.
+Terminal responders should stay limited to prompts with a safe deterministic answer. Codex's `Create a plan?` prompt should not be auto-dismissed or followed by a synthetic continuation reply; it should remain visible for the normal decision flow to arbitrate.
 
 Completion is also an explicit decision boundary. If Codex has finished the requested workflow and is merely waiting for another operator instruction, the arbitrator may return `complete_task`, in which case the orchestrator records the final summary, marks the task `completed`, and stops advancing the session.
 

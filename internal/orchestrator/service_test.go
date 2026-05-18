@@ -404,7 +404,7 @@ func TestTickUsesFixedContinueReplyDuringExecuting(t *testing.T) {
 	}
 }
 
-func TestTickSendsOneContinuationAfterDismissingPlanPromptInExecuting(t *testing.T) {
+func TestTickLeavesPlanPromptForDecisionEngineInExecuting(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
@@ -439,44 +439,22 @@ func TestTickSendsOneContinuationAfterDismissingPlanPromptInExecuting(t *testing
 	}
 
 	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("first TickOnce returned error: %v", err)
-	}
-
-	runner.outputWindow = OutputWindow{
-		RawOutput: "Static codex screen after dismiss",
-		Summary:   "Static codex screen after dismiss",
-		SessionState: SessionState{
-			CurrentCommand: "codex",
-		},
-	}
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("second TickOnce returned error: %v", err)
-	}
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("third TickOnce returned error: %v", err)
+		t.Fatalf("TickOnce returned error: %v", err)
 	}
 
 	persisted, err := store.GetTask(ctx, task.TaskID)
 	if err != nil {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
-	if persisted.LastInput != executingContinueReply {
-		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, executingContinueReply)
+	if persisted.LastInput != "" {
+		t.Fatalf("persisted.LastInput = %q, want empty", persisted.LastInput)
 	}
-	if persisted.PendingPostResponderAction != "" {
-		t.Fatalf("persisted.PendingPostResponderAction = %q, want empty", persisted.PendingPostResponderAction)
-	}
-	if persisted.LastContinuationScreenDigest != ScreenDigest(runner.outputWindow) {
-		t.Fatalf("persisted.LastContinuationScreenDigest = %q, want %q", persisted.LastContinuationScreenDigest, ScreenDigest(runner.outputWindow))
-	}
-	wantCalls := []string{"capture", "send-key", "capture", "send", "capture"}
+	wantCalls := []string{"capture"}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("runner.calls = %v, want %v", runner.calls, wantCalls)
 	}
-	if decider.callCount != 0 {
-		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	if decider.callCount != 1 {
+		t.Fatalf("decider.callCount = %d, want 1", decider.callCount)
 	}
 }
 
@@ -1096,7 +1074,7 @@ You've hit your usage limit. Upgrade to Pro, purchase more credits or try again 
 	}
 }
 
-func TestTickDismissesPlanPromptWithEscape(t *testing.T) {
+func TestTickLeavesPlanPromptForDecisionEngine(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
@@ -1135,14 +1113,17 @@ esc dismiss`,
 	if persisted.Status != StatusRunning {
 		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
 	}
-	if persisted.LastInput != "[key] Escape" {
-		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, "[key] Escape")
+	if persisted.LastInput != "" {
+		t.Fatalf("persisted.LastInput = %q, want empty", persisted.LastInput)
 	}
-	if runner.lastSentKey != "Escape" {
-		t.Fatalf("runner.lastSentKey = %q, want %q", runner.lastSentKey, "Escape")
+	if runner.lastSentKey != "" {
+		t.Fatalf("runner.lastSentKey = %q, want empty", runner.lastSentKey)
 	}
-	if decider.callCount != 0 {
-		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
+	if !reflect.DeepEqual(runner.calls, []string{"capture"}) {
+		t.Fatalf("runner.calls = %v, want [capture]", runner.calls)
+	}
+	if decider.callCount != 1 {
+		t.Fatalf("decider.callCount = %d, want 1", decider.callCount)
 	}
 }
 

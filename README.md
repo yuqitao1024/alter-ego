@@ -167,7 +167,7 @@ Task decision flow:
 
 `wait` is not a persisted task state. It is only a one-tick decision outcome that leaves the task in `running` without sending any new input.
 
-Deterministic follow-up actions are used for Codex TUI prompts that need a short fixed sequence rather than model arbitration. For example, dismissing `Create a plan?` during `executing` queues exactly one continuation reply on the next tick, and identical post-continuation screens are treated as `wait`.
+Deterministic terminal responders are reserved for prompts with a safe fixed answer, such as trust confirmation or login/usage escalation. `Create a plan?` is not auto-dismissed; that screen is left to the normal decision flow instead of sending `Escape` or a synthetic continuation reply.
 
 Run locally:
 

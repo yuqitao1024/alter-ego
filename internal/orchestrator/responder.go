@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
-	"unicode"
 )
 
 type TerminalResponse struct {
@@ -55,17 +54,6 @@ func EvaluateTerminalResponse(task TaskRun, window OutputWindow, now time.Time) 
 			AutoInput: "1",
 		}
 	}
-	if looksLikePlanPrompt(text) {
-		digest := ScreenDigest(window)
-		if task.LastScreenDigest == digest && strings.TrimSpace(task.LastInput) == "[key] Escape" {
-			return TerminalResponse{Name: "plan_prompt_dismiss", Handled: true}
-		}
-		return TerminalResponse{
-			Name:    "plan_prompt_dismiss",
-			Handled: true,
-			AutoKey: "Escape",
-		}
-	}
 	return TerminalResponse{}
 }
 
@@ -97,13 +85,6 @@ func looksLikeUsageLimitPrompt(text string) bool {
 		(strings.Contains(text, "upgrade to pro") && strings.Contains(text, "usage limit"))
 }
 
-func looksLikePlanPrompt(text string) bool {
-	normalized := normalizeTerminalPrompt(text)
-	return strings.Contains(normalized, "create a plan") &&
-		strings.Contains(normalized, "use plan mode") &&
-		strings.Contains(normalized, "esc dismiss")
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -111,21 +92,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func normalizeTerminalPrompt(text string) string {
-	var b strings.Builder
-	lastSpace := true
-	for _, r := range strings.ToLower(text) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-			lastSpace = false
-			continue
-		}
-		if !lastSpace {
-			b.WriteByte(' ')
-			lastSpace = true
-		}
-	}
-	return strings.TrimSpace(b.String())
 }

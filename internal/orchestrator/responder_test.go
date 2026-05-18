@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestEvaluateTerminalResponseDismissesCompressedPlanPrompt(t *testing.T) {
+func TestEvaluateTerminalResponseIgnoresCompressedPlanPrompt(t *testing.T) {
 	t.Parallel()
 
 	window := OutputWindow{
@@ -15,13 +15,7 @@ func TestEvaluateTerminalResponseDismissesCompressedPlanPrompt(t *testing.T) {
 	}
 
 	response := EvaluateTerminalResponse(TaskRun{}, window, time.Now().UTC())
-	if !response.Handled {
-		t.Fatal("response.Handled = false, want true")
-	}
-	if response.Name != "plan_prompt_dismiss" {
-		t.Fatalf("response.Name = %q, want %q", response.Name, "plan_prompt_dismiss")
-	}
-	if response.AutoKey != "Escape" {
-		t.Fatalf("response.AutoKey = %q, want %q", response.AutoKey, "Escape")
+	if response.Handled {
+		t.Fatal("response.Handled = true, want false")
 	}
 }
