@@ -116,6 +116,41 @@ func TestTickMarksRunningTaskDetachedWhenCaptureTimesOut(t *testing.T) {
 	}
 }
 
+func TestTickMarksRunningTaskDetachedWhenSessionNotFoundDuringCapture(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:               "task-missing-session",
+		TemplateID:           "feature_dev",
+		RepositoryID:         "repo_backend",
+		MachineID:            "machine_a",
+		Status:               StatusRunning,
+		UserRequest:          "Investigate missing session",
+		CreatedBy:            "tester",
+		RemoteWorkdir:        "/srv/backend",
+		TMUXSessionName:      "alterego-task-missing-session",
+		RemoteCodexSessionID: "session-missing-session",
+	})
+	runner := service.runner.(*fakeServiceRunner)
+	runner.captureErr = fmt.Errorf("inspect tmux session state: exit status 1: can't find pane: alterego-task-missing-session")
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusDetached {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusDetached)
+	}
+}
+
 func TestTickTimeoutOnOneTaskDoesNotBlockNextTask(t *testing.T) {
 	t.Parallel()
 

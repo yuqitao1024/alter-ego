@@ -294,6 +294,9 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		if errors.Is(err, ErrRemoteCommandTimeout) {
 			return s.markTaskDetached(ctx, task, "remote session probe timed out")
 		}
+		if isRemoteSessionMissingError(err) {
+			return s.markTaskDetached(ctx, task, "remote session no longer exists")
+		}
 		return fmt.Errorf("read remote output for task %q: %w", task.TaskID, err)
 	}
 	previousDigest := task.LastScreenDigest
@@ -586,6 +589,27 @@ func (s *Service) shouldIgnoreResolvedResponder(task TaskRun, response TerminalR
 		return false
 	}
 	return s.now().Before(*task.ResponderCooldownUntil)
+}
+
+func isRemoteSessionMissingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "can't find pane"):
+		return true
+	case strings.Contains(text, "can't find window"):
+		return true
+	case strings.Contains(text, "can't find session"):
+		return true
+	case strings.Contains(text, "no server running on"):
+		return true
+	case strings.Contains(text, "tmux session") && strings.Contains(text, "not found"):
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) enforcePhasePolicy(task TaskRun, result DecisionResult, window OutputWindow) DecisionResult {
