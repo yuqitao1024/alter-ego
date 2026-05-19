@@ -35,24 +35,19 @@ const (
 )
 
 type TaskRun struct {
-	TaskID                       string
-	TemplateID                   string
-	RepositoryID                 string
-	MachineID                    string
-	Status                       TaskStatus
-	Phase                        TaskPhase
-	WorkflowStage                WorkflowStage
-	UserRequest                  string
-	CreatedBy                    string
-	RemoteWorkdir                string
-	TMUXSessionName              string
-	RemoteCodexSessionID         string
-	ThreadID                     string
-	ActiveTurnID                 string
-	LastThreadStatus             string
-	LastTurnStatus               string
-	LastObservedItemID           string
-	LastRemoteActivityAt         *time.Time
+	TaskID               string
+	TemplateID           string
+	RepositoryID         string
+	MachineID            string
+	Status               TaskStatus
+	Phase                TaskPhase
+	WorkflowStage        WorkflowStage
+	UserRequest          string
+	CreatedBy            string
+	RemoteWorkdir        string
+	TMUXSessionName      string
+	RemoteCodexSessionID string
+	AppServerState
 	LastInput                    string
 	LastOutputSummary            string
 	LastScreenDigest             string

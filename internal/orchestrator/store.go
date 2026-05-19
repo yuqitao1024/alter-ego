@@ -586,35 +586,22 @@ func (s *Store) init(ctx context.Context) error {
 		{statement: `ALTER TABLE tasks ADD COLUMN last_remote_activity_at TEXT`, column: "last_remote_activity_at"},
 	}
 
-	workflowStageAdded := false
 	for _, migration := range migrations {
-		added, err := s.addColumnIfMissing(ctx, migration.statement)
+		_, err := s.addColumnIfMissing(ctx, migration.statement)
 		if err != nil {
 			return fmt.Errorf("migrate sqlite store: %w", err)
 		}
-		if migration.column == "workflow_stage" {
-			workflowStageAdded = added
-		}
 	}
-	if workflowStageAdded {
-		if _, err := s.db.ExecContext(ctx, `
-			UPDATE tasks
-			SET workflow_stage = CASE phase
-				WHEN ? THEN ?
-				WHEN ? THEN ?
-				ELSE ?
-			END
-			WHERE workflow_stage = ?
-		`,
-			TaskPhaseExecuting,
-			WorkflowStageImplementation,
-			TaskPhasePlanning,
-			WorkflowStagePlanWriting,
-			WorkflowStageRequirementDiscussion,
-			WorkflowStageRequirementDiscussion,
-		); err != nil {
-			return fmt.Errorf("backfill workflow_stage: %w", err)
-		}
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE tasks
+		SET workflow_stage = ?
+		WHERE workflow_stage = ? AND phase = ?
+	`,
+		WorkflowStageImplementation,
+		WorkflowStageRequirementDiscussion,
+		TaskPhaseExecuting,
+	); err != nil {
+		return fmt.Errorf("repair workflow_stage for executing tasks: %w", err)
 	}
 
 	return nil

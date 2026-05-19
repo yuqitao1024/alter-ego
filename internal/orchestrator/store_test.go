@@ -125,21 +125,23 @@ func TestStorePersistsAppServerThreadState(t *testing.T) {
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
 	lastRemoteActivityAt := now.Add(90 * time.Second)
 	task := TaskRun{
-		TaskID:               "task-appserver",
-		TemplateID:           "simt-stl-dev",
-		RepositoryID:         "simt-stl",
-		MachineID:            "A5-82",
-		Status:               StatusRunning,
-		Phase:                TaskPhasePlanning,
-		WorkflowStage:        WorkflowStagePlanWriting,
-		ThreadID:             "thread_123",
-		ActiveTurnID:         "turn_456",
-		LastThreadStatus:     "running",
-		LastTurnStatus:       "running",
-		LastObservedItemID:   "item_789",
-		LastRemoteActivityAt: &lastRemoteActivityAt,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+		TaskID:        "task-appserver",
+		TemplateID:    "simt-stl-dev",
+		RepositoryID:  "simt-stl",
+		MachineID:     "A5-82",
+		Status:        StatusRunning,
+		Phase:         TaskPhasePlanning,
+		WorkflowStage: WorkflowStagePlanWriting,
+		AppServerState: AppServerState{
+			ThreadID:             "thread_123",
+			ActiveTurnID:         "turn_456",
+			LastThreadStatus:     "running",
+			LastTurnStatus:       "running",
+			LastObservedItemID:   "item_789",
+			LastRemoteActivityAt: &lastRemoteActivityAt,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	if err := store.CreateTask(context.Background(), task); err != nil {
@@ -308,6 +310,166 @@ func TestStoreMigratesLegacyTaskSchema(t *testing.T) {
 		t.Fatalf("GetTask after update returned error: %v", err)
 	}
 	assertTaskFields(t, persisted, got)
+}
+
+func TestStoreRepairsWorkflowStageFromBrokenInitialMigration(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "broken-migration.db")
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	schemaAfterBrokenMigration := `CREATE TABLE tasks (
+		task_id TEXT PRIMARY KEY,
+		template_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		machine_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		phase TEXT NOT NULL DEFAULT 'planning',
+		workflow_stage TEXT NOT NULL DEFAULT 'requirement_discussion',
+		user_request TEXT NOT NULL,
+		created_by TEXT NOT NULL,
+		remote_workdir TEXT NOT NULL,
+		tmux_session_name TEXT NOT NULL,
+		remote_codex_session_id TEXT NOT NULL,
+		thread_id TEXT NOT NULL DEFAULT '',
+		active_turn_id TEXT NOT NULL DEFAULT '',
+		last_thread_status TEXT NOT NULL DEFAULT '',
+		last_turn_status TEXT NOT NULL DEFAULT '',
+		last_observed_item_id TEXT NOT NULL DEFAULT '',
+		last_remote_activity_at TEXT,
+		last_input TEXT NOT NULL,
+		last_output_summary TEXT NOT NULL,
+		last_screen_digest TEXT NOT NULL,
+		active_responder_name TEXT NOT NULL DEFAULT '',
+		active_responder_screen_digest TEXT NOT NULL DEFAULT '',
+		last_resolved_responder_name TEXT NOT NULL DEFAULT '',
+		last_resolved_screen_digest TEXT NOT NULL DEFAULT '',
+		responder_cooldown_until TEXT,
+		pending_post_responder_action TEXT NOT NULL DEFAULT '',
+		last_continuation_screen_digest TEXT NOT NULL DEFAULT '',
+		last_decision_screen_digest TEXT NOT NULL DEFAULT '',
+		last_decision_action TEXT NOT NULL DEFAULT '',
+		decision_cooldown_until TEXT,
+		awaiting_question TEXT,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`
+	if _, err := db.ExecContext(ctx, schemaAfterBrokenMigration); err != nil {
+		t.Fatalf("Exec schemaAfterBrokenMigration returned error: %v", err)
+	}
+
+	createdAt := time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(10 * time.Minute)
+	insertTask := func(taskID string, phase TaskPhase, workflowStage WorkflowStage) {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO tasks (
+				task_id,
+				template_id,
+				repository_id,
+				machine_id,
+				status,
+				phase,
+				workflow_stage,
+				user_request,
+				created_by,
+				remote_workdir,
+				tmux_session_name,
+				remote_codex_session_id,
+				thread_id,
+				active_turn_id,
+				last_thread_status,
+				last_turn_status,
+				last_observed_item_id,
+				last_remote_activity_at,
+				last_input,
+				last_output_summary,
+				last_screen_digest,
+				active_responder_name,
+				active_responder_screen_digest,
+				last_resolved_responder_name,
+				last_resolved_screen_digest,
+				responder_cooldown_until,
+				pending_post_responder_action,
+				last_continuation_screen_digest,
+				last_decision_screen_digest,
+				last_decision_action,
+				decision_cooldown_until,
+				awaiting_question,
+				created_at,
+				updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			taskID,
+			"feature_dev",
+			"repo_backend",
+			"machine_a",
+			StatusRunning,
+			phase,
+			workflowStage,
+			"Continue implementation",
+			"user_legacy",
+			"/srv/repos/backend/.codex/"+taskID,
+			"alterego-"+taskID,
+			"codex-session-"+taskID,
+			"",
+			"",
+			"",
+			"",
+			"",
+			nil,
+			"Continue",
+			"Implementation in progress",
+			"digest:"+taskID,
+			"",
+			"",
+			"",
+			"",
+			nil,
+			"",
+			"",
+			"",
+			"",
+			nil,
+			nil,
+			createdAt.Format(time.RFC3339Nano),
+			updatedAt.Format(time.RFC3339Nano),
+		); err != nil {
+			t.Fatalf("Insert task %q returned error: %v", taskID, err)
+		}
+	}
+
+	insertTask("task-broken", TaskPhaseExecuting, WorkflowStageRequirementDiscussion)
+	insertTask("task-correct", TaskPhaseExecuting, WorkflowStageImplementation)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close db returned error: %v", err)
+	}
+
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore returned error: %v", err)
+	}
+	defer store.Close()
+
+	broken, err := store.GetTask(ctx, "task-broken")
+	if err != nil {
+		t.Fatalf("GetTask(task-broken) returned error: %v", err)
+	}
+	if broken.WorkflowStage != WorkflowStageImplementation {
+		t.Fatalf("broken.WorkflowStage = %q, want %q", broken.WorkflowStage, WorkflowStageImplementation)
+	}
+
+	correct, err := store.GetTask(ctx, "task-correct")
+	if err != nil {
+		t.Fatalf("GetTask(task-correct) returned error: %v", err)
+	}
+	if correct.WorkflowStage != WorkflowStageImplementation {
+		t.Fatalf("correct.WorkflowStage = %q, want %q", correct.WorkflowStage, WorkflowStageImplementation)
+	}
 }
 
 func TestStoreListsActiveTasksForScheduler(t *testing.T) {
