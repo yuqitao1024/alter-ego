@@ -204,10 +204,7 @@ func (c *Client) readLoop() {
 			continue
 		}
 
-		select {
-		case c.notifications <- message:
-		default:
-		}
+		c.notifications <- message
 	}
 }
 

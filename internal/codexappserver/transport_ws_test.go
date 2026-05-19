@@ -121,6 +121,47 @@ func TestWebSocketTransportRecvPreservesLiveProducerOrder(t *testing.T) {
 	}
 }
 
+func TestWebSocketTransportRecvReturnsFrameBeforeCloseErrorFromReadLoop(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("Upgrade() error: %v", err)
+			return
+		}
+
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"method":"ping"}`)); err != nil {
+			t.Errorf("WriteMessage() error: %v", err)
+		}
+		_ = conn.Close()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	transport, err := DialWebSocket(ctx, wsURLFromHTTP(server.URL))
+	if err != nil {
+		t.Fatalf("DialWebSocket returned error: %v", err)
+	}
+	defer transport.Close()
+
+	got, err := transport.Recv(ctx)
+	if err != nil {
+		t.Fatalf("first Recv returned error: %v", err)
+	}
+	if string(got) != `{"method":"ping"}` {
+		t.Fatalf("first Recv payload = %s", string(got))
+	}
+
+	got, err = transport.Recv(ctx)
+	if err == nil {
+		t.Fatalf("second Recv returned payload %q, want error", string(got))
+	}
+}
+
 func wsURLFromHTTP(raw string) string {
 	return "ws" + strings.TrimPrefix(raw, "http")
 }
