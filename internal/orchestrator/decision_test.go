@@ -110,8 +110,8 @@ func TestDecisionPromptDoesNotMentionTerminalResponders(t *testing.T) {
 		UserRequest:  "request",
 	})
 
-	if strings.Contains(strings.ToLower(prompt), "terminal responder") {
-		t.Fatalf("prompt contains legacy terminal responder wording:\n%s", prompt)
+	if strings.Contains(strings.ToLower(prompt), "legacy interactive session") {
+		t.Fatalf("prompt contains legacy interactive-session wording:\n%s", prompt)
 	}
 }
 

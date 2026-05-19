@@ -139,10 +139,15 @@ func TestAppServerClientSerializesOverlappingRPCs(t *testing.T) {
 
 	<-secondStarted
 
-	select {
-	case <-transport.sentRequestSignal:
-		t.Fatal("second RPC sent before first RPC completed")
-	case <-time.After(50 * time.Millisecond):
+	deadline := time.Now().Add(50 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		transport.mu.Lock()
+		got := len(transport.sentRequests)
+		transport.mu.Unlock()
+		if got > 1 {
+			t.Fatal("second RPC sent before first RPC completed")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 
 	transport.enqueueResponse(`{"id":"1","result":{"thread":{"id":"thread_123"}}}`)
