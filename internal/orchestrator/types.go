@@ -45,7 +45,8 @@ type TaskRun struct {
 	UserRequest          string
 	CreatedBy            string
 	RemoteWorkdir        string
-	AppServerState
+	ThreadID              string
+	ActiveTurnID          string
 	LastInput             string
 	LastOutputSummary     string
 	LastDecisionAction    string

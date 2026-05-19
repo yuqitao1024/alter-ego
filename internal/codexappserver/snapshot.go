@@ -52,6 +52,21 @@ func (w *ThreadWatcher) Snapshot() ThreadSnapshot {
 	return w.snapshot
 }
 
+func (w *ThreadWatcher) markConnecting() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.snapshot.SubscriptionState = SubscriptionStateConnecting
+	w.snapshot.LastSubscriptionError = ""
+}
+
+func (w *ThreadWatcher) markError(message string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.snapshot.SubscriptionState = SubscriptionStateError
+	w.snapshot.LastSubscriptionError = message
+	w.snapshot.LastActivityAt = time.Now().UTC()
+}
+
 func (w *ThreadWatcher) apply(msg rpcMessage) {
 	params, ok := messageParams(msg)
 	if !ok {
@@ -70,7 +85,7 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 	w.snapshot.LastSubscriptionError = ""
 
 	switch msg.Method {
-	case "thread/started", "thread/completed":
+	case "thread/started", "thread/completed", "thread/status/changed", "thread/closed":
 		var payload struct {
 			Thread struct {
 				ID     string `json:"id"`
@@ -97,7 +112,7 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 		}
 		w.snapshot.ActiveTurnID = payload.Turn.ID
 		w.snapshot.ActiveTurnStatus = payload.Turn.Status
-	case "item/started", "item/completed":
+	case "item/started", "item/completed", "item/agentMessage/delta":
 		var payload struct {
 			Item struct {
 				ID       string `json:"id"`
@@ -105,12 +120,21 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 				Text     string `json:"text"`
 				ThreadID string `json:"thread_id"`
 			} `json:"item"`
+			Delta struct {
+				Text string `json:"text"`
+			} `json:"delta"`
 		}
 		if err := json.Unmarshal(params, &payload); err != nil {
 			return
 		}
 		w.snapshot.LastItemID = payload.Item.ID
 		text := strings.TrimSpace(payload.Item.Text)
+		if msg.Method == "item/agentMessage/delta" {
+			text = strings.TrimSpace(payload.Delta.Text)
+			w.snapshot.LatestAgentMessage = strings.TrimSpace(w.snapshot.LatestAgentMessage + text)
+			w.snapshot.LatestSummary = w.snapshot.LatestAgentMessage
+			return
+		}
 		switch payload.Item.Type {
 		case "agent_message":
 			w.snapshot.LatestAgentMessage = text
@@ -125,7 +149,7 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 
 func (w *ThreadWatcher) accepts(method string, params json.RawMessage) bool {
 	switch method {
-	case "thread/started", "thread/completed":
+	case "thread/started", "thread/completed", "thread/status/changed", "thread/closed":
 		var payload struct {
 			Thread struct {
 				ID string `json:"id"`
@@ -134,7 +158,7 @@ func (w *ThreadWatcher) accepts(method string, params json.RawMessage) bool {
 		if err := json.Unmarshal(params, &payload); err != nil {
 			return false
 		}
-		return payload.Thread.ID == "" || payload.Thread.ID == w.threadID
+		return payload.Thread.ID == w.threadID
 	case "turn/started", "turn/completed":
 		var payload struct {
 			Turn struct {
@@ -144,17 +168,23 @@ func (w *ThreadWatcher) accepts(method string, params json.RawMessage) bool {
 		if err := json.Unmarshal(params, &payload); err != nil {
 			return false
 		}
-		return payload.Turn.ThreadID == "" || payload.Turn.ThreadID == w.threadID
-	case "item/started", "item/completed":
+		return payload.Turn.ThreadID == w.threadID
+	case "item/started", "item/completed", "item/agentMessage/delta":
 		var payload struct {
 			Item struct {
 				ThreadID string `json:"thread_id"`
 			} `json:"item"`
+			Thread struct {
+				ID string `json:"id"`
+			} `json:"thread"`
 		}
 		if err := json.Unmarshal(params, &payload); err != nil {
 			return false
 		}
-		return payload.Item.ThreadID == "" || payload.Item.ThreadID == w.threadID
+		if payload.Item.ThreadID != "" {
+			return payload.Item.ThreadID == w.threadID
+		}
+		return payload.Thread.ID == w.threadID
 	default:
 		return false
 	}

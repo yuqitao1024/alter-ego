@@ -57,17 +57,13 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			remote_workdir,
 			thread_id,
 			active_turn_id,
-			last_thread_status,
-			last_turn_status,
-			last_observed_item_id,
-			last_remote_activity_at,
 			last_input,
 			last_output_summary,
 			last_decision_action,
 			awaiting_question,
 			created_at,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
@@ -81,10 +77,6 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		task.RemoteWorkdir,
 		task.ThreadID,
 		task.ActiveTurnID,
-		task.LastThreadStatus,
-		task.LastTurnStatus,
-		task.LastObservedItemID,
-		formatOptionalTime(task.LastRemoteActivityAt),
 		task.LastInput,
 		task.LastOutputSummary,
 		task.LastDecisionAction,
@@ -118,10 +110,6 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			remote_workdir = ?,
 			thread_id = ?,
 			active_turn_id = ?,
-			last_thread_status = ?,
-			last_turn_status = ?,
-			last_observed_item_id = ?,
-			last_remote_activity_at = ?,
 			last_input = ?,
 			last_output_summary = ?,
 			last_decision_action = ?,
@@ -141,10 +129,6 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		task.RemoteWorkdir,
 		task.ThreadID,
 		task.ActiveTurnID,
-		task.LastThreadStatus,
-		task.LastTurnStatus,
-		task.LastObservedItemID,
-		formatOptionalTime(task.LastRemoteActivityAt),
 		task.LastInput,
 		task.LastOutputSummary,
 		task.LastDecisionAction,
@@ -183,10 +167,6 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			remote_workdir,
 			thread_id,
 			active_turn_id,
-			last_thread_status,
-			last_turn_status,
-			last_observed_item_id,
-			last_remote_activity_at,
 			last_input,
 			last_output_summary,
 			last_decision_action,
@@ -219,10 +199,6 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			remote_workdir,
 			thread_id,
 			active_turn_id,
-			last_thread_status,
-			last_turn_status,
-			last_observed_item_id,
-			last_remote_activity_at,
 			last_input,
 			last_output_summary,
 			last_decision_action,
@@ -437,10 +413,6 @@ func (s *Store) init(ctx context.Context) error {
 			remote_workdir TEXT NOT NULL,
 			thread_id TEXT NOT NULL DEFAULT '',
 			active_turn_id TEXT NOT NULL DEFAULT '',
-			last_thread_status TEXT NOT NULL DEFAULT '',
-			last_turn_status TEXT NOT NULL DEFAULT '',
-			last_observed_item_id TEXT NOT NULL DEFAULT '',
-			last_remote_activity_at TEXT,
 			last_input TEXT NOT NULL,
 			last_output_summary TEXT NOT NULL,
 			last_decision_action TEXT NOT NULL DEFAULT '',
@@ -490,7 +462,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	var phase string
 	var workflowStage string
 	var awaitingQuestion sql.NullString
-	var lastRemoteActivityAt sql.NullString
 	var createdAt string
 	var updatedAt string
 
@@ -507,10 +478,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&task.RemoteWorkdir,
 		&task.ThreadID,
 		&task.ActiveTurnID,
-		&task.LastThreadStatus,
-		&task.LastTurnStatus,
-		&task.LastObservedItemID,
-		&lastRemoteActivityAt,
 		&task.LastInput,
 		&task.LastOutputSummary,
 		&task.LastDecisionAction,
@@ -539,10 +506,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	if err != nil {
 		return TaskRun{}, err
 	}
-	task.LastRemoteActivityAt, err = parseOptionalTime(lastRemoteActivityAt)
-	if err != nil {
-		return TaskRun{}, fmt.Errorf("parse last_remote_activity_at: %w", err)
-	}
 
 	return task, nil
 }
@@ -569,24 +532,6 @@ func unmarshalAwaitingQuestion(raw sql.NullString) (*AwaitingQuestion, error) {
 		return nil, fmt.Errorf("unmarshal awaiting question: %w", err)
 	}
 	return &question, nil
-}
-
-func formatOptionalTime(tm *time.Time) any {
-	if tm == nil {
-		return nil
-	}
-	return tm.UTC().Format(time.RFC3339Nano)
-}
-
-func parseOptionalTime(raw sql.NullString) (*time.Time, error) {
-	if !raw.Valid || raw.String == "" {
-		return nil, nil
-	}
-	tm, err := time.Parse(time.RFC3339Nano, raw.String)
-	if err != nil {
-		return nil, err
-	}
-	return &tm, nil
 }
 
 func IsTaskNotFound(err error) bool {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 )
 
 type MachineRuntimeConfig struct {
@@ -26,6 +25,7 @@ type ClientAPI interface {
 	StartTurn(ctx context.Context, req TurnStartRequest) (string, error)
 	SteerTurn(ctx context.Context, req TurnSteerRequest) (string, error)
 	InterruptTurn(ctx context.Context, req TurnInterruptRequest) error
+	ResumeThread(ctx context.Context, threadID string) error
 }
 
 type ManagerOptions struct {
@@ -83,7 +83,7 @@ func (m *Manager) StartTaskSession(ctx context.Context, machine MachineRuntimeCo
 
 	turnID, err := runtime.client.StartTurn(ctx, TurnStartRequest{
 		ThreadID: threadID,
-		Input:    req.Input,
+		Input:    textInput(req.Input),
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("start turn: %w", err)
@@ -106,6 +106,7 @@ func (m *Manager) WatchTaskThread(ctx context.Context, machine MachineRuntimeCon
 		watcher = newThreadWatcher(threadID)
 		runtime.watchers[threadID] = watcher
 	}
+	watcher.markConnecting()
 
 	return watcher, nil
 }
@@ -136,13 +137,14 @@ func (m *Manager) SendTaskInput(ctx context.Context, machine MachineRuntimeConfi
 	if strings.TrimSpace(activeTurnID) != "" {
 		return runtime.client.SteerTurn(ctx, TurnSteerRequest{
 			TurnID: activeTurnID,
-			Input:  input,
+			Input:  textInput(input),
 		})
 	}
 
 	return runtime.client.StartTurn(ctx, TurnStartRequest{
-		ThreadID: threadID,
-		Input:    input,
+		ThreadID:       threadID,
+		ExpectedTurnID: activeTurnID,
+		Input:          textInput(input),
 	})
 }
 
@@ -174,11 +176,15 @@ func (m *Manager) Close() error {
 
 func (m *Manager) ensureMachine(ctx context.Context, machine MachineRuntimeConfig) (*machineRuntime, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if runtime := m.machines[machine.MachineID]; runtime != nil {
-		return runtime, nil
+		clientAlive := runtime.client != nil
+		m.mu.Unlock()
+		if clientAlive {
+			return runtime, nil
+		}
+		return m.redialMachine(ctx, machine)
 	}
+	m.mu.Unlock()
 
 	client, err := m.dialClient(ctx, machine)
 	if err != nil {
@@ -197,6 +203,44 @@ func (m *Manager) ensureMachine(ctx context.Context, machine MachineRuntimeConfi
 	return runtime, nil
 }
 
+func (m *Manager) redialMachine(ctx context.Context, machine MachineRuntimeConfig) (*machineRuntime, error) {
+	client, err := m.dialClient(ctx, machine)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	runtime := m.machines[machine.MachineID]
+	if runtime == nil {
+		runtime = &machineRuntime{
+			machine:  machine,
+			watchers: make(map[string]*ThreadWatcher),
+		}
+		m.machines[machine.MachineID] = runtime
+	}
+	runtime.machine = machine
+	runtime.client = client
+	for threadID, watcher := range runtime.watchers {
+		if err := runtime.client.ResumeThread(ctx, threadID); err != nil {
+			return nil, err
+		}
+		watcher.markConnecting()
+	}
+
+	go m.consumeNotifications(machine.MachineID, runtime)
+
+	return runtime, nil
+}
+
+func textInput(input string) []InputItem {
+	return []InputItem{{
+		Type: "text",
+		Text: input,
+	}}
+}
+
 func (m *Manager) consumeNotifications(machineID string, runtime *machineRuntime) {
 	for msg := range runtime.client.Notifications() {
 		m.mu.Lock()
@@ -210,24 +254,20 @@ func (m *Manager) consumeNotifications(machineID string, runtime *machineRuntime
 	if runtime.client == nil {
 		markMessage = "app-server client unavailable"
 	}
-	m.markRuntimeError(machineID, markMessage)
+	m.markRuntimeDisconnected(machineID, runtime, markMessage)
 }
 
-func (m *Manager) markRuntimeError(machineID, message string) {
+func (m *Manager) markRuntimeDisconnected(machineID string, runtime *machineRuntime, message string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	runtime := m.machines[machineID]
-	if runtime == nil {
+	current := m.machines[machineID]
+	if current == nil || current != runtime {
 		return
 	}
 
-	now := time.Now().UTC()
-	for _, watcher := range runtime.watchers {
-		watcher.mu.Lock()
-		watcher.snapshot.SubscriptionState = SubscriptionStateError
-		watcher.snapshot.LastSubscriptionError = message
-		watcher.snapshot.LastActivityAt = now
-		watcher.mu.Unlock()
+	runtime.client = nil
+	for _, watcher := range current.watchers {
+		watcher.markError(message)
 	}
 }

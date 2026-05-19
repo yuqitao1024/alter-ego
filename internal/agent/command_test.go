@@ -95,3 +95,31 @@ func TestCommandHandlerUnknownCommandPointsToHelp(t *testing.T) {
 		t.Fatalf("reply.Text = %q", reply.Text)
 	}
 }
+
+func TestCommandHandlerMachineInitInvokesService(t *testing.T) {
+	handler := NewCommandHandler(Config{}, NewSessionStore(12), &fakeMachineInitService{})
+	event := channel.MessageEvent{
+		Text: "/machine init machine_a",
+		Conversation: channel.Conversation{
+			ID:   "oc_1",
+			Kind: channel.ConversationDirect,
+		},
+	}
+
+	reply, err := handler.HandleCommand(context.Background(), event)
+	if err != nil {
+		t.Fatalf("HandleCommand returned error: %v", err)
+	}
+	if reply.Text != "Machine machine_a initialized for Codex App Server." {
+		t.Fatalf("reply.Text = %q", reply.Text)
+	}
+}
+
+type fakeMachineInitService struct {
+	machineID string
+}
+
+func (f *fakeMachineInitService) InitMachine(_ context.Context, machineID string) error {
+	f.machineID = machineID
+	return nil
+}

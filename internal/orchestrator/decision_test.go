@@ -47,9 +47,7 @@ func TestDecisionContextIncludesRuntimeTaskFields(t *testing.T) {
 			UserRequest:       "Add /task commands",
 			LastInput:         "Review current router",
 			LastOutputSummary: "Router parsed command prefix successfully",
-			AppServerState: AppServerState{
-				ThreadID: "thread-9",
-			},
+			ThreadID: "thread-9",
 		},
 		OutputWindow: OutputWindow{
 			SessionState: SessionState{

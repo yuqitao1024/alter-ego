@@ -150,7 +150,7 @@ func TestTickStartsInteractiveSessionAndStoresThreadMetadata(t *testing.T) {
 		t.Fatalf("persisted.RemoteWorkdir = %q, want /srv/codex-tasks/task-running/repo", persisted.RemoteWorkdir)
 	}
 	if persisted.ThreadID != "thread_123" || persisted.ActiveTurnID != "turn_456" {
-		t.Fatalf("persisted app-server identity = %#v", persisted.AppServerState)
+		t.Fatalf("persisted thread identity = %#v", persisted)
 	}
 }
 
@@ -170,9 +170,7 @@ func TestTickMarksRunningTaskDetachedWhenCaptureTimesOut(t *testing.T) {
 		UserRequest:   "Investigate timeout",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-timeout",
-		},
+		ThreadID: "thread-timeout",
 	})
 	service.runner.(*fakeServiceRunner).captureErr = fmt.Errorf("capture app-server output: %w", ErrRemoteCommandTimeout)
 
@@ -205,9 +203,7 @@ func TestTickMarksRunningTaskDetachedWhenThreadMissingDuringCapture(t *testing.T
 		UserRequest:   "Investigate missing thread",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread_123",
-		},
+		ThreadID: "thread_123",
 	})
 	service.runner.(*fakeServiceRunner).captureErr = fmt.Errorf("get app-server thread: %w", ErrAppServerThreadMissing)
 
@@ -240,9 +236,7 @@ func TestTickTimeoutOnOneTaskDoesNotBlockNextTask(t *testing.T) {
 		UserRequest:   "Task one",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-running-timeout",
-		},
+		ThreadID: "thread-running-timeout",
 	})
 	pendingTask := seedTask(t, store, TaskRun{
 		TaskID:       "task-pending-next",
@@ -298,9 +292,7 @@ func TestTickMovesTaskToWaitingUserInputWhenDecisionRequiresUser(t *testing.T) {
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-wait",
-		},
+		ThreadID: "thread-wait",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
 		RawOutput: `I found two implementation approaches.
@@ -358,9 +350,7 @@ func TestTickPromotesPlanningTaskToExecutingOnModelReply(t *testing.T) {
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-phase-promotion",
-		},
+		ThreadID: "thread-phase-promotion",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
 		RawOutput: "Ready to start implementation",
@@ -411,9 +401,7 @@ func TestReplyDoesNotPromotePhaseFromExecutionKeywordsWithoutWorkflowStage(t *te
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread_123",
-		},
+		ThreadID: "thread_123",
 		AwaitingQuestion: &AwaitingQuestion{
 			QuestionText: "Ready to continue?",
 			QuestionType: "plan_review",
@@ -452,9 +440,7 @@ func TestServicePromotesToExecutingOnlyFromImplementationStage(t *testing.T) {
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread_123",
-		},
+		ThreadID: "thread_123",
 	})
 
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
@@ -505,9 +491,7 @@ func TestTickUsesFixedContinueReplyDuringExecuting(t *testing.T) {
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-executing-continue",
-		},
+		ThreadID: "thread-executing-continue",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
 		RawOutput: "Waiting for a short continuation",
@@ -557,9 +541,7 @@ func TestTickForcesUserApprovalBeforeReturningExecutingTaskToPlanning(t *testing
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-phase-regression",
-		},
+		ThreadID: "thread-phase-regression",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
 		RawOutput: "Need to revisit the plan",
@@ -610,9 +592,7 @@ func TestTickSkipsDecisionModelWhileCodexIsStillWorking(t *testing.T) {
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-working-skip",
-		},
+		ThreadID: "thread-working-skip",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
 		RawOutput: "Working\nPress Esc to interrupt",
@@ -655,9 +635,7 @@ func TestTickKeepsTaskRunningWhenDecisionEngineReturnsWait(t *testing.T) {
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-working",
-		},
+		ThreadID: "thread-working",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
 		RawOutput: "Need operator guidance",
@@ -704,9 +682,7 @@ func TestTickRepliesToCodexWhenDecisionEngineRequestsDirectReply(t *testing.T) {
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread-direct-reply",
-		},
+		ThreadID: "thread-direct-reply",
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
 		RawOutput: `当前状态有冲突，需要先对齐目标。
@@ -759,10 +735,8 @@ func TestTickMarksTaskCompletedWhenDecisionEngineRequestsCompletion(t *testing.T
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID:     "thread-complete",
+		ThreadID: "thread-complete",
 			ActiveTurnID: "turn-complete",
-		},
 	})
 	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
 		RawOutput: `Implementation finished successfully.
@@ -809,9 +783,7 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 		UserRequest:   "Implement orchestrator",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID: "thread_123",
-		},
+		ThreadID: "thread_123",
 		AwaitingQuestion: &AwaitingQuestion{
 			QuestionText: "You've hit your usage limit.",
 			QuestionType: "usage_limit",
@@ -886,10 +858,8 @@ func TestRecoverDetachedTaskReconnectsByThreadID(t *testing.T) {
 		UserRequest:   "Resume detached task",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID:     "thread_123",
+		ThreadID: "thread_123",
 			ActiveTurnID: "turn_456",
-		},
 	})
 	runner := service.runner.(*fakeServiceRunner)
 	runner.hasSession = true
@@ -906,7 +876,7 @@ func TestRecoverDetachedTaskReconnectsByThreadID(t *testing.T) {
 		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
 	}
 	if persisted.ThreadID != "thread_123" || persisted.ActiveTurnID != "turn_456" {
-		t.Fatalf("persisted thread identity = %#v", persisted.AppServerState)
+		t.Fatalf("persisted thread identity = %#v", persisted)
 	}
 	if !reflect.DeepEqual(runner.calls, []string{"has-session"}) {
 		t.Fatalf("runner.calls = %v, want [has-session]", runner.calls)
@@ -929,10 +899,8 @@ func TestStopMarksTaskStoppedAndCallsRunner(t *testing.T) {
 		UserRequest:   "Stop me",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID:     "thread-stop",
+		ThreadID: "thread-stop",
 			ActiveTurnID: "turn-stop",
-		},
 	})
 
 	if err := service.Stop(ctx, task.TaskID); err != nil {
@@ -969,10 +937,8 @@ func TestStopDoesNotPersistStoppedWhenRunnerStopFails(t *testing.T) {
 		UserRequest:   "Stop me",
 		CreatedBy:     "tester",
 		RemoteWorkdir: "/srv/backend",
-		AppServerState: AppServerState{
-			ThreadID:     "thread_123",
+		ThreadID: "thread_123",
 			ActiveTurnID: "turn_456",
-		},
 	})
 	service.runner.(*fakeServiceRunner).stopErr = errors.New("interrupt app-server turn: denied")
 

@@ -14,10 +14,8 @@ func TestReconnectUsesThreadWhenPresent(t *testing.T) {
 		TaskID:        "task-1",
 		MachineID:     "machine_a",
 		RemoteWorkdir: "/srv/repo",
-		AppServerState: AppServerState{
-			ThreadID:     "thread_123",
-			ActiveTurnID: "turn_456",
-		},
+		ThreadID:      "thread_123",
+		ActiveTurnID:  "turn_456",
 	}
 
 	session, err := ReconnectInteractiveSession(context.Background(), runner, task)
@@ -44,9 +42,7 @@ func TestReconnectFailsWhenThreadMissing(t *testing.T) {
 		TaskID:        "task-2",
 		MachineID:     "machine_a",
 		RemoteWorkdir: "/srv/repo",
-		AppServerState: AppServerState{
-			ThreadID: "thread_456",
-		},
+		ThreadID: "thread_456",
 	}
 
 	_, err := ReconnectInteractiveSession(context.Background(), runner, task)

@@ -56,11 +56,6 @@ func TestStoreUpdatesTaskStatusAndSessionFields(t *testing.T) {
 	task.RemoteWorkdir = "/srv/repos/backend/.codex/task-002"
 	task.ThreadID = "thread-update-002"
 	task.ActiveTurnID = "turn-update-002"
-	task.LastThreadStatus = "running"
-	task.LastTurnStatus = "completed"
-	task.LastObservedItemID = "item-update-002"
-	lastRemoteActivityAt := task.UpdatedAt.Add(15 * time.Second)
-	task.LastRemoteActivityAt = &lastRemoteActivityAt
 	task.LastDecisionAction = DecisionActionWait
 	task.UpdatedAt = task.UpdatedAt.Add(2 * time.Minute)
 	if err := store.UpdateTask(ctx, task); err != nil {
@@ -105,12 +100,11 @@ func TestStorePersistsAwaitingQuestion(t *testing.T) {
 	}
 }
 
-func TestStorePersistsAppServerThreadState(t *testing.T) {
+func TestStorePersistsThreadIdentity(t *testing.T) {
 	store := openTestStore(t)
 	defer store.Close()
 
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
-	lastRemoteActivityAt := now.Add(90 * time.Second)
 	task := TaskRun{
 		TaskID:        "task-appserver",
 		TemplateID:    "simt-stl-dev",
@@ -119,16 +113,10 @@ func TestStorePersistsAppServerThreadState(t *testing.T) {
 		Status:        StatusRunning,
 		Phase:         TaskPhasePlanning,
 		WorkflowStage: WorkflowStagePlanWriting,
-		AppServerState: AppServerState{
-			ThreadID:             "thread_123",
-			ActiveTurnID:         "turn_456",
-			LastThreadStatus:     "running",
-			LastTurnStatus:       "running",
-			LastObservedItemID:   "item_789",
-			LastRemoteActivityAt: &lastRemoteActivityAt,
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
+		ThreadID:      "thread_123",
+		ActiveTurnID:  "turn_456",
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	if err := store.CreateTask(context.Background(), task); err != nil {
@@ -326,15 +314,6 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	if got.ActiveTurnID != want.ActiveTurnID {
 		t.Fatalf("ActiveTurnID = %q, want %q", got.ActiveTurnID, want.ActiveTurnID)
 	}
-	if got.LastThreadStatus != want.LastThreadStatus {
-		t.Fatalf("LastThreadStatus = %q, want %q", got.LastThreadStatus, want.LastThreadStatus)
-	}
-	if got.LastTurnStatus != want.LastTurnStatus {
-		t.Fatalf("LastTurnStatus = %q, want %q", got.LastTurnStatus, want.LastTurnStatus)
-	}
-	if got.LastObservedItemID != want.LastObservedItemID {
-		t.Fatalf("LastObservedItemID = %q, want %q", got.LastObservedItemID, want.LastObservedItemID)
-	}
 	if got.UserRequest != want.UserRequest {
 		t.Fatalf("UserRequest = %q, want %q", got.UserRequest, want.UserRequest)
 	}
@@ -349,13 +328,6 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	}
 	if got.LastDecisionAction != want.LastDecisionAction {
 		t.Fatalf("LastDecisionAction = %q, want %q", got.LastDecisionAction, want.LastDecisionAction)
-	}
-	switch {
-	case got.LastRemoteActivityAt == nil && want.LastRemoteActivityAt == nil:
-	case got.LastRemoteActivityAt == nil || want.LastRemoteActivityAt == nil:
-		t.Fatalf("LastRemoteActivityAt = %v, want %v", got.LastRemoteActivityAt, want.LastRemoteActivityAt)
-	case !got.LastRemoteActivityAt.Equal(*want.LastRemoteActivityAt):
-		t.Fatalf("LastRemoteActivityAt = %s, want %s", got.LastRemoteActivityAt, want.LastRemoteActivityAt)
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("CreatedAt = %s, want %s", got.CreatedAt, want.CreatedAt)

@@ -46,6 +46,20 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 			t.Fatalf("WriteJSON initialize response: %v", err)
 		}
 
+		_, payload, err = conn.ReadMessage()
+		if err != nil {
+			t.Errorf("ReadMessage initialized ack error: %v", err)
+			return
+		}
+		var initialized rpcMessage
+		if err := json.Unmarshal(payload, &initialized); err != nil {
+			t.Errorf("Unmarshal initialized error: %v", err)
+			return
+		}
+		if initialized.Method != "initialized" {
+			t.Fatalf("second method = %q, want initialized", initialized.Method)
+		}
+
 		requestsByMethod := make(map[string]rpcMessage, 2)
 		for len(requestsByMethod) < 2 {
 			_, payload, err := conn.ReadMessage()
@@ -68,6 +82,16 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		turnRequest, ok := requestsByMethod["turn/start"]
 		if !ok {
 			t.Fatal("turn/start request was not received")
+		}
+		var turnParams map[string]any
+		if err := json.Unmarshal(mustJSON(t, turnRequest.Params), &turnParams); err != nil {
+			t.Fatalf("Unmarshal turn params: %v", err)
+		}
+		if _, ok := turnParams["threadId"]; !ok {
+			t.Fatalf("turn/start params = %#v, want threadId", turnParams)
+		}
+		if _, ok := turnParams["input"]; !ok {
+			t.Fatalf("turn/start params = %#v, want input", turnParams)
 		}
 
 		if err := conn.WriteJSON(rpcMessage{ID: turnRequest.ID, Result: mustJSON(t, map[string]any{"turn": map[string]any{"id": "turn-2"}})}); err != nil {
@@ -112,7 +136,7 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		turnID, err := client.StartTurn(ctx, TurnStartRequest{ThreadID: "thread-1", Input: "continue"})
+		turnID, err := client.StartTurn(ctx, TurnStartRequest{ThreadID: "thread-1", Input: []InputItem{{Type: "text", Text: "continue"}}})
 		if err != nil {
 			t.Errorf("StartTurn returned error: %v", err)
 			return
@@ -138,6 +162,65 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		}
 	default:
 		t.Fatal("StartTurn did not return a turn ID")
+	}
+}
+
+func TestNewClientSendsInitializedNotificationAfterInitialize(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{}
+	seen := make(chan []string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("Upgrade() error: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		methods := make([]string, 0, 2)
+		for len(methods) < 2 {
+			_, payload, err := conn.ReadMessage()
+			if err != nil {
+				t.Errorf("ReadMessage() error: %v", err)
+				return
+			}
+
+			var request rpcMessage
+			if err := json.Unmarshal(payload, &request); err != nil {
+				t.Errorf("Unmarshal() error: %v", err)
+				return
+			}
+			methods = append(methods, request.Method)
+			if request.Method == "initialize" {
+				if err := conn.WriteJSON(rpcMessage{
+					ID:     request.ID,
+					Result: mustJSON(t, map[string]any{"userAgent": "alterego-test"}),
+				}); err != nil {
+					t.Errorf("WriteJSON() error: %v", err)
+					return
+				}
+			}
+		}
+		seen <- methods
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	client, err := NewClient(ctx, ClientOptions{
+		URL:        wsURLFromHTTP(server.URL),
+		ClientInfo: ClientInfo{Name: "alterego"},
+	})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	defer client.Close()
+
+	methods := <-seen
+	if len(methods) != 2 || methods[0] != "initialize" || methods[1] != "initialized" {
+		t.Fatalf("methods = %v, want [initialize initialized]", methods)
 	}
 }
 

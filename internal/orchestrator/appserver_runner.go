@@ -2,55 +2,38 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
 )
 
-type appServerRunnerClient interface {
-	StartThread(ctx context.Context, req ThreadStartRequest) (string, error)
-	StartTurn(ctx context.Context, req TurnStartRequest) (string, error)
-	SteerTurn(ctx context.Context, req TurnSteerRequest) (string, error)
-	InterruptTurn(ctx context.Context, req TurnInterruptRequest) error
-	GetThread(ctx context.Context, req ThreadGetRequest) (AppServerThread, error)
-	ListThreadItems(ctx context.Context, req ThreadItemsListRequest) ([]AppServerThreadItem, error)
-}
-
-type appServerProxyConnector interface {
-	Connect(ctx context.Context, machine MachineConfig) (AppServerTransport, error)
+type codexRuntime interface {
+	StartTaskSession(ctx context.Context, machine codexappserver.MachineRuntimeConfig, req codexappserver.StartTaskSessionRequest) (string, string, error)
+	WatchTaskThread(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID string) (*codexappserver.ThreadWatcher, error)
+	SendTaskInput(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID, input string) (string, error)
+	InterruptTask(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID string) error
+	Snapshot(machineID, threadID string) (codexappserver.ThreadSnapshot, bool)
 }
 
 type AppServerRunner struct {
 	transport       sshTransport
-	proxy           appServerProxyConnector
-	clientFactory   func(AppServerTransport) appServerRunnerClient
+	manager         codexRuntime
 	machineResolver func(machineID string) (MachineConfig, error)
 }
 
 var ErrAppServerThreadMissing = errors.New("app-server thread missing")
 var ErrAppServerStopUnsupported = errors.New("app-server runner does not support stopping remote threads without thread and turn identity")
 
-func NewAppServerRunner(proxy appServerProxyConnector, client appServerRunnerClient) *AppServerRunner {
-	if proxy == nil {
-		proxy = NewSSHAppServerProxy(nil)
-	}
-
-	runner := &AppServerRunner{
+func NewAppServerRunner(manager codexRuntime) *AppServerRunner {
+	return &AppServerRunner{
 		transport: shellSSHTransport{},
-		proxy:     proxy,
+		manager:   manager,
 		machineResolver: func(machineID string) (MachineConfig, error) {
 			return MachineConfig{}, fmt.Errorf("machine resolver is not configured for %q", machineID)
 		},
 	}
-	if client != nil {
-		runner.clientFactory = func(AppServerTransport) appServerRunnerClient { return client }
-	} else {
-		runner.clientFactory = func(transport AppServerTransport) appServerRunnerClient {
-			return NewAppServerClient(transport)
-		}
-	}
-	return runner
 }
 
 func (r *AppServerRunner) SetMachineResolver(resolver func(machineID string) (MachineConfig, error)) {
@@ -66,26 +49,17 @@ func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req Start
 		return RemoteSession{}, err
 	}
 
-	client, closeFn, err := r.connectClient(ctx, req.Machine)
-	if err != nil {
-		return RemoteSession{}, err
-	}
-	defer closeFn()
-
-	threadID, err := client.StartThread(ctx, ThreadStartRequest{
+	threadID, turnID, err := r.manager.StartTaskSession(ctx, machineRuntimeConfig(req.Machine), codexappserver.StartTaskSessionRequest{
 		Cwd:              repoDir,
 		BaseInstructions: strings.TrimSpace(req.WorkflowContent),
+		Input:            buildStartInput(req.WorkflowContent, req.UserRequest),
 	})
 	if err != nil {
-		return RemoteSession{}, fmt.Errorf("start app-server thread: %w", err)
+		return RemoteSession{}, fmt.Errorf("start app-server session: %w", err)
 	}
 
-	turnID, err := client.StartTurn(ctx, TurnStartRequest{
-		ThreadID: threadID,
-		Input:    buildStartInput(req.WorkflowContent, req.UserRequest),
-	})
-	if err != nil {
-		return RemoteSession{}, fmt.Errorf("start app-server turn: %w", err)
+	if _, err := r.manager.WatchTaskThread(ctx, machineRuntimeConfig(req.Machine), threadID); err != nil {
+		return RemoteSession{}, fmt.Errorf("watch app-server thread: %w", err)
 	}
 
 	return RemoteSession{
@@ -97,32 +71,18 @@ func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req Start
 }
 
 func (r *AppServerRunner) CaptureOutput(ctx context.Context, session RemoteSession) (OutputWindow, error) {
-	machine, err := r.machineResolver(session.MachineID)
-	if err != nil {
-		return OutputWindow{}, err
-	}
+	_ = ctx
 
-	client, closeFn, err := r.connectClient(ctx, machine)
-	if err != nil {
-		return OutputWindow{}, err
+	snapshot, ok := r.manager.Snapshot(session.MachineID, session.ThreadID)
+	if !ok {
+		return OutputWindow{}, ErrAppServerThreadMissing
 	}
-	defer closeFn()
-
-	thread, err := client.GetThread(ctx, ThreadGetRequest{ThreadID: session.ThreadID})
-	if err != nil {
-		return OutputWindow{}, fmt.Errorf("get app-server thread: %w", err)
-	}
-	items, err := client.ListThreadItems(ctx, ThreadItemsListRequest{ThreadID: session.ThreadID})
-	if err != nil {
-		return OutputWindow{}, fmt.Errorf("list app-server thread items: %w", err)
-	}
-
-	summary := summarizeThreadItems(items)
+	summary := firstNonEmpty(snapshot.LatestSummary, snapshot.LatestAgentMessage, snapshot.LatestPlan, snapshot.LatestCommand)
 	return OutputWindow{
 		RawOutput: summary,
 		Summary:   summary,
 		SessionState: SessionState{
-			ThreadStatus: thread.Status,
+			ThreadStatus: snapshot.ThreadStatus,
 		},
 	}, nil
 }
@@ -133,57 +93,20 @@ func (r *AppServerRunner) SendInteractiveInput(ctx context.Context, session Remo
 		return RemoteSession{}, err
 	}
 
-	client, closeFn, err := r.connectClient(ctx, machine)
+	turnID, err := r.manager.SendTaskInput(ctx, machineRuntimeConfig(machine), session.ThreadID, session.ActiveTurnID, input)
 	if err != nil {
-		return RemoteSession{}, err
+		return RemoteSession{}, fmt.Errorf("send app-server input: %w", err)
 	}
-	defer closeFn()
-
-	if strings.TrimSpace(session.ActiveTurnID) != "" {
-		turnID, err := client.SteerTurn(ctx, TurnSteerRequest{
-			TurnID: session.ActiveTurnID,
-			Input:  input,
-		})
-		if err != nil {
-			return RemoteSession{}, fmt.Errorf("steer app-server turn: %w", err)
-		}
-		if strings.TrimSpace(turnID) != "" {
-			session.ActiveTurnID = turnID
-		}
-		return session, nil
+	if strings.TrimSpace(turnID) != "" {
+		session.ActiveTurnID = turnID
 	}
-
-	turnID, err := client.StartTurn(ctx, TurnStartRequest{
-		ThreadID: session.ThreadID,
-		Input:    input,
-	})
-	if err != nil {
-		return RemoteSession{}, fmt.Errorf("start app-server turn: %w", err)
-	}
-	session.ActiveTurnID = turnID
 	return session, nil
 }
 
 func (r *AppServerRunner) HasSession(ctx context.Context, session RemoteSession) (bool, error) {
-	machine, err := r.machineResolver(session.MachineID)
-	if err != nil {
-		return false, err
-	}
-
-	client, closeFn, err := r.connectClient(ctx, machine)
-	if err != nil {
-		return false, err
-	}
-	defer closeFn()
-
-	_, err = client.GetThread(ctx, ThreadGetRequest{ThreadID: session.ThreadID})
-	if err == nil {
-		return true, nil
-	}
-	if isAppServerThreadMissingError(err) {
-		return false, nil
-	}
-	return false, fmt.Errorf("get app-server thread: %w", err)
+	_ = ctx
+	_, ok := r.manager.Snapshot(session.MachineID, session.ThreadID)
+	return ok, nil
 }
 
 func (r *AppServerRunner) StopSession(ctx context.Context, session RemoteSession) error {
@@ -196,16 +119,7 @@ func (r *AppServerRunner) StopSession(ctx context.Context, session RemoteSession
 		return err
 	}
 
-	client, closeFn, err := r.connectClient(ctx, machine)
-	if err != nil {
-		return err
-	}
-	defer closeFn()
-
-	if err := client.InterruptTurn(ctx, TurnInterruptRequest{
-		ThreadID: session.ThreadID,
-		TurnID:   session.ActiveTurnID,
-	}); err != nil {
+	if err := r.manager.InterruptTask(ctx, machineRuntimeConfig(machine), session.ThreadID, session.ActiveTurnID); err != nil {
 		return fmt.Errorf("interrupt app-server turn: %w", err)
 	}
 	return nil
@@ -219,13 +133,11 @@ func (r *AppServerRunner) runWorkspaceCommand(ctx context.Context, machine Machi
 	return output, nil
 }
 
-func (r *AppServerRunner) connectClient(ctx context.Context, machine MachineConfig) (appServerRunnerClient, func(), error) {
-	transport, err := r.proxy.Connect(ctx, machine)
-	if err != nil {
-		return nil, nil, fmt.Errorf("connect app-server proxy: %w", err)
+func machineRuntimeConfig(machine MachineConfig) codexappserver.MachineRuntimeConfig {
+	return codexappserver.MachineRuntimeConfig{
+		MachineID:    machine.ID,
+		WebSocketURL: machine.AppServerWebSocketURL(),
 	}
-	closeFn := func() { _ = transport.Close() }
-	return r.clientFactory(transport), closeFn, nil
 }
 
 func buildPrepareWorkspaceCommand(req StartRequest) string {
@@ -245,89 +157,4 @@ func buildPrepareWorkspaceCommand(req StartRequest) string {
 	)
 	steps = append(steps, req.PostCloneBootstrap...)
 	return strings.Join(steps, " && ")
-}
-
-func summarizeThreadItems(items []AppServerThreadItem) string {
-	var latestAgentMessage string
-	var latestPlan string
-	var latestCommand string
-
-	for _, item := range items {
-		switch normalizeThreadItemType(item.Type) {
-		case "agentmessage":
-			if text := extractThreadItemText(item.Payload); text != "" {
-				latestAgentMessage = text
-			}
-		case "plan":
-			if text := extractThreadItemText(item.Payload); text != "" {
-				latestPlan = text
-			}
-		case "commandexecution":
-			if text := extractCommandExecutionText(item.Payload); text != "" {
-				latestCommand = text
-			}
-		}
-	}
-
-	parts := make([]string, 0, 3)
-	if latestAgentMessage != "" {
-		parts = append(parts, latestAgentMessage)
-	}
-	if latestPlan != "" {
-		parts = append(parts, latestPlan)
-	}
-	if latestCommand != "" {
-		parts = append(parts, latestCommand)
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func normalizeThreadItemType(itemType string) string {
-	replacer := strings.NewReplacer("_", "", "-", "", " ", "")
-	return strings.ToLower(replacer.Replace(strings.TrimSpace(itemType)))
-}
-
-func extractThreadItemText(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-
-	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return ""
-	}
-
-	for _, key := range []string{"text", "message", "summary"} {
-		if value, ok := data[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func extractCommandExecutionText(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-
-	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return ""
-	}
-	for _, key := range []string{"command", "text", "summary"} {
-		if value, ok := data[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func isAppServerThreadMissingError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(strings.TrimSpace(err.Error()))
-	return errors.Is(err, ErrAppServerThreadMissing) ||
-		strings.Contains(message, "thread missing") ||
-		strings.Contains(message, "thread not found")
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yuqitao1024/alter-ego/internal/agent"
+	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
 	"github.com/yuqitao1024/alter-ego/internal/lark"
 	"github.com/yuqitao1024/alter-ego/internal/orchestrator"
 )
@@ -32,9 +34,6 @@ func run() error {
 	defer stop()
 
 	sessions := agent.NewSessionStore(12)
-	commandHandler := agent.NewCommandHandler(agentCfg, sessions)
-	chatHandler := agent.NewChatHandler(agentCfg, sessions, nil)
-
 	taskSubsystem, err := buildTaskSubsystem(ctx, taskSubsystemConfig{
 		RegistryRoot: taskRegistryRoot(),
 		DBPath:       taskDBPath(),
@@ -46,6 +45,9 @@ func run() error {
 	}
 	defer taskSubsystem.Close()
 	go taskSubsystem.Run(ctx)
+
+	commandHandler := agent.NewCommandHandler(agentCfg, sessions, taskSubsystem.MachineInstaller)
+	chatHandler := agent.NewChatHandler(agentCfg, sessions, nil)
 
 	handler := agent.NewRouter(commandHandler, taskSubsystem.TaskHandler, chatHandler)
 
@@ -65,11 +67,13 @@ type taskSubsystemConfig struct {
 }
 
 type taskSubsystem struct {
-	Registry    *orchestrator.Registry
-	Store       *orchestrator.Store
-	Runner      orchestrator.RemoteRunner
-	Service     *orchestrator.Service
-	TaskHandler *agent.TaskCommandHandler
+	Registry         *orchestrator.Registry
+	Store            *orchestrator.Store
+	Runner           orchestrator.RemoteRunner
+	Service          *orchestrator.Service
+	TaskHandler      *agent.TaskCommandHandler
+	MachineInstaller agent.MachineInitService
+	Manager          io.Closer
 }
 
 func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubsystem, error) {
@@ -89,7 +93,26 @@ func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubs
 		return nil, err
 	}
 
-	runner := orchestrator.NewAppServerRunner(nil, nil)
+	manager := codexappserver.NewManager(codexappserver.ManagerOptions{})
+	installer := codexappserver.NewInstaller(nil, func(machineID string) (codexappserver.MachineInstallConfig, error) {
+		machine := registry.Machines[machineID]
+		if machine == nil {
+			return codexappserver.MachineInstallConfig{}, errors.New("unknown machine: " + machineID)
+		}
+		return codexappserver.MachineInstallConfig{
+			MachineID:   machine.ID,
+			Host:        machine.Host,
+			Port:        machine.Port,
+			SSHUser:     machine.User,
+			RunUser:     machine.AppServerInstallUser,
+			ListenHost:  machine.AppServerListenHost,
+			ListenPort:  machine.AppServerListenPort,
+			ServiceName: machine.AppServerServiceName,
+			ShellInit:   append([]string(nil), machine.ShellInit...),
+		}, nil
+	})
+
+	runner := orchestrator.NewAppServerRunner(manager)
 	runner.SetMachineResolver(func(machineID string) (orchestrator.MachineConfig, error) {
 		machine := registry.Machines[machineID]
 		if machine == nil {
@@ -113,19 +136,27 @@ func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubs
 	service.SetNotifier(cfg.Notifier)
 
 	return &taskSubsystem{
-		Registry:    registry,
-		Store:       store,
-		Runner:      runner,
-		Service:     service,
-		TaskHandler: agent.NewTaskCommandHandler(service),
+		Registry:         registry,
+		Store:            store,
+		Runner:           runner,
+		Service:          service,
+		TaskHandler:      agent.NewTaskCommandHandler(service),
+		MachineInstaller: installer,
+		Manager:          manager,
 	}, nil
 }
 
 func (s *taskSubsystem) Close() error {
-	if s == nil || s.Store == nil {
+	if s == nil {
 		return nil
 	}
-	return s.Store.Close()
+	if s.Manager != nil {
+		_ = s.Manager.Close()
+	}
+	if s.Store != nil {
+		return s.Store.Close()
+	}
+	return nil
 }
 
 func (s *taskSubsystem) Run(ctx context.Context) {

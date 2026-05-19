@@ -49,6 +49,10 @@ func NewClient(ctx context.Context, opts ClientOptions) (*Client, error) {
 		_ = client.Close()
 		return nil, err
 	}
+	if err := client.notify(ctx, "initialized", InitializedNotification{}); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
 
 	return client, nil
 }
@@ -95,6 +99,10 @@ func (c *Client) InterruptTurn(ctx context.Context, req TurnInterruptRequest) er
 	return c.call(ctx, "turn/interrupt", req, nil)
 }
 
+func (c *Client) ResumeThread(ctx context.Context, threadID string) error {
+	return c.call(ctx, "thread/resume", ThreadResumeRequest{ThreadID: threadID}, nil)
+}
+
 func (c *Client) Notifications() <-chan rpcMessage {
 	return c.notifications
 }
@@ -128,6 +136,24 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 
 	_, err = c.await(requestID, responseCh, ctx, method, result)
 	return err
+}
+
+func (c *Client) notify(ctx context.Context, method string, params any) error {
+	if c == nil || c.transport == nil {
+		return errors.New("codex app-server transport is not configured")
+	}
+
+	requestBytes, err := json.Marshal(rpcMessage{
+		Method: method,
+		Params: params,
+	})
+	if err != nil {
+		return fmt.Errorf("%s: marshal request: %w", method, err)
+	}
+	if err := c.transport.Send(ctx, requestBytes); err != nil {
+		return fmt.Errorf("%s: send request: %w", method, err)
+	}
+	return nil
 }
 
 func (c *Client) dispatch(ctx context.Context, method string, params any) (string, chan callResult, string, error) {

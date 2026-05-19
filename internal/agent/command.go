@@ -8,15 +8,25 @@ import (
 	"github.com/yuqitao1024/alter-ego/internal/channel"
 )
 
-type CommandHandler struct {
-	cfg      Config
-	sessions *SessionStore
+type MachineInitService interface {
+	InitMachine(ctx context.Context, machineID string) error
 }
 
-func NewCommandHandler(cfg Config, sessions *SessionStore) *CommandHandler {
+type CommandHandler struct {
+	cfg         Config
+	sessions    *SessionStore
+	machineInit MachineInitService
+}
+
+func NewCommandHandler(cfg Config, sessions *SessionStore, machineInit ...MachineInitService) *CommandHandler {
+	var svc MachineInitService
+	if len(machineInit) > 0 {
+		svc = machineInit[0]
+	}
 	return &CommandHandler{
-		cfg:      cfg,
-		sessions: sessions,
+		cfg:         cfg,
+		sessions:    sessions,
+		machineInit: svc,
 	}
 }
 
@@ -36,7 +46,21 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, event channel.Messag
 
 	switch command {
 	case "/help":
-		reply.Text = "/help - show supported commands\n/status - show handler status\n/reset - clear current conversation context"
+		reply.Text = "/help - show supported commands\n/status - show handler status\n/reset - clear current conversation context\n/machine init <machine-id> - install and enable Codex App Server on a machine"
+	case "/machine":
+		if len(fields) != 3 || fields[1] != "init" {
+			reply.Text = "Usage: /machine init <machine-id>"
+			return reply, nil
+		}
+		if h.machineInit == nil {
+			reply.Text = "Machine init service is not configured."
+			return reply, nil
+		}
+		machineID := fields[2]
+		if err := h.machineInit.InitMachine(ctx, machineID); err != nil {
+			return reply, err
+		}
+		reply.Text = fmt.Sprintf("Machine %s initialized for Codex App Server.", machineID)
 	case "/status":
 		provider := h.cfg.Provider
 		if provider == "" {

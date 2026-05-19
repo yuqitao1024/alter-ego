@@ -74,9 +74,7 @@ func TestTaskCommandStatusFormatsTaskDetails(t *testing.T) {
 			MachineID:         "machine_a",
 			Status:            orchestrator.StatusRunning,
 			LastOutputSummary: "Tests passed",
-			AppServerState: orchestrator.AppServerState{
-				ThreadID: "thread-1",
-			},
+			ThreadID: "thread-1",
 		},
 	})
 

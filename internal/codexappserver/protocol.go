@@ -35,32 +35,36 @@ type InitializeResult struct {
 	UserAgent string `json:"userAgent,omitempty"`
 }
 
+type InitializedNotification struct{}
+
+type InputItem struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
 type ThreadStartRequest struct {
 	Cwd              string `json:"cwd"`
-	BaseInstructions string `json:"base_instructions,omitempty"`
+	BaseInstructions string `json:"baseInstructions,omitempty"`
 }
 
 type TurnStartRequest struct {
-	ThreadID string `json:"thread_id"`
-	Input    string `json:"input"`
+	ThreadID       string      `json:"threadId"`
+	ExpectedTurnID string      `json:"expectedTurnId,omitempty"`
+	Input          []InputItem `json:"input"`
 }
 
 type TurnSteerRequest struct {
-	TurnID string `json:"turn_id"`
-	Input  string `json:"input"`
+	TurnID string      `json:"turnId"`
+	Input  []InputItem `json:"input"`
 }
 
 type TurnInterruptRequest struct {
-	ThreadID string `json:"thread_id"`
-	TurnID   string `json:"turn_id"`
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
 }
 
-type ThreadGetRequest struct {
-	ThreadID string `json:"thread_id"`
-}
-
-type ThreadItemsListRequest struct {
-	ThreadID string `json:"thread_id"`
+type ThreadResumeRequest struct {
+	ThreadID string `json:"threadId"`
 }
 
 type Thread struct {
