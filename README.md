@@ -55,7 +55,7 @@ Supported commands:
 
 ## Remote Codex Tasks
 
-Remote Codex orchestration is configured from repository files and persisted in SQLite. Each task runs inside a long-lived remote `tmux` session, and Alter Ego drives Codex by reading the session screen and sending follow-up input back into the same session. If `tmux` survives but the foreground Codex process exits, Alter Ego probes the pane state and issues one controlled `codex resume --last` before falling back to model arbitration.
+Remote Codex orchestration is configured from repository files and persisted in SQLite. Each task runs against a long-lived remote `codex app-server` thread, and Alter Ego drives Codex through the structured app-server protocol instead of scraping terminal output. SSH is still used to bootstrap and proxy the remote app-server process, but the task state source is the app-server thread and turn model.
 
 Unlike the general chat handler, remote task orchestration requires a configured LLM. Deterministic terminal handshakes such as trust prompts and usage-limit prompts are still handled by fixed responders, but every non-deterministic Codex interaction is arbitrated by the configured model. The task subsystem will fail to start if `ALTER_EGO_LLM_API_KEY` or `ALTER_EGO_LLM_MODEL` is missing.
 
@@ -80,7 +80,7 @@ Each repository binds to its remote machine pool. Each template binds to one rep
 Remote machine prerequisites:
 
 - `ssh` access from the local control node
-- `tmux` installed on the remote machine
+- `codex app-server` and `codex remote-control` available on the remote machine
 - `codex` installed and already authenticated on the remote machine
 - Git access to the configured `remote_repo_url`
 
@@ -120,8 +120,9 @@ For each new task, Alter Ego will:
 4. clone the repository;
 5. checkout `default_branch`;
 6. run `post_clone_bootstrap`;
-7. create a task-scoped `tmux` session;
-8. start `codex` inside that `tmux` session.
+7. start the remote app-server proxy;
+8. create a task-scoped app-server thread;
+9. start `codex` inside that thread.
 
 Interactive task lifecycle:
 
@@ -130,7 +131,7 @@ Interactive task lifecycle:
 3. `starting_session`
 4. `running`
 5. `waiting_user_input` when Codex needs clarification, scope confirmation, an implementation choice, or missing context
-6. `detached` when the local operator loses attachment but the remote `tmux` session may still exist
+6. `detached` when the local operator loses attachment but the remote app-server thread may still exist
 7. `completed` when the model arbitrator concludes the requested workflow is finished
 8. `failed` when startup, recovery, or remote execution cannot continue
 9. `stopped` when the operator explicitly stops the task
@@ -152,13 +153,13 @@ Replies from `/task reply` are injected back into the live remote session rather
 
 Task decision flow:
 
-1. probe the current `tmux` pane state and capture the current screen tail;
-2. run deterministic responders for known terminal handshakes;
+1. reconnect to the remote app-server proxy and fetch the current thread state;
+2. run deterministic responders for known structured handshakes;
 3. if a responder queued a deterministic follow-up action, execute that follow-up before any model arbitration;
-4. if the pane is still alive but Codex has dropped back to the shell, issue one controlled `codex resume --last`;
+4. if the thread is still alive but Codex has dropped back to an inactive state, start a new turn;
 5. if Codex is clearly still working, do not call the model arbitrator;
-6. if the same screen digest was arbitrated recently, do not call the model again until the cooldown expires;
-7. otherwise send the workflow, task context, and terminal excerpt to the configured LLM;
+6. if the same app-server snapshot was arbitrated recently, do not call the model again until the cooldown expires;
+7. otherwise send the workflow, task context, and structured thread snapshot to the configured LLM;
 8. the LLM must return one of:
    - `wait`
    - `reply_to_codex`
@@ -167,7 +168,7 @@ Task decision flow:
 
 `wait` is not a persisted task state. It is only a one-tick decision outcome that leaves the task in `running` without sending any new input.
 
-Deterministic terminal responders are reserved for prompts with a safe fixed answer, such as trust confirmation or login/usage escalation. `Create a plan?` is not auto-dismissed; that screen is left to the normal decision flow instead of sending `Escape` or a synthetic continuation reply.
+Deterministic responders are reserved for prompts with a safe fixed answer, such as trust confirmation or login/usage escalation. `Create a plan?` is not auto-dismissed; that prompt is left to the normal decision flow instead of sending `Escape` or a synthetic continuation reply.
 
 Run locally:
 

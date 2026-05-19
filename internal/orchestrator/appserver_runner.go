@@ -29,7 +29,6 @@ type AppServerRunner struct {
 }
 
 var ErrAppServerThreadMissing = errors.New("app-server thread missing")
-var ErrAppServerResumeUnsupported = errors.New("app-server runner uses thread reconnect semantics; resume --last is unsupported")
 var ErrAppServerStopUnsupported = errors.New("app-server runner does not support stopping remote threads without thread and turn identity")
 
 func NewAppServerRunner(proxy appServerProxyConnector, client appServerRunnerClient) *AppServerRunner {
@@ -165,10 +164,6 @@ func (r *AppServerRunner) SendInteractiveInput(ctx context.Context, session Remo
 	return session, nil
 }
 
-func (r *AppServerRunner) SendInteractiveKey(context.Context, RemoteSession, string) error {
-	return fmt.Errorf("app-server runner does not support interactive key injection")
-}
-
 func (r *AppServerRunner) HasSession(ctx context.Context, session RemoteSession) (bool, error) {
 	machine, err := r.machineResolver(session.MachineID)
 	if err != nil {
@@ -189,10 +184,6 @@ func (r *AppServerRunner) HasSession(ctx context.Context, session RemoteSession)
 		return false, nil
 	}
 	return false, fmt.Errorf("get app-server thread: %w", err)
-}
-
-func (r *AppServerRunner) ResumeLastCodexSession(ctx context.Context, session RemoteSession) error {
-	return fmt.Errorf("%w: thread %q", ErrAppServerResumeUnsupported, session.ThreadID)
 }
 
 func (r *AppServerRunner) StopSession(ctx context.Context, session RemoteSession) error {

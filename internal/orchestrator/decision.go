@@ -10,7 +10,7 @@ import (
 )
 
 const fixedDecisionRules = `You are Alter Ego's remote Codex task coordinator.
-- Advance remote Codex work deterministically after terminal responders have already been applied.
+- Advance remote Codex work deterministically using the current thread state and workflow context.
 - Ask the user when the task requires requirement clarification, scope confirmation, an implementation solution choice, or missing context.
 - If Codex is still working, return wait.
 - If Codex is waiting for a direct operator answer, either ask the user or reply to Codex directly.
@@ -40,13 +40,14 @@ type DecisionContext struct {
 }
 
 type DecisionResult struct {
-	Action       string
-	DecisionType string
-	NextPhase    TaskPhase
-	NextInput    string
-	CodexReply   string
-	Summary      string
-	Question     *AwaitingQuestion
+	Action        string
+	DecisionType  string
+	NextPhase     TaskPhase
+	WorkflowStage WorkflowStage
+	NextInput     string
+	CodexReply    string
+	Summary       string
+	Question      *AwaitingQuestion
 }
 
 type DecisionEngine interface {
@@ -68,22 +69,24 @@ func NewModelDecisionEngine(model DecisionModel) *ModelDecisionEngine {
 }
 
 type decisionPayload struct {
-	Action       string `json:"action"`
-	DecisionType string `json:"decision_type"`
-	NextPhase    string `json:"next_phase"`
-	Summary      string `json:"summary"`
-	CodexReply   string `json:"codex_reply"`
-	UserQuestion string `json:"user_question"`
+	Action        string `json:"action"`
+	DecisionType  string `json:"decision_type"`
+	NextPhase     string `json:"next_phase"`
+	WorkflowStage string `json:"workflow_stage"`
+	Summary       string `json:"summary"`
+	CodexReply    string `json:"codex_reply"`
+	UserQuestion  string `json:"user_question"`
 }
 
 func (p *decisionPayload) UnmarshalJSON(data []byte) error {
 	type rawDecisionPayload struct {
-		Action       string          `json:"action"`
-		DecisionType json.RawMessage `json:"decision_type"`
-		NextPhase    string          `json:"next_phase"`
-		Summary      string          `json:"summary"`
-		CodexReply   string          `json:"codex_reply"`
-		UserQuestion string          `json:"user_question"`
+		Action        string          `json:"action"`
+		DecisionType  json.RawMessage `json:"decision_type"`
+		NextPhase     string          `json:"next_phase"`
+		WorkflowStage string          `json:"workflow_stage"`
+		Summary       string          `json:"summary"`
+		CodexReply    string          `json:"codex_reply"`
+		UserQuestion  string          `json:"user_question"`
 	}
 
 	var raw rawDecisionPayload
@@ -93,6 +96,7 @@ func (p *decisionPayload) UnmarshalJSON(data []byte) error {
 
 	p.Action = raw.Action
 	p.NextPhase = raw.NextPhase
+	p.WorkflowStage = raw.WorkflowStage
 	p.Summary = raw.Summary
 	p.CodexReply = raw.CodexReply
 	p.UserQuestion = raw.UserQuestion
@@ -141,11 +145,18 @@ func (e *ModelDecisionEngine) DecideNextStep(ctx context.Context, in DecisionCon
 	}
 
 	result := DecisionResult{
-		Action:       strings.TrimSpace(payload.Action),
-		DecisionType: strings.TrimSpace(payload.DecisionType),
-		NextPhase:    normalizeTaskPhaseValue(payload.NextPhase),
-		Summary:      strings.TrimSpace(payload.Summary),
-		CodexReply:   strings.TrimSpace(payload.CodexReply),
+		Action:        strings.TrimSpace(payload.Action),
+		DecisionType:  strings.TrimSpace(payload.DecisionType),
+		NextPhase:     normalizeTaskPhaseValue(payload.NextPhase),
+		WorkflowStage: normalizeWorkflowStageValue(payload.WorkflowStage),
+		Summary:       strings.TrimSpace(payload.Summary),
+		CodexReply:    strings.TrimSpace(payload.CodexReply),
+	}
+	if result.WorkflowStage == "" {
+		result.WorkflowStage = workflowStageForPhase(result.NextPhase, in.Task.WorkflowStage)
+	}
+	if result.NextPhase == "" {
+		result.NextPhase = taskPhaseForWorkflowStage(result.WorkflowStage)
 	}
 	if result.Action == DecisionActionAskUser {
 		questionText := strings.TrimSpace(payload.UserQuestion)
@@ -194,26 +205,24 @@ func BuildDecisionPrompt(in DecisionContext) string {
 	builder.WriteString(in.Task.RepositoryID)
 	builder.WriteString("\nmachine_id: ")
 	builder.WriteString(in.Task.MachineID)
-	builder.WriteString("\nremote_codex_session_id: ")
-	builder.WriteString(in.Task.RemoteCodexSessionID)
+	builder.WriteString("\nthread_id: ")
+	builder.WriteString(in.Task.ThreadID)
 	builder.WriteString("\ntask_phase: ")
 	builder.WriteString(string(normalizeTaskPhase(in.Task)))
+	builder.WriteString("\nworkflow_stage: ")
+	builder.WriteString(string(normalizeWorkflowStage(in.Task.WorkflowStage, in.Task.Phase)))
 	builder.WriteString("\nuser_request: ")
 	builder.WriteString(userRequest)
 	builder.WriteString("\nlast_input: ")
 	builder.WriteString(in.Task.LastInput)
 	builder.WriteString("\nlast_output_summary: ")
 	builder.WriteString(in.Task.LastOutputSummary)
-	builder.WriteString("\npane_current_command: ")
-	builder.WriteString(in.OutputWindow.SessionState.CurrentCommand)
-	builder.WriteString("\npane_dead: ")
-	builder.WriteString(fmt.Sprintf("%t", in.OutputWindow.SessionState.PaneDead))
-	builder.WriteString("\npane_in_mode: ")
-	builder.WriteString(fmt.Sprintf("%t", in.OutputWindow.SessionState.InMode))
+	builder.WriteString("\nthread_status: ")
+	builder.WriteString(in.OutputWindow.SessionState.ThreadStatus)
 	builder.WriteString("\ncompletion_rule: If the requested workflow is already complete and Codex only needs another operator prompt, return complete_task.")
-	builder.WriteString("\nraw_terminal_excerpt:\n")
+	builder.WriteString("\nthread_summary:\n")
 	builder.WriteString(strings.TrimSpace(in.OutputWindow.RawOutput))
-	builder.WriteString("\n\nReturn exactly one JSON object with fields: action, decision_type, next_phase, summary, codex_reply, user_question.")
+	builder.WriteString("\n\nReturn exactly one JSON object with fields: action, decision_type, next_phase, workflow_stage, summary, codex_reply, user_question.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
 	builder.WriteString("\nThe response must be valid JSON parsable by Go's encoding/json package.")
@@ -226,6 +235,29 @@ func normalizeTaskPhaseValue(raw string) TaskPhase {
 		return TaskPhaseExecuting
 	case string(TaskPhasePlanning):
 		return TaskPhasePlanning
+	default:
+		return ""
+	}
+}
+
+func normalizeWorkflowStageValue(raw string) WorkflowStage {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(WorkflowStageRequirementDiscussion):
+		return WorkflowStageRequirementDiscussion
+	case string(WorkflowStageSpecWriting):
+		return WorkflowStageSpecWriting
+	case string(WorkflowStageSpecReview):
+		return WorkflowStageSpecReview
+	case string(WorkflowStagePlanWriting):
+		return WorkflowStagePlanWriting
+	case string(WorkflowStagePlanReview):
+		return WorkflowStagePlanReview
+	case string(WorkflowStageImplementation):
+		return WorkflowStageImplementation
+	case string(WorkflowStageVerification):
+		return WorkflowStageVerification
+	case string(WorkflowStageIntegration):
+		return WorkflowStageIntegration
 	default:
 		return ""
 	}

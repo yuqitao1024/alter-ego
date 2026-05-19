@@ -67,7 +67,7 @@ type taskSubsystemConfig struct {
 type taskSubsystem struct {
 	Registry    *orchestrator.Registry
 	Store       *orchestrator.Store
-	Runner      *orchestrator.SSHRunner
+	Runner      orchestrator.RemoteRunner
 	Service     *orchestrator.Service
 	TaskHandler *agent.TaskCommandHandler
 }
@@ -89,7 +89,13 @@ func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubs
 		return nil, err
 	}
 
-	runner := orchestrator.NewSSHRunner(nil)
+	for _, machine := range registry.MachineList {
+		if machine.AppServerSocket == "" {
+			return nil, errors.New("machine " + machine.ID + ` missing app_server_socket`)
+		}
+	}
+
+	runner := orchestrator.NewAppServerRunner(nil, nil)
 	runner.SetMachineResolver(func(machineID string) (orchestrator.MachineConfig, error) {
 		machine := registry.Machines[machineID]
 		if machine == nil {

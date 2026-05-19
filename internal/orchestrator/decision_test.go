@@ -41,13 +41,20 @@ func TestDecisionContextIncludesRuntimeTaskFields(t *testing.T) {
 
 	prompt := BuildDecisionPrompt(DecisionContext{
 		Task: TaskRun{
-			TaskID:               "task-123",
-			RepositoryID:         "repo_backend",
-			MachineID:            "machine_a",
-			UserRequest:          "Add /task commands",
-			LastInput:            "Review current router",
-			LastOutputSummary:    "Router parsed command prefix successfully",
-			RemoteCodexSessionID: "session-9",
+			TaskID:            "task-123",
+			RepositoryID:      "repo_backend",
+			MachineID:         "machine_a",
+			UserRequest:       "Add /task commands",
+			LastInput:         "Review current router",
+			LastOutputSummary: "Router parsed command prefix successfully",
+			AppServerState: AppServerState{
+				ThreadID: "thread-9",
+			},
+		},
+		OutputWindow: OutputWindow{
+			SessionState: SessionState{
+				ThreadStatus: "running",
+			},
 		},
 		WorkflowText: "Workflow body",
 		UserRequest:  "Add /task commands",
@@ -60,7 +67,8 @@ func TestDecisionContextIncludesRuntimeTaskFields(t *testing.T) {
 		"Add /task commands",
 		"Review current router",
 		"Router parsed command prefix successfully",
-		"session-9",
+		"thread-9",
+		"running",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(prompt, part) {
@@ -89,6 +97,21 @@ func TestDecisionPromptForbidsMarkdownAndExtraText(t *testing.T) {
 		if !strings.Contains(prompt, part) {
 			t.Fatalf("prompt missing %q:\n%s", part, prompt)
 		}
+	}
+}
+
+func TestDecisionPromptDoesNotMentionTerminalResponders(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildDecisionPrompt(DecisionContext{
+		Task:         TaskRun{TaskID: "task-prompt"},
+		OutputWindow: OutputWindow{RawOutput: "Working"},
+		WorkflowText: "workflow",
+		UserRequest:  "request",
+	})
+
+	if strings.Contains(strings.ToLower(prompt), "terminal responder") {
+		t.Fatalf("prompt contains legacy terminal responder wording:\n%s", prompt)
 	}
 }
 

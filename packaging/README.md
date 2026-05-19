@@ -45,6 +45,8 @@ The service expects:
 - environment file: `/etc/alterego/alterego.env`
 - SQLite state: `/var/lib/alterego/tasks.db`
 
+Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`; machine YAML now carries the app-server socket and bootstrap command list for each remote host.
+
 ## Notes
 
 - The committed packaging flow never includes real secrets or real deployment configuration.

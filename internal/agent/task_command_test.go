@@ -68,13 +68,15 @@ func TestTaskCommandStatusFormatsTaskDetails(t *testing.T) {
 
 	handler := NewTaskCommandHandler(&fakeTaskService{
 		statusTask: orchestrator.TaskRun{
-			TaskID:               "task-1",
-			TemplateID:           "feature_dev",
-			RepositoryID:         "repo_backend",
-			MachineID:            "machine_a",
-			Status:               orchestrator.StatusRunning,
-			LastOutputSummary:    "Tests passed",
-			RemoteCodexSessionID: "session-1",
+			TaskID:            "task-1",
+			TemplateID:        "feature_dev",
+			RepositoryID:      "repo_backend",
+			MachineID:         "machine_a",
+			Status:            orchestrator.StatusRunning,
+			LastOutputSummary: "Tests passed",
+			AppServerState: orchestrator.AppServerState{
+				ThreadID: "thread-1",
+			},
 		},
 	})
 
@@ -83,7 +85,7 @@ func TestTaskCommandStatusFormatsTaskDetails(t *testing.T) {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
 
-	wantParts := []string{"task-1", "feature_dev", "repo_backend", "machine_a", "session-1", "Tests passed"}
+	wantParts := []string{"task-1", "feature_dev", "repo_backend", "machine_a", "thread-1", "Tests passed"}
 	for _, part := range wantParts {
 		if !strings.Contains(reply.Text, part) {
 			t.Fatalf("reply.Text missing %q: %q", part, reply.Text)

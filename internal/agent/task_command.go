@@ -76,13 +76,13 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 			return reply, err
 		}
 		reply.Text = fmt.Sprintf(
-			"task: %s\ntemplate: %s\nrepository: %s\nmachine: %s\nstatus: %s\nsession: %s\nsummary: %s",
+			"task: %s\ntemplate: %s\nrepository: %s\nmachine: %s\nstatus: %s\nthread: %s\nsummary: %s",
 			task.TaskID,
 			task.TemplateID,
 			task.RepositoryID,
 			task.MachineID,
 			task.Status,
-			task.RemoteCodexSessionID,
+			task.ThreadID,
 			task.LastOutputSummary,
 		)
 	case "reply":

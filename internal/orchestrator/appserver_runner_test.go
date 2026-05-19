@@ -103,9 +103,6 @@ func TestAppServerRunnerCaptureOutputAggregatesThreadItems(t *testing.T) {
 	if window.SessionState.ThreadStatus != "running" {
 		t.Fatalf("SessionState.ThreadStatus = %q, want %q", window.SessionState.ThreadStatus, "running")
 	}
-	if window.SessionState.CurrentCommand != "" {
-		t.Fatalf("SessionState.CurrentCommand = %q, want empty for app-server path", window.SessionState.CurrentCommand)
-	}
 }
 
 func TestAppServerRunnerSendInteractiveInputSteersActiveTurn(t *testing.T) {
@@ -270,3 +267,12 @@ type fakeAppServerRunnerTransport struct{}
 func (f *fakeAppServerRunnerTransport) Send(context.Context, []byte) ([]byte, error) { return nil, nil }
 func (f *fakeAppServerRunnerTransport) Recv(context.Context) ([]byte, error)         { return nil, nil }
 func (f *fakeAppServerRunnerTransport) Close() error                                 { return nil }
+
+type fakeSSHTransport struct {
+	commands []string
+}
+
+func (f *fakeSSHTransport) Run(_ context.Context, _ MachineConfig, command string, _ string) (string, error) {
+	f.commands = append(f.commands, command)
+	return "", nil
+}

@@ -20,9 +20,6 @@ type Service struct {
 	now func() time.Time
 }
 
-const resolvedResponderCooldown = 10 * time.Second
-const decisionArbitrationCooldown = 60 * time.Second
-const systemResumeLastInput = "[system] codex resume --last"
 const executingContinueReply = "Continue according to the already confirmed plan and current workflow. Do not reopen planning. If you truly need to change scope or approach, stop and ask the user explicitly."
 
 type TaskNotifier interface {
@@ -129,15 +126,8 @@ func (s *Service) Reply(ctx context.Context, taskID, text string) error {
 	task.Status = StatusRunning
 	task.AwaitingQuestion = nil
 	task.LastInput = text
-	if wantsExecutionPhase(text) {
-		task.Phase = TaskPhaseExecuting
-	}
-	task.LastResolvedResponderName = task.ActiveResponderName
-	task.LastResolvedScreenDigest = task.ActiveResponderScreenDigest
-	cooldownUntil := s.now().Add(resolvedResponderCooldown)
-	task.ResponderCooldownUntil = &cooldownUntil
-	task.ActiveResponderName = ""
-	task.ActiveResponderScreenDigest = ""
+	task.WorkflowStage = normalizeWorkflowStage(task.WorkflowStage, task.Phase)
+	task.Phase = taskPhaseForWorkflowStage(task.WorkflowStage)
 	applySessionToTask(&task, session)
 	task.UpdatedAt = s.now()
 	if err := s.store.UpdateTask(ctx, task); err != nil {
@@ -198,7 +188,7 @@ func (s *Service) moveTaskToStartingSession(ctx context.Context, task TaskRun) e
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return err
 	}
-	return s.appendEvent(ctx, task.TaskID, "session_starting", "starting tmux-backed codex session")
+	return s.appendEvent(ctx, task.TaskID, "session_starting", "starting app-server-backed codex session")
 }
 
 func (s *Service) startInteractiveSession(ctx context.Context, task TaskRun) error {
@@ -243,15 +233,15 @@ func (s *Service) startInteractiveSession(ctx context.Context, task TaskRun) err
 
 	task.Status = StatusRunning
 	task.RemoteWorkdir = coalesceString(session.Workdir, taskRepoWorkdir(template.Repository.RemoteWorkspaceRoot, task.TaskID))
-	task.TMUXSessionName = coalesceString(session.TMUXSessionName, defaultTMUXSessionName(task.TaskID))
-	task.RemoteCodexSessionID = session.CodexSessionID
 	task.ThreadID = session.ThreadID
 	task.ActiveTurnID = session.ActiveTurnID
+	task.WorkflowStage = normalizeWorkflowStage(task.WorkflowStage, task.Phase)
+	task.Phase = taskPhaseForWorkflowStage(task.WorkflowStage)
 	task.UpdatedAt = s.now()
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return err
 	}
-	return s.appendEvent(ctx, task.TaskID, "tmux_session_started", fmt.Sprintf("tmux session %s started", task.TMUXSessionName))
+	return s.appendEvent(ctx, task.TaskID, "app_server_thread_started", fmt.Sprintf("app-server thread %s started", task.ThreadID))
 }
 
 func (s *Service) recoverDetachedTask(ctx context.Context, task TaskRun) error {
@@ -265,25 +255,21 @@ func (s *Service) recoverDetachedTask(ctx context.Context, task TaskRun) error {
 
 	task.Status = StatusRunning
 	task.RemoteWorkdir = coalesceString(session.Workdir, task.RemoteWorkdir)
-	task.TMUXSessionName = coalesceString(session.TMUXSessionName, task.TMUXSessionName)
-	task.RemoteCodexSessionID = coalesceString(session.CodexSessionID, task.RemoteCodexSessionID)
 	task.ThreadID = coalesceString(session.ThreadID, task.ThreadID)
 	task.ActiveTurnID = coalesceString(session.ActiveTurnID, task.ActiveTurnID)
 	task.LastOutputSummary = coalesceString(session.LastOutputWindow.Summary, task.LastOutputSummary)
-	task.ActiveResponderName = ""
-	task.ActiveResponderScreenDigest = ""
+	task.WorkflowStage = normalizeWorkflowStage(task.WorkflowStage, task.Phase)
+	task.Phase = taskPhaseForWorkflowStage(task.WorkflowStage)
 	task.UpdatedAt = s.now()
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return err
 	}
-	return s.appendEvent(ctx, task.TaskID, "task_reconnected", fmt.Sprintf("reconnected to tmux session %s", task.TMUXSessionName))
+	return s.appendEvent(ctx, task.TaskID, "task_reconnected", fmt.Sprintf("reconnected to app-server thread %s", task.ThreadID))
 }
 
 func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
-	task.Phase = normalizeTaskPhase(task)
-	if task.Phase == TaskPhasePlanning && wantsExecutionPhase(task.LastInput) {
-		task.Phase = TaskPhaseExecuting
-	}
+	task.WorkflowStage = normalizeWorkflowStage(task.WorkflowStage, task.Phase)
+	task.Phase = taskPhaseForWorkflowStage(task.WorkflowStage)
 
 	template, err := s.lookupTemplate(task.TemplateID)
 	if err != nil {
@@ -305,114 +291,11 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 		}
 		return fmt.Errorf("read remote output for task %q: %w", task.TaskID, err)
 	}
-	previousDigest := task.LastScreenDigest
-	previousInput := task.LastInput
 	if strings.TrimSpace(window.Summary) != "" {
 		task.LastOutputSummary = window.Summary
 	}
-	task.LastScreenDigest = ScreenDigest(window)
-	if window.SessionState.NeedsResume() {
-		if previousInput == systemResumeLastInput && previousDigest == task.LastScreenDigest {
-			goto decide
-		}
-		if err := s.runner.ResumeLastCodexSession(ctx, sessionFromTask(task)); err != nil {
-			if errors.Is(err, ErrRemoteCommandTimeout) {
-				return s.markTaskDetached(ctx, task, "remote session resume timed out")
-			}
-			return fmt.Errorf("resume codex session for task %q: %w", task.TaskID, err)
-		}
-		task.LastInput = systemResumeLastInput
-		task.UpdatedAt = s.now()
-		if err := s.store.UpdateTask(ctx, task); err != nil {
-			return err
-		}
-		return s.appendEvent(ctx, task.TaskID, "codex_session_resumed", "tmux session survived after codex exit; resumed most recent codex session")
-	}
-
-	if response := EvaluateTerminalResponse(task, window, s.now()); response.Handled {
-		if s.shouldIgnoreResolvedResponder(task, response, task.LastScreenDigest) {
-			task.Status = StatusRunning
-			task.UpdatedAt = s.now()
-			return s.store.UpdateTask(ctx, task)
-		}
-		if response.AutoInput != "" {
-			session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), response.AutoInput)
-			if err != nil {
-				if errors.Is(err, ErrRemoteCommandTimeout) {
-					return s.markTaskDetached(ctx, task, "remote session auto-response timed out")
-				}
-				return fmt.Errorf("send terminal responder input for task %q: %w", task.TaskID, err)
-			}
-			task.ActiveResponderName = response.Name
-			task.ActiveResponderScreenDigest = task.LastScreenDigest
-			task.LastInput = response.AutoInput
-			applySessionToTask(&task, session)
-			task.UpdatedAt = s.now()
-			if err := s.store.UpdateTask(ctx, task); err != nil {
-				return err
-			}
-			if err := s.appendEvent(ctx, task.TaskID, "terminal_responder_applied", response.Name); err != nil {
-				return err
-			}
-			return nil
-		}
-		if response.AutoKey != "" {
-			if err := s.runner.SendInteractiveKey(ctx, sessionFromTask(task), response.AutoKey); err != nil {
-				if errors.Is(err, ErrRemoteCommandTimeout) {
-					return s.markTaskDetached(ctx, task, "remote session auto-key timed out")
-				}
-				return fmt.Errorf("send terminal responder key for task %q: %w", task.TaskID, err)
-			}
-			task.ActiveResponderName = response.Name
-			task.ActiveResponderScreenDigest = task.LastScreenDigest
-			task.LastInput = "[key] " + response.AutoKey
-			task.UpdatedAt = s.now()
-			if err := s.store.UpdateTask(ctx, task); err != nil {
-				return err
-			}
-			if err := s.appendEvent(ctx, task.TaskID, "terminal_responder_applied", response.Name); err != nil {
-				return err
-			}
-			return nil
-		}
-		if response.Question != nil {
-			task.Status = StatusWaitingUserInput
-			task.ActiveResponderName = response.Name
-			task.ActiveResponderScreenDigest = task.LastScreenDigest
-			task.AwaitingQuestion = response.Question
-			task.UpdatedAt = s.now()
-			if err := s.store.UpdateTask(ctx, task); err != nil {
-				return err
-			}
-			if err := s.appendQuestion(ctx, task); err != nil {
-				return err
-			}
-			if err := s.appendEvent(ctx, task.TaskID, "waiting_user_input", fmt.Sprintf("waiting for %s", task.AwaitingQuestion.QuestionType)); err != nil {
-				return err
-			}
-			if s.notifier != nil {
-				if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
-					return fmt.Errorf("notify task question for %q: %w", task.TaskID, err)
-				}
-			}
-			return nil
-		}
-		task.UpdatedAt = s.now()
-		return s.store.UpdateTask(ctx, task)
-	}
-
-decide:
 	if shouldSkipDecisionForWorkingWindow(window) {
 		task.Status = StatusRunning
-		task.ActiveResponderName = ""
-		task.ActiveResponderScreenDigest = ""
-		task.UpdatedAt = s.now()
-		return s.store.UpdateTask(ctx, task)
-	}
-	if s.shouldSkipDecisionArbitration(task) {
-		task.Status = StatusRunning
-		task.ActiveResponderName = ""
-		task.ActiveResponderScreenDigest = ""
 		task.UpdatedAt = s.now()
 		return s.store.UpdateTask(ctx, task)
 	}
@@ -428,13 +311,15 @@ decide:
 	}
 
 	task.LastOutputSummary = coalesceString(result.Summary, task.LastOutputSummary)
-	task.LastDecisionScreenDigest = task.LastScreenDigest
 	task.LastDecisionAction = result.Action
-	decisionCooldownUntil := s.now().Add(decisionArbitrationCooldown)
-	task.DecisionCooldownUntil = &decisionCooldownUntil
 	result = s.enforcePhasePolicy(task, result, window)
+	if result.WorkflowStage != "" {
+		task.WorkflowStage = result.WorkflowStage
+	}
 	if result.NextPhase != "" {
 		task.Phase = result.NextPhase
+	} else {
+		task.Phase = taskPhaseForWorkflowStage(task.WorkflowStage)
 	}
 	switch result.Action {
 	case DecisionActionAskUser:
@@ -449,8 +334,6 @@ decide:
 			}
 		}
 		task.Status = StatusWaitingUserInput
-		task.ActiveResponderName = ""
-		task.ActiveResponderScreenDigest = ""
 		task.AwaitingQuestion = question
 		task.UpdatedAt = s.now()
 		if err := s.store.UpdateTask(ctx, task); err != nil {
@@ -484,8 +367,6 @@ decide:
 			task.LastInput = reply
 			applySessionToTask(&task, session)
 		}
-		task.ActiveResponderName = ""
-		task.ActiveResponderScreenDigest = ""
 		task.Status = StatusRunning
 		task.UpdatedAt = s.now()
 		return s.store.UpdateTask(ctx, task)
@@ -494,16 +375,12 @@ decide:
 			return fmt.Errorf("stop completed task %q: %w", task.TaskID, err)
 		}
 		task.Status = StatusCompleted
-		task.ActiveResponderName = ""
-		task.ActiveResponderScreenDigest = ""
 		task.UpdatedAt = s.now()
 		if err := s.store.UpdateTask(ctx, task); err != nil {
 			return err
 		}
 		return s.appendEvent(ctx, task.TaskID, "task_completed", coalesceString(result.Summary, "task completed"))
 	case DecisionActionWait, "":
-		task.ActiveResponderName = ""
-		task.ActiveResponderScreenDigest = ""
 		task.Status = StatusRunning
 		task.UpdatedAt = s.now()
 		return s.store.UpdateTask(ctx, task)
@@ -541,12 +418,10 @@ func (s *Service) lookupMachine(machineID string) (*MachineConfig, error) {
 
 func sessionFromTask(task TaskRun) RemoteSession {
 	return RemoteSession{
-		MachineID:       task.MachineID,
-		Workdir:         task.RemoteWorkdir,
-		TMUXSessionName: task.TMUXSessionName,
-		CodexSessionID:  task.RemoteCodexSessionID,
-		ThreadID:        task.ThreadID,
-		ActiveTurnID:    task.ActiveTurnID,
+		MachineID:    task.MachineID,
+		Workdir:      task.RemoteWorkdir,
+		ThreadID:     task.ThreadID,
+		ActiveTurnID: task.ActiveTurnID,
 	}
 }
 
@@ -555,8 +430,6 @@ func applySessionToTask(task *TaskRun, session RemoteSession) {
 		return
 	}
 	task.RemoteWorkdir = coalesceString(session.Workdir, task.RemoteWorkdir)
-	task.TMUXSessionName = coalesceString(session.TMUXSessionName, task.TMUXSessionName)
-	task.RemoteCodexSessionID = coalesceString(session.CodexSessionID, task.RemoteCodexSessionID)
 	task.ThreadID = coalesceString(session.ThreadID, task.ThreadID)
 	task.ActiveTurnID = coalesceString(session.ActiveTurnID, task.ActiveTurnID)
 }
@@ -601,19 +474,6 @@ func (s *Service) markAnsweredQuestion(ctx context.Context, taskID string, quest
 	return nil
 }
 
-func (s *Service) shouldIgnoreResolvedResponder(task TaskRun, response TerminalResponse, digest string) bool {
-	if response.Name == "" || digest == "" {
-		return false
-	}
-	if task.LastResolvedResponderName != response.Name || task.LastResolvedScreenDigest != digest {
-		return false
-	}
-	if task.ResponderCooldownUntil == nil {
-		return false
-	}
-	return s.now().Before(*task.ResponderCooldownUntil)
-}
-
 func isRemoteSessionMissingError(err error) bool {
 	if err == nil {
 		return false
@@ -633,8 +493,6 @@ func isRemoteSessionMissingError(err error) bool {
 		return true
 	case strings.Contains(text, "thread missing"):
 		return true
-	case strings.Contains(text, "tmux session") && strings.Contains(text, "not found"):
-		return true
 	case strings.Contains(text, "thread") && strings.Contains(text, "not found"):
 		return true
 	default:
@@ -644,15 +502,23 @@ func isRemoteSessionMissingError(err error) bool {
 
 func (s *Service) enforcePhasePolicy(task TaskRun, result DecisionResult, window OutputWindow) DecisionResult {
 	currentPhase := normalizeTaskPhase(task)
+	currentStage := normalizeWorkflowStage(task.WorkflowStage, task.Phase)
 
 	if result.NextPhase == "" {
 		result.NextPhase = currentPhase
+	}
+	if result.WorkflowStage == "" {
+		result.WorkflowStage = currentStage
+	}
+	if result.NextPhase == "" {
+		result.NextPhase = taskPhaseForWorkflowStage(result.WorkflowStage)
 	}
 
 	if currentPhase == TaskPhaseExecuting && result.NextPhase == TaskPhasePlanning {
 		result.Action = DecisionActionAskUser
 		result.DecisionType = firstNonEmpty(result.DecisionType, "scope_confirmation")
 		result.NextPhase = TaskPhaseExecuting
+		result.WorkflowStage = currentStage
 		if result.Question == nil {
 			result.Question = &AwaitingQuestion{
 				QuestionText:   "Codex wants to reopen planning during execution. Reply in Lark only if you want to allow a return to planning.",
@@ -667,45 +533,8 @@ func (s *Service) enforcePhasePolicy(task TaskRun, result DecisionResult, window
 	return result
 }
 
-func (s *Service) shouldSkipDecisionArbitration(task TaskRun) bool {
-	if task.LastDecisionScreenDigest == "" || task.DecisionCooldownUntil == nil {
-		return false
-	}
-	if task.LastDecisionScreenDigest != task.LastScreenDigest {
-		return false
-	}
-	return s.now().Before(*task.DecisionCooldownUntil)
-}
-
 func normalizeTaskPhase(task TaskRun) TaskPhase {
-	if task.Phase == TaskPhaseExecuting {
-		return TaskPhaseExecuting
-	}
-	return TaskPhasePlanning
-}
-
-func wantsExecutionPhase(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if lower == "" {
-		return false
-	}
-	for _, marker := range []string{
-		"implement",
-		"build",
-		"test",
-		"commit",
-		"push",
-		"pull request",
-		"create pr",
-		"execute these steps",
-		"work directly on main branch",
-		"start with step 1",
-	} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
+	return taskPhaseForWorkflowStage(normalizeWorkflowStage(task.WorkflowStage, task.Phase))
 }
 
 func shouldSkipDecisionForWorkingWindow(window OutputWindow) bool {
@@ -731,5 +560,33 @@ func shouldSkipDecisionForWorkingWindow(window OutputWindow) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func normalizeWorkflowStage(stage WorkflowStage, phase TaskPhase) WorkflowStage {
+	stage = normalizeWorkflowStageValue(string(stage))
+	if stage != "" {
+		return stage
+	}
+	return workflowStageForPhase(phase, "")
+}
+
+func workflowStageForPhase(phase TaskPhase, current WorkflowStage) WorkflowStage {
+	current = normalizeWorkflowStageValue(string(current))
+	if current != "" {
+		return current
+	}
+	if phase == TaskPhaseExecuting {
+		return WorkflowStageImplementation
+	}
+	return WorkflowStageRequirementDiscussion
+}
+
+func taskPhaseForWorkflowStage(stage WorkflowStage) TaskPhase {
+	switch normalizeWorkflowStageValue(string(stage)) {
+	case WorkflowStageImplementation, WorkflowStageVerification, WorkflowStageIntegration:
+		return TaskPhaseExecuting
+	default:
+		return TaskPhasePlanning
 	}
 }

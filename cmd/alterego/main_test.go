@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yuqitao1024/alter-ego/internal/agent"
+	"github.com/yuqitao1024/alter-ego/internal/orchestrator"
 )
 
 func TestBuildTaskSubsystemRequiresConfigRoot(t *testing.T) {
@@ -51,6 +53,9 @@ func TestBuildTaskSubsystemBuildsService(t *testing.T) {
 	if subsystem.Registry == nil || subsystem.Registry.Templates["feature_dev"] == nil {
 		t.Fatalf("subsystem.Registry = %#v", subsystem.Registry)
 	}
+	if _, ok := subsystem.Runner.(*orchestrator.AppServerRunner); !ok {
+		t.Fatalf("subsystem.Runner = %T, want *orchestrator.AppServerRunner", subsystem.Runner)
+	}
 }
 
 func TestBuildTaskSubsystemRequiresLLMConfig(t *testing.T) {
@@ -68,6 +73,30 @@ func TestBuildTaskSubsystemRequiresLLMConfig(t *testing.T) {
 	}
 }
 
+func TestBuildTaskSubsystemRequiresMachineAppServerSocket(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeTaskConfigFixturesWithoutAppServerSocket(t, root)
+
+	_, err := buildTaskSubsystem(context.Background(), taskSubsystemConfig{
+		RegistryRoot: root,
+		DBPath:       filepath.Join(root, "orchestrator.db"),
+		LLMConfig: agent.Config{
+			Provider: "dashscope",
+			APIKey:   "test-key",
+			BaseURL:  "https://example.invalid/v1",
+			Model:    "test-model",
+		},
+	})
+	if err == nil {
+		t.Fatal("buildTaskSubsystem returned nil error, want missing app_server_socket error")
+	}
+	if !strings.Contains(err.Error(), `missing app_server_socket`) {
+		t.Fatalf("buildTaskSubsystem error = %v, want missing app_server_socket", err)
+	}
+}
+
 func writeTaskConfigFixtures(t *testing.T, root string) {
 	t.Helper()
 
@@ -76,6 +105,9 @@ display_name: Machine A
 host: 127.0.0.1
 port: 22
 user: coder
+app_server_socket: /home/coder/.codex/app-server.sock
+app_server_bootstrap:
+  - codex remote-control -c model=\"gpt-5.4\"
 `)
 	writeFile(t, filepath.Join(root, "configs/repositories/repo_backend.yaml"), `id: repo_backend
 display_name: Backend Repo
@@ -96,6 +128,19 @@ description: Default feature workflow
 workflow_path: docs/workflows/feature_dev.md
 `)
 	writeFile(t, filepath.Join(root, "docs/workflows/feature_dev.md"), "Workflow: analyze and implement.\n")
+}
+
+func writeTaskConfigFixturesWithoutAppServerSocket(t *testing.T, root string) {
+	t.Helper()
+
+	writeTaskConfigFixtures(t, root)
+
+	writeFile(t, filepath.Join(root, "configs/machines/machine_a.yaml"), `id: machine_a
+display_name: Machine A
+host: 127.0.0.1
+port: 22
+user: coder
+`)
 }
 
 func writeFile(t *testing.T, path, body string) {

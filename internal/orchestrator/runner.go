@@ -10,9 +10,7 @@ type RemoteRunner interface {
 	StartInteractiveSession(ctx context.Context, req StartRequest) (RemoteSession, error)
 	CaptureOutput(ctx context.Context, session RemoteSession) (OutputWindow, error)
 	SendInteractiveInput(ctx context.Context, session RemoteSession, input string) (RemoteSession, error)
-	SendInteractiveKey(ctx context.Context, session RemoteSession, key string) error
 	HasSession(ctx context.Context, session RemoteSession) (bool, error)
-	ResumeLastCodexSession(ctx context.Context, session RemoteSession) error
 	StopSession(ctx context.Context, session RemoteSession) error
 }
 
@@ -32,8 +30,6 @@ type StartRequest struct {
 type RemoteSession struct {
 	MachineID        string
 	Workdir          string
-	TMUXSessionName  string
-	CodexSessionID   string
 	ThreadID         string
 	ActiveTurnID     string
 	LastOutputWindow OutputWindow
@@ -46,10 +42,7 @@ type OutputWindow struct {
 }
 
 type SessionState struct {
-	CurrentCommand string
 	ThreadStatus   string
-	PaneDead       bool
-	InMode         bool
 }
 
 func (s SessionState) CodexActive() bool {
@@ -59,39 +52,21 @@ func (s SessionState) CodexActive() bool {
 			return true
 		}
 	}
-	command := strings.ToLower(strings.TrimSpace(s.CurrentCommand))
-	if s.PaneDead {
-		return false
-	}
-	return command == "codex" || command == "node"
-}
-
-func (s SessionState) NeedsResume() bool {
-	if s.PaneDead {
-		return true
-	}
-	switch strings.ToLower(strings.TrimSpace(s.CurrentCommand)) {
-	case "bash", "sh", "zsh", "dash", "ksh", "fish":
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 func ReconnectInteractiveSession(ctx context.Context, runner RemoteRunner, task TaskRun) (RemoteSession, error) {
 	session := RemoteSession{
-		MachineID:       task.MachineID,
-		Workdir:         task.RemoteWorkdir,
-		TMUXSessionName: task.TMUXSessionName,
-		CodexSessionID:  task.RemoteCodexSessionID,
-		ThreadID:        task.ThreadID,
-		ActiveTurnID:    task.ActiveTurnID,
+		MachineID:    task.MachineID,
+		Workdir:      task.RemoteWorkdir,
+		ThreadID:     task.ThreadID,
+		ActiveTurnID: task.ActiveTurnID,
 	}
 	if strings.TrimSpace(session.Workdir) == "" {
 		return RemoteSession{}, fmt.Errorf("task %q has no remote workdir", task.TaskID)
 	}
-	if strings.TrimSpace(session.ThreadID) == "" && strings.TrimSpace(session.TMUXSessionName) == "" {
-		return RemoteSession{}, fmt.Errorf("task %q has no remote thread or tmux session identity", task.TaskID)
+	if strings.TrimSpace(session.ThreadID) == "" {
+		return RemoteSession{}, fmt.Errorf("task %q has no remote thread identity", task.TaskID)
 	}
 
 	ok, err := runner.HasSession(ctx, session)
@@ -99,16 +74,9 @@ func ReconnectInteractiveSession(ctx context.Context, runner RemoteRunner, task 
 		return RemoteSession{}, fmt.Errorf("check remote session for task %q: %w", task.TaskID, err)
 	}
 	if !ok {
-		if strings.TrimSpace(session.ThreadID) != "" {
-			return RemoteSession{}, fmt.Errorf("thread %q not found for task %q", session.ThreadID, task.TaskID)
-		}
-		return RemoteSession{}, fmt.Errorf("tmux session %q not found for task %q", session.TMUXSessionName, task.TaskID)
+		return RemoteSession{}, fmt.Errorf("thread %q not found for task %q", session.ThreadID, task.TaskID)
 	}
 	return session, nil
-}
-
-func defaultTMUXSessionName(taskID string) string {
-	return "alterego-" + taskID
 }
 
 func coalesceString(preferred, fallback string) string {
@@ -116,4 +84,13 @@ func coalesceString(preferred, fallback string) string {
 		return preferred
 	}
 	return fallback
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

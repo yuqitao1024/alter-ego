@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -15,8 +14,6 @@ import (
 type Store struct {
 	db *sql.DB
 }
-
-const workflowStageRepairMigrationKey = "workflow_stage_repair_after_0ef13e6"
 
 func OpenStore(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
@@ -58,8 +55,6 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			user_request,
 			created_by,
 			remote_workdir,
-			tmux_session_name,
-			remote_codex_session_id,
 			thread_id,
 			active_turn_id,
 			last_thread_status,
@@ -68,21 +63,11 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			last_remote_activity_at,
 			last_input,
 			last_output_summary,
-			last_screen_digest,
-			active_responder_name,
-			active_responder_screen_digest,
-			last_resolved_responder_name,
-			last_resolved_screen_digest,
-			responder_cooldown_until,
-			pending_post_responder_action,
-			last_continuation_screen_digest,
-			last_decision_screen_digest,
 			last_decision_action,
-			decision_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
@@ -94,8 +79,6 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		task.UserRequest,
 		task.CreatedBy,
 		task.RemoteWorkdir,
-		task.TMUXSessionName,
-		task.RemoteCodexSessionID,
 		task.ThreadID,
 		task.ActiveTurnID,
 		task.LastThreadStatus,
@@ -104,17 +87,7 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		formatOptionalTime(task.LastRemoteActivityAt),
 		task.LastInput,
 		task.LastOutputSummary,
-		task.LastScreenDigest,
-		task.ActiveResponderName,
-		task.ActiveResponderScreenDigest,
-		task.LastResolvedResponderName,
-		task.LastResolvedScreenDigest,
-		formatOptionalTime(task.ResponderCooldownUntil),
-		task.PendingPostResponderAction,
-		task.LastContinuationScreenDigest,
-		task.LastDecisionScreenDigest,
 		task.LastDecisionAction,
-		formatOptionalTime(task.DecisionCooldownUntil),
 		awaitingQuestion,
 		task.CreatedAt.UTC().Format(time.RFC3339Nano),
 		task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -143,8 +116,6 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			user_request = ?,
 			created_by = ?,
 			remote_workdir = ?,
-			tmux_session_name = ?,
-			remote_codex_session_id = ?,
 			thread_id = ?,
 			active_turn_id = ?,
 			last_thread_status = ?,
@@ -153,17 +124,7 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			last_remote_activity_at = ?,
 			last_input = ?,
 			last_output_summary = ?,
-			last_screen_digest = ?,
-			active_responder_name = ?,
-			active_responder_screen_digest = ?,
-			last_resolved_responder_name = ?,
-			last_resolved_screen_digest = ?,
-			responder_cooldown_until = ?,
-			pending_post_responder_action = ?,
-			last_continuation_screen_digest = ?,
-			last_decision_screen_digest = ?,
 			last_decision_action = ?,
-			decision_cooldown_until = ?,
 			awaiting_question = ?,
 			created_at = ?,
 			updated_at = ?
@@ -178,8 +139,6 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		task.UserRequest,
 		task.CreatedBy,
 		task.RemoteWorkdir,
-		task.TMUXSessionName,
-		task.RemoteCodexSessionID,
 		task.ThreadID,
 		task.ActiveTurnID,
 		task.LastThreadStatus,
@@ -188,17 +147,7 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		formatOptionalTime(task.LastRemoteActivityAt),
 		task.LastInput,
 		task.LastOutputSummary,
-		task.LastScreenDigest,
-		task.ActiveResponderName,
-		task.ActiveResponderScreenDigest,
-		task.LastResolvedResponderName,
-		task.LastResolvedScreenDigest,
-		formatOptionalTime(task.ResponderCooldownUntil),
-		task.PendingPostResponderAction,
-		task.LastContinuationScreenDigest,
-		task.LastDecisionScreenDigest,
 		task.LastDecisionAction,
-		formatOptionalTime(task.DecisionCooldownUntil),
 		awaitingQuestion,
 		task.CreatedAt.UTC().Format(time.RFC3339Nano),
 		task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -232,8 +181,6 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			user_request,
 			created_by,
 			remote_workdir,
-			tmux_session_name,
-			remote_codex_session_id,
 			thread_id,
 			active_turn_id,
 			last_thread_status,
@@ -242,17 +189,7 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			last_remote_activity_at,
 			last_input,
 			last_output_summary,
-			last_screen_digest,
-			active_responder_name,
-			active_responder_screen_digest,
-			last_resolved_responder_name,
-			last_resolved_screen_digest,
-			responder_cooldown_until,
-			pending_post_responder_action,
-			last_continuation_screen_digest,
-			last_decision_screen_digest,
 			last_decision_action,
-			decision_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
@@ -280,8 +217,6 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			user_request,
 			created_by,
 			remote_workdir,
-			tmux_session_name,
-			remote_codex_session_id,
 			thread_id,
 			active_turn_id,
 			last_thread_status,
@@ -290,17 +225,7 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			last_remote_activity_at,
 			last_input,
 			last_output_summary,
-			last_screen_digest,
-			active_responder_name,
-			active_responder_screen_digest,
-			last_resolved_responder_name,
-			last_resolved_screen_digest,
-			responder_cooldown_until,
-			pending_post_responder_action,
-			last_continuation_screen_digest,
-			last_decision_screen_digest,
 			last_decision_action,
-			decision_cooldown_until,
 			awaiting_question,
 			created_at,
 			updated_at
@@ -510,8 +435,6 @@ func (s *Store) init(ctx context.Context) error {
 			user_request TEXT NOT NULL,
 			created_by TEXT NOT NULL,
 			remote_workdir TEXT NOT NULL,
-			tmux_session_name TEXT NOT NULL,
-			remote_codex_session_id TEXT NOT NULL,
 			thread_id TEXT NOT NULL DEFAULT '',
 			active_turn_id TEXT NOT NULL DEFAULT '',
 			last_thread_status TEXT NOT NULL DEFAULT '',
@@ -520,17 +443,7 @@ func (s *Store) init(ctx context.Context) error {
 			last_remote_activity_at TEXT,
 			last_input TEXT NOT NULL,
 			last_output_summary TEXT NOT NULL,
-			last_screen_digest TEXT NOT NULL,
-			active_responder_name TEXT NOT NULL DEFAULT '',
-			active_responder_screen_digest TEXT NOT NULL DEFAULT '',
-			last_resolved_responder_name TEXT NOT NULL DEFAULT '',
-			last_resolved_screen_digest TEXT NOT NULL DEFAULT '',
-			responder_cooldown_until TEXT,
-			pending_post_responder_action TEXT NOT NULL DEFAULT '',
-			last_continuation_screen_digest TEXT NOT NULL DEFAULT '',
-			last_decision_screen_digest TEXT NOT NULL DEFAULT '',
 			last_decision_action TEXT NOT NULL DEFAULT '',
-			decision_cooldown_until TEXT,
 			awaiting_question TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -553,10 +466,6 @@ func (s *Store) init(ctx context.Context) error {
 			answered_at TEXT,
 			answer_text TEXT NOT NULL DEFAULT ''
 		)`,
-		`CREATE TABLE IF NOT EXISTS store_metadata (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_events_task_id ON task_events(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_questions_task_id ON task_questions(task_id)`,
@@ -568,104 +477,7 @@ func (s *Store) init(ctx context.Context) error {
 		}
 	}
 
-	migrations := []struct {
-		statement string
-		column    string
-	}{
-		{statement: `ALTER TABLE tasks ADD COLUMN active_responder_name TEXT NOT NULL DEFAULT ''`, column: "active_responder_name"},
-		{statement: `ALTER TABLE tasks ADD COLUMN active_responder_screen_digest TEXT NOT NULL DEFAULT ''`, column: "active_responder_screen_digest"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_resolved_responder_name TEXT NOT NULL DEFAULT ''`, column: "last_resolved_responder_name"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_resolved_screen_digest TEXT NOT NULL DEFAULT ''`, column: "last_resolved_screen_digest"},
-		{statement: `ALTER TABLE tasks ADD COLUMN responder_cooldown_until TEXT`, column: "responder_cooldown_until"},
-		{statement: `ALTER TABLE tasks ADD COLUMN pending_post_responder_action TEXT NOT NULL DEFAULT ''`, column: "pending_post_responder_action"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_continuation_screen_digest TEXT NOT NULL DEFAULT ''`, column: "last_continuation_screen_digest"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_decision_screen_digest TEXT NOT NULL DEFAULT ''`, column: "last_decision_screen_digest"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_decision_action TEXT NOT NULL DEFAULT ''`, column: "last_decision_action"},
-		{statement: `ALTER TABLE tasks ADD COLUMN decision_cooldown_until TEXT`, column: "decision_cooldown_until"},
-		{statement: `ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'planning'`, column: "phase"},
-		{statement: `ALTER TABLE tasks ADD COLUMN workflow_stage TEXT NOT NULL DEFAULT 'requirement_discussion'`, column: "workflow_stage"},
-		{statement: `ALTER TABLE tasks ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''`, column: "thread_id"},
-		{statement: `ALTER TABLE tasks ADD COLUMN active_turn_id TEXT NOT NULL DEFAULT ''`, column: "active_turn_id"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_thread_status TEXT NOT NULL DEFAULT ''`, column: "last_thread_status"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_turn_status TEXT NOT NULL DEFAULT ''`, column: "last_turn_status"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_observed_item_id TEXT NOT NULL DEFAULT ''`, column: "last_observed_item_id"},
-		{statement: `ALTER TABLE tasks ADD COLUMN last_remote_activity_at TEXT`, column: "last_remote_activity_at"},
-	}
-
-	for _, migration := range migrations {
-		_, err := s.addColumnIfMissing(ctx, migration.statement)
-		if err != nil {
-			return fmt.Errorf("migrate sqlite store: %w", err)
-		}
-	}
-	if err := s.applyWorkflowStageRepairMigration(ctx); err != nil {
-		return err
-	}
-
 	return nil
-}
-
-func (s *Store) addColumnIfMissing(ctx context.Context, statement string) (bool, error) {
-	if _, err := s.db.ExecContext(ctx, statement); err != nil {
-		if strings.Contains(err.Error(), "duplicate column name") {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-func (s *Store) applyWorkflowStageRepairMigration(ctx context.Context) error {
-	applied, err := s.hasMetadataKey(ctx, workflowStageRepairMigrationKey)
-	if err != nil {
-		return fmt.Errorf("check workflow_stage repair marker: %w", err)
-	}
-	if applied {
-		return nil
-	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin workflow_stage repair migration: %w", err)
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE tasks
-		SET workflow_stage = ?
-		WHERE workflow_stage = ? AND phase = ?
-	`,
-		WorkflowStageImplementation,
-		WorkflowStageRequirementDiscussion,
-		TaskPhaseExecuting,
-	); err != nil {
-		return fmt.Errorf("repair workflow_stage for executing tasks: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO store_metadata (key, value)
-		VALUES (?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	`, workflowStageRepairMigrationKey, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-		return fmt.Errorf("record workflow_stage repair marker: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit workflow_stage repair migration: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) hasMetadataKey(ctx context.Context, key string) (bool, error) {
-	var storedKey string
-	err := s.db.QueryRowContext(ctx, `SELECT key FROM store_metadata WHERE key = ?`, key).Scan(&storedKey)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 type taskScanner interface {
@@ -678,8 +490,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	var phase string
 	var workflowStage string
 	var awaitingQuestion sql.NullString
-	var responderCooldownUntil sql.NullString
-	var decisionCooldownUntil sql.NullString
 	var lastRemoteActivityAt sql.NullString
 	var createdAt string
 	var updatedAt string
@@ -695,8 +505,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&task.UserRequest,
 		&task.CreatedBy,
 		&task.RemoteWorkdir,
-		&task.TMUXSessionName,
-		&task.RemoteCodexSessionID,
 		&task.ThreadID,
 		&task.ActiveTurnID,
 		&task.LastThreadStatus,
@@ -705,17 +513,7 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&lastRemoteActivityAt,
 		&task.LastInput,
 		&task.LastOutputSummary,
-		&task.LastScreenDigest,
-		&task.ActiveResponderName,
-		&task.ActiveResponderScreenDigest,
-		&task.LastResolvedResponderName,
-		&task.LastResolvedScreenDigest,
-		&responderCooldownUntil,
-		&task.PendingPostResponderAction,
-		&task.LastContinuationScreenDigest,
-		&task.LastDecisionScreenDigest,
 		&task.LastDecisionAction,
-		&decisionCooldownUntil,
 		&awaitingQuestion,
 		&createdAt,
 		&updatedAt,
@@ -740,14 +538,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	task.AwaitingQuestion, err = unmarshalAwaitingQuestion(awaitingQuestion)
 	if err != nil {
 		return TaskRun{}, err
-	}
-	task.ResponderCooldownUntil, err = parseOptionalTime(responderCooldownUntil)
-	if err != nil {
-		return TaskRun{}, fmt.Errorf("parse responder_cooldown_until: %w", err)
-	}
-	task.DecisionCooldownUntil, err = parseOptionalTime(decisionCooldownUntil)
-	if err != nil {
-		return TaskRun{}, fmt.Errorf("parse decision_cooldown_until: %w", err)
 	}
 	task.LastRemoteActivityAt, err = parseOptionalTime(lastRemoteActivityAt)
 	if err != nil {
