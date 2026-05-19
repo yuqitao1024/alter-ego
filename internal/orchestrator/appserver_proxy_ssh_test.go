@@ -32,8 +32,11 @@ func TestSSHAppServerProxyStartsRemoteProxyCommand(t *testing.T) {
 	if !strings.Contains(transport.lastCommand, "source /home/y00621698/env.sh") {
 		t.Fatalf("command = %q, want shell init", transport.lastCommand)
 	}
-	if !strings.Contains(transport.lastCommand, "test -S '/home/y00621698/.codex/app-server.sock' || codex remote-control >/tmp/alterego-app-server.log 2>&1 &") {
-		t.Fatalf("command = %q, want bootstrap guard", transport.lastCommand)
+	if strings.Contains(transport.lastCommand, "test -S '/home/y00621698/.codex/app-server.sock' ||") {
+		t.Fatalf("command = %q, want no bootstrap guard without app_server_bootstrap", transport.lastCommand)
+	}
+	if strings.Contains(transport.lastCommand, "codex remote-control") {
+		t.Fatalf("command = %q, want no fallback bootstrap command", transport.lastCommand)
 	}
 }
 

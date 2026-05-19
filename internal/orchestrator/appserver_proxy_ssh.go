@@ -154,10 +154,10 @@ func buildAppServerProxyCommand(machine MachineConfig) string {
 	if initPrefix := shellInitPrefix(machine.ShellInit); initPrefix != "" {
 		steps = append(steps, initPrefix)
 	}
-	steps = append(steps,
-		fmt.Sprintf("test -S %s || %s", socketPath, buildAppServerBootstrapCommand(machine)),
-		fmt.Sprintf("codex app-server proxy --sock %s", socketPath),
-	)
+	if bootstrapCommand := buildAppServerBootstrapCommand(machine); bootstrapCommand != "" {
+		steps = append(steps, fmt.Sprintf("test -S %s || %s", socketPath, bootstrapCommand))
+	}
+	steps = append(steps, fmt.Sprintf("codex app-server proxy --sock %s", socketPath))
 	return strings.Join(steps, " && ")
 }
 
@@ -169,7 +169,7 @@ func buildAppServerBootstrapCommand(machine MachineConfig) string {
 	if len(bootstrapParts) > 1 {
 		return "(" + strings.Join(bootstrapParts, " && ") + ")"
 	}
-	return "codex remote-control >/tmp/alterego-app-server.log 2>&1 &"
+	return ""
 }
 
 func filterNonEmpty(values []string) []string {
