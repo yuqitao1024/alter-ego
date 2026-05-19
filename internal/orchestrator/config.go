@@ -148,11 +148,7 @@ func (m *MachineConfig) Validate() error {
 }
 
 func (m MachineConfig) AppServerWebSocketURL() string {
-	host := strings.TrimSpace(m.Host)
-	if listenHost := strings.TrimSpace(m.AppServerListenHost); listenHost != "" && listenHost != "0.0.0.0" {
-		host = listenHost
-	}
-	return fmt.Sprintf("ws://%s:%d", host, m.AppServerListenPort)
+	return fmt.Sprintf("ws://%s:%d", strings.TrimSpace(m.Host), m.AppServerListenPort)
 }
 
 func (r *RepositoryConfig) Validate() error {

@@ -112,7 +112,7 @@ func TestMachineConfigAppServerWebSocketURL(t *testing.T) {
 		ID:                   "machine_a",
 		Host:                 "machine-a.example.com",
 		User:                 "coder",
-		AppServerListenHost:  "0.0.0.0",
+		AppServerListenHost:  "127.0.0.1",
 		AppServerListenPort:  4317,
 		AppServerServiceName: "codex-app-server",
 		AppServerInstallUser: "coder",
