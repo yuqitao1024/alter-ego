@@ -34,6 +34,8 @@ type RemoteSession struct {
 	Workdir          string
 	TMUXSessionName  string
 	CodexSessionID   string
+	ThreadID         string
+	ActiveTurnID     string
 	LastOutputWindow OutputWindow
 }
 
