@@ -44,14 +44,11 @@ func NewClient(ctx context.Context, opts ClientOptions) (*Client, error) {
 	}
 	go client.readLoop()
 
-	requestID, responseCh, method, err := client.dispatch(ctx, "initialize", InitializeRequest{ClientInfo: opts.ClientInfo})
-	if err != nil {
+	var initializeResult InitializeResult
+	if err := client.call(ctx, "initialize", InitializeRequest{ClientInfo: opts.ClientInfo}, &initializeResult); err != nil {
 		_ = client.Close()
-		return nil, fmt.Errorf("%s: %w", method, err)
+		return nil, err
 	}
-	go func() {
-		_, _ = client.await(requestID, responseCh, ctx, method, nil)
-	}()
 
 	return client, nil
 }
@@ -203,9 +200,8 @@ func (c *Client) readLoop() {
 		}
 
 		if message.ID != "" {
-			if c.routeResponse(message) {
-				continue
-			}
+			c.routeResponse(message)
+			continue
 		}
 
 		select {

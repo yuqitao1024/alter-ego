@@ -2,6 +2,7 @@ package codexappserver
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,6 +48,25 @@ func TestWebSocketTransportSendRecv(t *testing.T) {
 		t.Fatalf("Send returned error: %v", err)
 	}
 	got, err := transport.Recv(ctx)
+	if err != nil {
+		t.Fatalf("Recv returned error: %v", err)
+	}
+	if string(got) != `{"method":"ping"}` {
+		t.Fatalf("Recv payload = %s", string(got))
+	}
+}
+
+func TestWebSocketTransportRecvReturnsBufferedFrameBeforeError(t *testing.T) {
+	t.Parallel()
+
+	transport := &WebSocketTransport{
+		recvCh: make(chan []byte, 1),
+		errCh:  make(chan error, 1),
+	}
+	transport.recvCh <- []byte(`{"method":"ping"}`)
+	transport.errCh <- errors.New("websocket closed")
+
+	got, err := transport.Recv(context.Background())
 	if err != nil {
 		t.Fatalf("Recv returned error: %v", err)
 	}
