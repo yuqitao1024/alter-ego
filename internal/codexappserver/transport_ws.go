@@ -21,10 +21,14 @@ type WebSocketTransport struct {
 
 	sendMu sync.Mutex
 
-	recvCh chan []byte
-	errCh  chan error
+	recvCh chan recvEvent
 
 	closeOnce sync.Once
+}
+
+type recvEvent struct {
+	payload []byte
+	err     error
 }
 
 func DialWebSocket(ctx context.Context, rawURL string) (*WebSocketTransport, error) {
@@ -35,8 +39,7 @@ func DialWebSocket(ctx context.Context, rawURL string) (*WebSocketTransport, err
 
 	t := &WebSocketTransport{
 		conn:   conn,
-		recvCh: make(chan []byte, 16),
-		errCh:  make(chan error, 1),
+		recvCh: make(chan recvEvent, 16),
 	}
 	go t.readLoop()
 	return t, nil
@@ -72,26 +75,14 @@ func (t *WebSocketTransport) Recv(ctx context.Context) ([]byte, error) {
 	}
 
 	select {
-	case payload := <-t.recvCh:
-		if payload == nil {
-			return nil, t.recvError()
+	case event := <-t.recvCh:
+		if event.payload != nil {
+			return event.payload, nil
 		}
-		return payload, nil
-	default:
-	}
-
-	select {
-	case payload := <-t.recvCh:
-		if payload == nil {
-			return nil, t.recvError()
+		if event.err == nil {
+			return nil, errors.New("websocket transport closed")
 		}
-		return payload, nil
-	case err := <-t.errCh:
-		if err == nil {
-			err = errors.New("websocket transport closed")
-		}
-		t.publishError(err)
-		return nil, err
+		return nil, event.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -113,31 +104,11 @@ func (t *WebSocketTransport) readLoop() {
 	for {
 		_, payload, err := t.conn.ReadMessage()
 		if err != nil {
-			t.publishError(err)
+			t.recvCh <- recvEvent{err: err}
 			return
 		}
 
 		frame := append([]byte(nil), payload...)
-		t.recvCh <- frame
-	}
-}
-
-func (t *WebSocketTransport) publishError(err error) {
-	select {
-	case t.errCh <- err:
-	default:
-	}
-}
-
-func (t *WebSocketTransport) recvError() error {
-	select {
-	case err := <-t.errCh:
-		if err == nil {
-			return errors.New("websocket transport closed")
-		}
-		t.publishError(err)
-		return err
-	default:
-		return errors.New("websocket transport closed")
+		t.recvCh <- recvEvent{payload: frame}
 	}
 }

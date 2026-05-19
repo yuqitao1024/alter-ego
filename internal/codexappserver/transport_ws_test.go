@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -60,11 +61,10 @@ func TestWebSocketTransportRecvReturnsBufferedFrameBeforeError(t *testing.T) {
 	t.Parallel()
 
 	transport := &WebSocketTransport{
-		recvCh: make(chan []byte, 1),
-		errCh:  make(chan error, 1),
+		recvCh: make(chan recvEvent, 2),
 	}
-	transport.recvCh <- []byte(`{"method":"ping"}`)
-	transport.errCh <- errors.New("websocket closed")
+	transport.recvCh <- recvEvent{payload: []byte(`{"method":"ping"}`)}
+	transport.recvCh <- recvEvent{err: errors.New("websocket closed")}
 
 	got, err := transport.Recv(context.Background())
 	if err != nil {
@@ -72,6 +72,52 @@ func TestWebSocketTransportRecvReturnsBufferedFrameBeforeError(t *testing.T) {
 	}
 	if string(got) != `{"method":"ping"}` {
 		t.Fatalf("Recv payload = %s", string(got))
+	}
+}
+
+func TestWebSocketTransportRecvPreservesLiveProducerOrder(t *testing.T) {
+	t.Parallel()
+
+	previous := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previous)
+
+	for i := 0; i < 200; i++ {
+		transport := &WebSocketTransport{
+			recvCh: make(chan recvEvent, 2),
+		}
+
+		started := make(chan struct{})
+		done := make(chan struct{})
+		var (
+			got []byte
+			err error
+		)
+
+		go func() {
+			close(started)
+			got, err = transport.Recv(context.Background())
+			close(done)
+		}()
+
+		<-started
+
+		go func() {
+			transport.recvCh <- recvEvent{payload: []byte(`{"method":"ping"}`)}
+			transport.recvCh <- recvEvent{err: errors.New("websocket closed")}
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("Recv did not return")
+		}
+
+		if err != nil {
+			t.Fatalf("iteration %d: Recv returned error before frame: %v", i, err)
+		}
+		if string(got) != `{"method":"ping"}` {
+			t.Fatalf("iteration %d: Recv payload = %s", i, string(got))
+		}
 	}
 }
 
