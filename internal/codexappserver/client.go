@@ -44,8 +44,13 @@ func NewClient(ctx context.Context, opts ClientOptions) (*Client, error) {
 	}
 	go client.readLoop()
 
+	requestID, responseCh, method, err := client.dispatch(ctx, "initialize", InitializeRequest{ClientInfo: opts.ClientInfo})
+	if err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("%s: %w", method, err)
+	}
 	go func() {
-		_, _ = client.Initialize(ctx, InitializeRequest{ClientInfo: opts.ClientInfo})
+		_, _ = client.await(requestID, responseCh, ctx, method, nil)
 	}()
 
 	return client, nil
@@ -119,6 +124,16 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 		return errors.New("codex app-server transport is not configured")
 	}
 
+	requestID, responseCh, dispatchedMethod, err := c.dispatch(ctx, method, params)
+	if err != nil {
+		return fmt.Errorf("%s: %w", dispatchedMethod, err)
+	}
+
+	_, err = c.await(requestID, responseCh, ctx, method, result)
+	return err
+}
+
+func (c *Client) dispatch(ctx context.Context, method string, params any) (string, chan callResult, string, error) {
 	requestID := c.nextRequestID()
 	responseCh := make(chan callResult, 1)
 
@@ -133,36 +148,40 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 	})
 	if err != nil {
 		c.removePending(requestID)
-		return fmt.Errorf("%s: marshal request: %w", method, err)
+		return "", nil, method, fmt.Errorf("marshal request: %w", err)
 	}
 
 	if err := c.transport.Send(ctx, requestBytes); err != nil {
 		c.removePending(requestID)
-		return fmt.Errorf("%s: send request: %w", method, err)
+		return "", nil, method, fmt.Errorf("send request: %w", err)
 	}
 
+	return requestID, responseCh, method, nil
+}
+
+func (c *Client) await(requestID string, responseCh <-chan callResult, ctx context.Context, method string, result any) (rpcMessage, error) {
 	select {
 	case response := <-responseCh:
 		if response.err != nil {
-			return fmt.Errorf("%s: receive response: %w", method, response.err)
+			return rpcMessage{}, fmt.Errorf("%s: receive response: %w", method, response.err)
 		}
 		if response.message.Error != nil {
 			message := strings.TrimSpace(response.message.Error.Message)
 			if message == "" {
 				message = "unknown app-server error"
 			}
-			return fmt.Errorf("%s: %s", method, message)
+			return rpcMessage{}, fmt.Errorf("%s: %s", method, message)
 		}
 		if result == nil || len(response.message.Result) == 0 {
-			return nil
+			return response.message, nil
 		}
 		if err := json.Unmarshal(response.message.Result, result); err != nil {
-			return fmt.Errorf("%s: decode result: %w", method, err)
+			return rpcMessage{}, fmt.Errorf("%s: decode result: %w", method, err)
 		}
-		return nil
+		return response.message, nil
 	case <-ctx.Done():
 		c.removePending(requestID)
-		return fmt.Errorf("%s: waiting for response: %w", method, ctx.Err())
+		return rpcMessage{}, fmt.Errorf("%s: waiting for response: %w", method, ctx.Err())
 	}
 }
 
