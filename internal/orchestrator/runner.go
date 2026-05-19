@@ -72,19 +72,29 @@ func (s SessionState) NeedsResume() bool {
 }
 
 func ReconnectInteractiveSession(ctx context.Context, runner RemoteRunner, task TaskRun) (RemoteSession, error) {
-	session := sessionFromTask(task)
+	session := RemoteSession{
+		MachineID:       task.MachineID,
+		Workdir:         task.RemoteWorkdir,
+		TMUXSessionName: task.TMUXSessionName,
+		CodexSessionID:  task.RemoteCodexSessionID,
+		ThreadID:        task.ThreadID,
+		ActiveTurnID:    task.ActiveTurnID,
+	}
 	if strings.TrimSpace(session.Workdir) == "" {
 		return RemoteSession{}, fmt.Errorf("task %q has no remote workdir", task.TaskID)
 	}
-	if strings.TrimSpace(session.TMUXSessionName) == "" {
-		return RemoteSession{}, fmt.Errorf("task %q has no tmux session name", task.TaskID)
+	if strings.TrimSpace(session.ThreadID) == "" && strings.TrimSpace(session.TMUXSessionName) == "" {
+		return RemoteSession{}, fmt.Errorf("task %q has no remote thread or tmux session identity", task.TaskID)
 	}
 
 	ok, err := runner.HasSession(ctx, session)
 	if err != nil {
-		return RemoteSession{}, fmt.Errorf("check tmux session for task %q: %w", task.TaskID, err)
+		return RemoteSession{}, fmt.Errorf("check remote session for task %q: %w", task.TaskID, err)
 	}
 	if !ok {
+		if strings.TrimSpace(session.ThreadID) != "" {
+			return RemoteSession{}, fmt.Errorf("thread %q not found for task %q", session.ThreadID, task.TaskID)
+		}
 		return RemoteSession{}, fmt.Errorf("tmux session %q not found for task %q", session.TMUXSessionName, task.TaskID)
 	}
 	return session, nil
