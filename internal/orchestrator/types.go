@@ -4,6 +4,7 @@ import "time"
 
 type TaskStatus string
 type TaskPhase string
+type WorkflowStage string
 
 const (
 	StatusPending            TaskStatus = "pending"
@@ -20,6 +21,17 @@ const (
 const (
 	TaskPhasePlanning  TaskPhase = "planning"
 	TaskPhaseExecuting TaskPhase = "executing"
+)
+
+const (
+	WorkflowStageRequirementDiscussion WorkflowStage = "requirement_discussion"
+	WorkflowStageSpecWriting           WorkflowStage = "spec_writing"
+	WorkflowStageSpecReview            WorkflowStage = "spec_review"
+	WorkflowStagePlanWriting           WorkflowStage = "plan_writing"
+	WorkflowStagePlanReview            WorkflowStage = "plan_review"
+	WorkflowStageImplementation        WorkflowStage = "implementation"
+	WorkflowStageVerification          WorkflowStage = "verification"
+	WorkflowStageIntegration           WorkflowStage = "integration"
 )
 
 type TaskRun struct {

@@ -562,33 +562,72 @@ func (s *Store) init(ctx context.Context) error {
 		}
 	}
 
-	migrations := []string{
-		`ALTER TABLE tasks ADD COLUMN active_responder_name TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN active_responder_screen_digest TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_resolved_responder_name TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_resolved_screen_digest TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN responder_cooldown_until TEXT`,
-		`ALTER TABLE tasks ADD COLUMN pending_post_responder_action TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_continuation_screen_digest TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_decision_screen_digest TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_decision_action TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN decision_cooldown_until TEXT`,
-		`ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'planning'`,
-		`ALTER TABLE tasks ADD COLUMN workflow_stage TEXT NOT NULL DEFAULT 'requirement_discussion'`,
-		`ALTER TABLE tasks ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN active_turn_id TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_thread_status TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_turn_status TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_observed_item_id TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN last_remote_activity_at TEXT`,
+	migrations := []struct {
+		statement string
+		column    string
+	}{
+		{statement: `ALTER TABLE tasks ADD COLUMN active_responder_name TEXT NOT NULL DEFAULT ''`, column: "active_responder_name"},
+		{statement: `ALTER TABLE tasks ADD COLUMN active_responder_screen_digest TEXT NOT NULL DEFAULT ''`, column: "active_responder_screen_digest"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_resolved_responder_name TEXT NOT NULL DEFAULT ''`, column: "last_resolved_responder_name"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_resolved_screen_digest TEXT NOT NULL DEFAULT ''`, column: "last_resolved_screen_digest"},
+		{statement: `ALTER TABLE tasks ADD COLUMN responder_cooldown_until TEXT`, column: "responder_cooldown_until"},
+		{statement: `ALTER TABLE tasks ADD COLUMN pending_post_responder_action TEXT NOT NULL DEFAULT ''`, column: "pending_post_responder_action"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_continuation_screen_digest TEXT NOT NULL DEFAULT ''`, column: "last_continuation_screen_digest"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_decision_screen_digest TEXT NOT NULL DEFAULT ''`, column: "last_decision_screen_digest"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_decision_action TEXT NOT NULL DEFAULT ''`, column: "last_decision_action"},
+		{statement: `ALTER TABLE tasks ADD COLUMN decision_cooldown_until TEXT`, column: "decision_cooldown_until"},
+		{statement: `ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'planning'`, column: "phase"},
+		{statement: `ALTER TABLE tasks ADD COLUMN workflow_stage TEXT NOT NULL DEFAULT 'requirement_discussion'`, column: "workflow_stage"},
+		{statement: `ALTER TABLE tasks ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''`, column: "thread_id"},
+		{statement: `ALTER TABLE tasks ADD COLUMN active_turn_id TEXT NOT NULL DEFAULT ''`, column: "active_turn_id"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_thread_status TEXT NOT NULL DEFAULT ''`, column: "last_thread_status"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_turn_status TEXT NOT NULL DEFAULT ''`, column: "last_turn_status"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_observed_item_id TEXT NOT NULL DEFAULT ''`, column: "last_observed_item_id"},
+		{statement: `ALTER TABLE tasks ADD COLUMN last_remote_activity_at TEXT`, column: "last_remote_activity_at"},
 	}
-	for _, statement := range migrations {
-		if _, err := s.db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+
+	workflowStageAdded := false
+	for _, migration := range migrations {
+		added, err := s.addColumnIfMissing(ctx, migration.statement)
+		if err != nil {
 			return fmt.Errorf("migrate sqlite store: %w", err)
+		}
+		if migration.column == "workflow_stage" {
+			workflowStageAdded = added
+		}
+	}
+	if workflowStageAdded {
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE tasks
+			SET workflow_stage = CASE phase
+				WHEN ? THEN ?
+				WHEN ? THEN ?
+				ELSE ?
+			END
+			WHERE workflow_stage = ?
+		`,
+			TaskPhaseExecuting,
+			WorkflowStageImplementation,
+			TaskPhasePlanning,
+			WorkflowStagePlanWriting,
+			WorkflowStageRequirementDiscussion,
+			WorkflowStageRequirementDiscussion,
+		); err != nil {
+			return fmt.Errorf("backfill workflow_stage: %w", err)
 		}
 	}
 
 	return nil
+}
+
+func (s *Store) addColumnIfMissing(ctx context.Context, statement string) (bool, error) {
+	if _, err := s.db.ExecContext(ctx, statement); err != nil {
+		if strings.Contains(err.Error(), "duplicate column name") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 type taskScanner interface {

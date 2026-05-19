@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -122,21 +123,23 @@ func TestStorePersistsAppServerThreadState(t *testing.T) {
 	defer store.Close()
 
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
+	lastRemoteActivityAt := now.Add(90 * time.Second)
 	task := TaskRun{
-		TaskID:             "task-appserver",
-		TemplateID:         "simt-stl-dev",
-		RepositoryID:       "simt-stl",
-		MachineID:          "A5-82",
-		Status:             StatusRunning,
-		Phase:              TaskPhasePlanning,
-		WorkflowStage:      WorkflowStagePlanWriting,
-		ThreadID:           "thread_123",
-		ActiveTurnID:       "turn_456",
-		LastThreadStatus:   "running",
-		LastTurnStatus:     "running",
-		LastObservedItemID: "item_789",
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		TaskID:               "task-appserver",
+		TemplateID:           "simt-stl-dev",
+		RepositoryID:         "simt-stl",
+		MachineID:            "A5-82",
+		Status:               StatusRunning,
+		Phase:                TaskPhasePlanning,
+		WorkflowStage:        WorkflowStagePlanWriting,
+		ThreadID:             "thread_123",
+		ActiveTurnID:         "turn_456",
+		LastThreadStatus:     "running",
+		LastTurnStatus:       "running",
+		LastObservedItemID:   "item_789",
+		LastRemoteActivityAt: &lastRemoteActivityAt,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 
 	if err := store.CreateTask(context.Background(), task); err != nil {
@@ -152,6 +155,159 @@ func TestStorePersistsAppServerThreadState(t *testing.T) {
 	if persisted.AwaitingQuestion != nil {
 		t.Fatalf("AwaitingQuestion = %#v, want nil", persisted.AwaitingQuestion)
 	}
+}
+
+func TestStoreMigratesLegacyTaskSchema(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-store.db")
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	legacySchema := `CREATE TABLE tasks (
+		task_id TEXT PRIMARY KEY,
+		template_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		machine_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		phase TEXT NOT NULL DEFAULT 'planning',
+		user_request TEXT NOT NULL,
+		created_by TEXT NOT NULL,
+		remote_workdir TEXT NOT NULL,
+		tmux_session_name TEXT NOT NULL,
+		remote_codex_session_id TEXT NOT NULL,
+		last_input TEXT NOT NULL,
+		last_output_summary TEXT NOT NULL,
+		last_screen_digest TEXT NOT NULL,
+		active_responder_name TEXT NOT NULL DEFAULT '',
+		active_responder_screen_digest TEXT NOT NULL DEFAULT '',
+		last_resolved_responder_name TEXT NOT NULL DEFAULT '',
+		last_resolved_screen_digest TEXT NOT NULL DEFAULT '',
+		responder_cooldown_until TEXT,
+		pending_post_responder_action TEXT NOT NULL DEFAULT '',
+		last_continuation_screen_digest TEXT NOT NULL DEFAULT '',
+		last_decision_screen_digest TEXT NOT NULL DEFAULT '',
+		last_decision_action TEXT NOT NULL DEFAULT '',
+		decision_cooldown_until TEXT,
+		awaiting_question TEXT,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`
+	if _, err := db.ExecContext(ctx, legacySchema); err != nil {
+		t.Fatalf("Exec legacy schema returned error: %v", err)
+	}
+
+	createdAt := time.Date(2026, 5, 18, 8, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(5 * time.Minute)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO tasks (
+			task_id,
+			template_id,
+			repository_id,
+			machine_id,
+			status,
+			phase,
+			user_request,
+			created_by,
+			remote_workdir,
+			tmux_session_name,
+			remote_codex_session_id,
+			last_input,
+			last_output_summary,
+			last_screen_digest,
+			active_responder_name,
+			active_responder_screen_digest,
+			last_resolved_responder_name,
+			last_resolved_screen_digest,
+			responder_cooldown_until,
+			pending_post_responder_action,
+			last_continuation_screen_digest,
+			last_decision_screen_digest,
+			last_decision_action,
+			decision_cooldown_until,
+			awaiting_question,
+			created_at,
+			updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		"task-legacy",
+		"feature_dev",
+		"repo_backend",
+		"machine_a",
+		StatusRunning,
+		TaskPhaseExecuting,
+		"Continue implementation",
+		"user_legacy",
+		"/srv/repos/backend/.codex/task-legacy",
+		"alterego-task-legacy",
+		"codex-session-legacy",
+		"Continue",
+		"Implementation in progress",
+		"digest:legacy",
+		"",
+		"",
+		"",
+		"",
+		nil,
+		"",
+		"",
+		"",
+		"",
+		nil,
+		nil,
+		createdAt.Format(time.RFC3339Nano),
+		updatedAt.Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("Insert legacy row returned error: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close legacy db returned error: %v", err)
+	}
+
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore returned error: %v", err)
+	}
+	defer store.Close()
+
+	got, err := store.GetTask(ctx, "task-legacy")
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if got.Phase != TaskPhaseExecuting {
+		t.Fatalf("Phase = %q, want %q", got.Phase, TaskPhaseExecuting)
+	}
+	if got.WorkflowStage != WorkflowStageImplementation {
+		t.Fatalf("WorkflowStage = %q, want %q", got.WorkflowStage, WorkflowStageImplementation)
+	}
+	if got.ThreadID != "" || got.ActiveTurnID != "" || got.LastThreadStatus != "" || got.LastTurnStatus != "" || got.LastObservedItemID != "" {
+		t.Fatalf("migrated app-server fields = %#v", got)
+	}
+	if got.LastRemoteActivityAt != nil {
+		t.Fatalf("LastRemoteActivityAt = %v, want nil", got.LastRemoteActivityAt)
+	}
+
+	got.WorkflowStage = WorkflowStageVerification
+	got.ThreadID = "thread-migrated"
+	got.ActiveTurnID = "turn-migrated"
+	got.LastThreadStatus = "running"
+	got.LastTurnStatus = "completed"
+	got.LastObservedItemID = "item-migrated"
+	lastRemoteActivityAt := updatedAt.Add(30 * time.Second)
+	got.LastRemoteActivityAt = &lastRemoteActivityAt
+	got.UpdatedAt = updatedAt.Add(time.Minute)
+	if err := store.UpdateTask(ctx, got); err != nil {
+		t.Fatalf("UpdateTask returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, "task-legacy")
+	if err != nil {
+		t.Fatalf("GetTask after update returned error: %v", err)
+	}
+	assertTaskFields(t, persisted, got)
 }
 
 func TestStoreListsActiveTasksForScheduler(t *testing.T) {
