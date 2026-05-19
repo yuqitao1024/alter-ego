@@ -472,6 +472,99 @@ func TestStoreRepairsWorkflowStageFromBrokenInitialMigration(t *testing.T) {
 	}
 }
 
+func TestStoreDoesNotReapplyWorkflowStageRepairAfterMarker(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workflow-stage-marker.db")
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open returned error: %v", err)
+	}
+
+	schemaAfterBrokenMigration := `CREATE TABLE tasks (
+		task_id TEXT PRIMARY KEY,
+		template_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		machine_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		phase TEXT NOT NULL DEFAULT 'planning',
+		workflow_stage TEXT NOT NULL DEFAULT 'requirement_discussion',
+		user_request TEXT NOT NULL,
+		created_by TEXT NOT NULL,
+		remote_workdir TEXT NOT NULL,
+		tmux_session_name TEXT NOT NULL,
+		remote_codex_session_id TEXT NOT NULL,
+		thread_id TEXT NOT NULL DEFAULT '',
+		active_turn_id TEXT NOT NULL DEFAULT '',
+		last_thread_status TEXT NOT NULL DEFAULT '',
+		last_turn_status TEXT NOT NULL DEFAULT '',
+		last_observed_item_id TEXT NOT NULL DEFAULT '',
+		last_remote_activity_at TEXT,
+		last_input TEXT NOT NULL,
+		last_output_summary TEXT NOT NULL,
+		last_screen_digest TEXT NOT NULL,
+		active_responder_name TEXT NOT NULL DEFAULT '',
+		active_responder_screen_digest TEXT NOT NULL DEFAULT '',
+		last_resolved_responder_name TEXT NOT NULL DEFAULT '',
+		last_resolved_screen_digest TEXT NOT NULL DEFAULT '',
+		responder_cooldown_until TEXT,
+		pending_post_responder_action TEXT NOT NULL DEFAULT '',
+		last_continuation_screen_digest TEXT NOT NULL DEFAULT '',
+		last_decision_screen_digest TEXT NOT NULL DEFAULT '',
+		last_decision_action TEXT NOT NULL DEFAULT '',
+		decision_cooldown_until TEXT,
+		awaiting_question TEXT,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`
+	if _, err := db.ExecContext(ctx, schemaAfterBrokenMigration); err != nil {
+		t.Fatalf("Exec schemaAfterBrokenMigration returned error: %v", err)
+	}
+
+	insertLegacyTaskRow(t, ctx, db, "task-initial", TaskPhaseExecuting, WorkflowStageRequirementDiscussion)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close db returned error: %v", err)
+	}
+
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore returned error: %v", err)
+	}
+	initial, err := store.GetTask(ctx, "task-initial")
+	if err != nil {
+		t.Fatalf("GetTask(task-initial) returned error: %v", err)
+	}
+	if initial.WorkflowStage != WorkflowStageImplementation {
+		t.Fatalf("initial.WorkflowStage = %q, want %q", initial.WorkflowStage, WorkflowStageImplementation)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close store returned error: %v", err)
+	}
+
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open reopen returned error: %v", err)
+	}
+	insertLegacyTaskRow(t, ctx, db, "task-after-marker", TaskPhaseExecuting, WorkflowStageRequirementDiscussion)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close db after insert returned error: %v", err)
+	}
+
+	store, err = OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore second reopen returned error: %v", err)
+	}
+	defer store.Close()
+
+	got, err := store.GetTask(ctx, "task-after-marker")
+	if err != nil {
+		t.Fatalf("GetTask(task-after-marker) returned error: %v", err)
+	}
+	if got.WorkflowStage != WorkflowStageRequirementDiscussion {
+		t.Fatalf("got.WorkflowStage = %q, want %q", got.WorkflowStage, WorkflowStageRequirementDiscussion)
+	}
+}
+
 func TestStoreListsActiveTasksForScheduler(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -597,6 +690,88 @@ func openTestStore(t *testing.T) *Store {
 		t.Fatalf("OpenStore returned error: %v", err)
 	}
 	return store
+}
+
+func insertLegacyTaskRow(t *testing.T, ctx context.Context, db *sql.DB, taskID string, phase TaskPhase, workflowStage WorkflowStage) {
+	t.Helper()
+
+	createdAt := time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(10 * time.Minute)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO tasks (
+			task_id,
+			template_id,
+			repository_id,
+			machine_id,
+			status,
+			phase,
+			workflow_stage,
+			user_request,
+			created_by,
+			remote_workdir,
+			tmux_session_name,
+			remote_codex_session_id,
+			thread_id,
+			active_turn_id,
+			last_thread_status,
+			last_turn_status,
+			last_observed_item_id,
+			last_remote_activity_at,
+			last_input,
+			last_output_summary,
+			last_screen_digest,
+			active_responder_name,
+			active_responder_screen_digest,
+			last_resolved_responder_name,
+			last_resolved_screen_digest,
+			responder_cooldown_until,
+			pending_post_responder_action,
+			last_continuation_screen_digest,
+			last_decision_screen_digest,
+			last_decision_action,
+			decision_cooldown_until,
+			awaiting_question,
+			created_at,
+			updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		taskID,
+		"feature_dev",
+		"repo_backend",
+		"machine_a",
+		StatusRunning,
+		phase,
+		workflowStage,
+		"Continue implementation",
+		"user_legacy",
+		"/srv/repos/backend/.codex/"+taskID,
+		"alterego-"+taskID,
+		"codex-session-"+taskID,
+		"",
+		"",
+		"",
+		"",
+		"",
+		nil,
+		"Continue",
+		"Implementation in progress",
+		"digest:"+taskID,
+		"",
+		"",
+		"",
+		"",
+		nil,
+		"",
+		"",
+		"",
+		"",
+		nil,
+		nil,
+		createdAt.Format(time.RFC3339Nano),
+		updatedAt.Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("Insert task %q returned error: %v", taskID, err)
+	}
 }
 
 func sampleTaskRun(taskID string, status TaskStatus) TaskRun {

@@ -16,6 +16,8 @@ type Store struct {
 	db *sql.DB
 }
 
+const workflowStageRepairMigrationKey = "workflow_stage_repair_after_0ef13e6"
+
 func OpenStore(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -551,6 +553,10 @@ func (s *Store) init(ctx context.Context) error {
 			answered_at TEXT,
 			answer_text TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS store_metadata (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_events_task_id ON task_events(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_questions_task_id ON task_questions(task_id)`,
@@ -592,7 +598,39 @@ func (s *Store) init(ctx context.Context) error {
 			return fmt.Errorf("migrate sqlite store: %w", err)
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if err := s.applyWorkflowStageRepairMigration(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Store) addColumnIfMissing(ctx context.Context, statement string) (bool, error) {
+	if _, err := s.db.ExecContext(ctx, statement); err != nil {
+		if strings.Contains(err.Error(), "duplicate column name") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) applyWorkflowStageRepairMigration(ctx context.Context) error {
+	applied, err := s.hasMetadataKey(ctx, workflowStageRepairMigrationKey)
+	if err != nil {
+		return fmt.Errorf("check workflow_stage repair marker: %w", err)
+	}
+	if applied {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin workflow_stage repair migration: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET workflow_stage = ?
 		WHERE workflow_stage = ? AND phase = ?
@@ -604,14 +642,27 @@ func (s *Store) init(ctx context.Context) error {
 		return fmt.Errorf("repair workflow_stage for executing tasks: %w", err)
 	}
 
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO store_metadata (key, value)
+		VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, workflowStageRepairMigrationKey, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("record workflow_stage repair marker: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit workflow_stage repair migration: %w", err)
+	}
 	return nil
 }
 
-func (s *Store) addColumnIfMissing(ctx context.Context, statement string) (bool, error) {
-	if _, err := s.db.ExecContext(ctx, statement); err != nil {
-		if strings.Contains(err.Error(), "duplicate column name") {
-			return false, nil
-		}
+func (s *Store) hasMetadataKey(ctx context.Context, key string) (bool, error) {
+	var storedKey string
+	err := s.db.QueryRowContext(ctx, `SELECT key FROM store_metadata WHERE key = ?`, key).Scan(&storedKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
 		return false, err
 	}
 	return true, nil
