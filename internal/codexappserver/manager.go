@@ -113,12 +113,13 @@ func (m *Manager) WatchTaskThread(ctx context.Context, machine MachineRuntimeCon
 func (m *Manager) Snapshot(machineID, threadID string) (ThreadSnapshot, bool) {
 	m.mu.Lock()
 	runtime := m.machines[machineID]
-	m.mu.Unlock()
 	if runtime == nil {
+		m.mu.Unlock()
 		return ThreadSnapshot{}, false
 	}
 
 	watcher := runtime.watchers[threadID]
+	m.mu.Unlock()
 	if watcher == nil {
 		return ThreadSnapshot{}, false
 	}
