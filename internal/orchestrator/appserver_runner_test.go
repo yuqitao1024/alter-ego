@@ -100,8 +100,11 @@ func TestAppServerRunnerCaptureOutputAggregatesThreadItems(t *testing.T) {
 	if !strings.Contains(window.Summary, "go test ./internal/orchestrator") {
 		t.Fatalf("Summary = %q", window.Summary)
 	}
-	if window.SessionState.CurrentCommand != "running" {
-		t.Fatalf("SessionState.CurrentCommand = %q, want %q", window.SessionState.CurrentCommand, "running")
+	if window.SessionState.ThreadStatus != "running" {
+		t.Fatalf("SessionState.ThreadStatus = %q, want %q", window.SessionState.ThreadStatus, "running")
+	}
+	if window.SessionState.CurrentCommand != "" {
+		t.Fatalf("SessionState.CurrentCommand = %q, want empty for app-server path", window.SessionState.CurrentCommand)
 	}
 }
 
@@ -112,12 +115,16 @@ func TestAppServerRunnerSendInteractiveInputSteersActiveTurn(t *testing.T) {
 	runner := NewAppServerRunner(&fakeAppServerRunnerProxy{}, client)
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return MachineConfig{ID: machineID}, nil }
 
-	err := runner.SendInteractiveInput(context.Background(), RemoteSession{
+	client.steerTurnID = "turn_999"
+	updated, err := runner.SendInteractiveInput(context.Background(), RemoteSession{
 		ThreadID:     "thread_123",
 		ActiveTurnID: "turn_456",
 	}, "continue with the fix")
 	if err != nil {
 		t.Fatalf("SendInteractiveInput returned error: %v", err)
+	}
+	if updated.ActiveTurnID != "turn_999" {
+		t.Fatalf("updated.ActiveTurnID = %q, want %q", updated.ActiveTurnID, "turn_999")
 	}
 	if client.steerTurnReq.TurnID != "turn_456" {
 		t.Fatalf("SteerTurn turn_id = %q, want %q", client.steerTurnReq.TurnID, "turn_456")
@@ -134,11 +141,14 @@ func TestAppServerRunnerSendInteractiveInputStartsNewTurnWithoutActiveTurn(t *te
 	runner := NewAppServerRunner(&fakeAppServerRunnerProxy{}, client)
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return MachineConfig{ID: machineID}, nil }
 
-	err := runner.SendInteractiveInput(context.Background(), RemoteSession{
+	updated, err := runner.SendInteractiveInput(context.Background(), RemoteSession{
 		ThreadID: "thread_123",
 	}, "continue with the fix")
 	if err != nil {
 		t.Fatalf("SendInteractiveInput returned error: %v", err)
+	}
+	if updated.ActiveTurnID != "turn_789" {
+		t.Fatalf("updated.ActiveTurnID = %q, want %q", updated.ActiveTurnID, "turn_789")
 	}
 	if client.startTurnReq.ThreadID != "thread_123" {
 		t.Fatalf("StartTurn thread_id = %q, want %q", client.startTurnReq.ThreadID, "thread_123")
@@ -167,6 +177,26 @@ func TestAppServerRunnerHasSessionChecksThreadExistence(t *testing.T) {
 	}
 }
 
+func TestAppServerRunnerStopSessionInterruptsActiveTurn(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeAppServerRunnerClient{}
+	runner := NewAppServerRunner(&fakeAppServerRunnerProxy{}, client)
+	runner.machineResolver = func(machineID string) (MachineConfig, error) { return MachineConfig{ID: machineID}, nil }
+
+	err := runner.StopSession(context.Background(), RemoteSession{
+		MachineID:    "machine_a",
+		ThreadID:     "thread_123",
+		ActiveTurnID: "turn_456",
+	})
+	if err != nil {
+		t.Fatalf("StopSession returned error: %v", err)
+	}
+	if client.interruptTurnReq.ThreadID != "thread_123" || client.interruptTurnReq.TurnID != "turn_456" {
+		t.Fatalf("InterruptTurn request = %#v", client.interruptTurnReq)
+	}
+}
+
 func fakeThreadItem(t *testing.T, id, itemType string, payload map[string]any) AppServerThreadItem {
 	t.Helper()
 	data, err := json.Marshal(payload)
@@ -183,7 +213,9 @@ type fakeAppServerRunnerClient struct {
 	startTurnReq TurnStartRequest
 	startTurnID  string
 
-	steerTurnReq TurnSteerRequest
+	steerTurnReq     TurnSteerRequest
+	steerTurnID      string
+	interruptTurnReq TurnInterruptRequest
 
 	thread       AppServerThread
 	getThreadErr error
@@ -200,8 +232,13 @@ func (f *fakeAppServerRunnerClient) StartTurn(_ context.Context, req TurnStartRe
 	return f.startTurnID, nil
 }
 
-func (f *fakeAppServerRunnerClient) SteerTurn(_ context.Context, req TurnSteerRequest) error {
+func (f *fakeAppServerRunnerClient) SteerTurn(_ context.Context, req TurnSteerRequest) (string, error) {
 	f.steerTurnReq = req
+	return f.steerTurnID, nil
+}
+
+func (f *fakeAppServerRunnerClient) InterruptTurn(_ context.Context, req TurnInterruptRequest) error {
+	f.interruptTurnReq = req
 	return nil
 }
 

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -238,7 +239,7 @@ func TestTickMovesPreparingWorkspaceTaskToStartingSession(t *testing.T) {
 	}
 }
 
-func TestTickStartsInteractiveSessionAndStoresTTYMetadata(t *testing.T) {
+func TestTickStartsInteractiveSessionAndStoresSessionMetadata(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
@@ -259,6 +260,8 @@ func TestTickStartsInteractiveSessionAndStoresTTYMetadata(t *testing.T) {
 		Workdir:         "/srv/codex-tasks/task-running/repo",
 		TMUXSessionName: "alterego-task-running",
 		CodexSessionID:  "session-start",
+		ThreadID:        "thread_123",
+		ActiveTurnID:    "turn_456",
 	}
 
 	if err := service.TickOnce(ctx); err != nil {
@@ -280,6 +283,9 @@ func TestTickStartsInteractiveSessionAndStoresTTYMetadata(t *testing.T) {
 	}
 	if persisted.TMUXSessionName != "alterego-task-running" {
 		t.Fatalf("persisted.TMUXSessionName = %q, want alterego-task-running", persisted.TMUXSessionName)
+	}
+	if persisted.ThreadID != "thread_123" || persisted.ActiveTurnID != "turn_456" {
+		t.Fatalf("persisted app-server identity = %#v", persisted)
 	}
 }
 
@@ -1180,6 +1186,7 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 		RemoteWorkdir:               "/srv/backend",
 		TMUXSessionName:             "alterego-task-reply",
 		RemoteCodexSessionID:        "session-reply",
+		AppServerState:              AppServerState{ThreadID: "thread_123"},
 		ActiveResponderName:         "usage_limit_prompt",
 		ActiveResponderScreenDigest: "digest:usage-limit",
 		AwaitingQuestion: &AwaitingQuestion{
@@ -1188,6 +1195,12 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 			AskedAt:      time.Now().UTC().Add(-time.Minute),
 		},
 	})
+	service.runner.(*fakeServiceRunner).sendSession = RemoteSession{
+		MachineID:    "machine_a",
+		Workdir:      "/srv/backend",
+		ThreadID:     "thread_123",
+		ActiveTurnID: "turn_999",
+	}
 
 	if err := service.Reply(ctx, task.TaskID, "Use polling."); err != nil {
 		t.Fatalf("Reply returned error: %v", err)
@@ -1205,6 +1218,9 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 	}
 	if persisted.LastInput != "Use polling." {
 		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, "Use polling.")
+	}
+	if persisted.ActiveTurnID != "turn_999" {
+		t.Fatalf("persisted.ActiveTurnID = %q, want %q", persisted.ActiveTurnID, "turn_999")
 	}
 	if persisted.LastResolvedResponderName == "" || persisted.LastResolvedScreenDigest == "" {
 		t.Fatalf("resolved responder fields not set: %#v", persisted)
@@ -1414,6 +1430,42 @@ func TestStopMarksTaskStoppedAndCallsRunner(t *testing.T) {
 	}
 }
 
+func TestStopDoesNotPersistStoppedWhenRunnerStopFails(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:        "task-stop-fail",
+		TemplateID:    "feature_dev",
+		RepositoryID:  "repo_backend",
+		MachineID:     "machine_a",
+		Status:        StatusRunning,
+		UserRequest:   "Stop me",
+		CreatedBy:     "tester",
+		RemoteWorkdir: "/srv/backend",
+		AppServerState: AppServerState{
+			ThreadID:     "thread_123",
+			ActiveTurnID: "turn_456",
+		},
+	})
+	service.runner.(*fakeServiceRunner).stopErr = errors.New("interrupt app-server turn: denied")
+
+	if err := service.Stop(ctx, task.TaskID); err == nil {
+		t.Fatal("Stop returned nil error, want stop failure")
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+}
+
 func TestLifecyclePersistsEventsAndQuestions(t *testing.T) {
 	t.Parallel()
 
@@ -1560,6 +1612,7 @@ type fakeServiceRunner struct {
 	calls []string
 
 	startSession  RemoteSession
+	sendSession   RemoteSession
 	outputWindow  OutputWindow
 	hasSession    bool
 	lastSentInput string
@@ -1580,13 +1633,16 @@ func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartReques
 	return f.startSession, nil
 }
 
-func (f *fakeServiceRunner) SendInteractiveInput(_ context.Context, _ RemoteSession, input string) error {
+func (f *fakeServiceRunner) SendInteractiveInput(_ context.Context, session RemoteSession, input string) (RemoteSession, error) {
 	f.calls = append(f.calls, "send")
 	f.lastSentInput = input
 	if f.sendErr != nil {
-		return f.sendErr
+		return RemoteSession{}, f.sendErr
 	}
-	return nil
+	if f.sendSession == (RemoteSession{}) {
+		return session, nil
+	}
+	return f.sendSession, nil
 }
 
 func (f *fakeServiceRunner) SendInteractiveKey(_ context.Context, _ RemoteSession, key string) error {

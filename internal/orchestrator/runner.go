@@ -9,7 +9,7 @@ import (
 type RemoteRunner interface {
 	StartInteractiveSession(ctx context.Context, req StartRequest) (RemoteSession, error)
 	CaptureOutput(ctx context.Context, session RemoteSession) (OutputWindow, error)
-	SendInteractiveInput(ctx context.Context, session RemoteSession, input string) error
+	SendInteractiveInput(ctx context.Context, session RemoteSession, input string) (RemoteSession, error)
 	SendInteractiveKey(ctx context.Context, session RemoteSession, key string) error
 	HasSession(ctx context.Context, session RemoteSession) (bool, error)
 	ResumeLastCodexSession(ctx context.Context, session RemoteSession) error
@@ -47,11 +47,18 @@ type OutputWindow struct {
 
 type SessionState struct {
 	CurrentCommand string
+	ThreadStatus   string
 	PaneDead       bool
 	InMode         bool
 }
 
 func (s SessionState) CodexActive() bool {
+	if strings.TrimSpace(s.ThreadStatus) != "" {
+		switch strings.ToLower(strings.TrimSpace(s.ThreadStatus)) {
+		case "running", "in_progress", "active":
+			return true
+		}
+	}
 	command := strings.ToLower(strings.TrimSpace(s.CurrentCommand))
 	if s.PaneDead {
 		return false

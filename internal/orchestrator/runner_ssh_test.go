@@ -123,7 +123,7 @@ func TestSSHRunnerSendInputUsesSendKeys(t *testing.T) {
 	machine := MachineConfig{ID: "machine_a", Host: "host-a", User: "coder", ShellInit: []string{"source /opt/codex/env.sh"}}
 	runner.machineResolver = func(machineID string) (MachineConfig, error) { return machine, nil }
 
-	err := runner.SendInteractiveInput(context.Background(), RemoteSession{
+	_, err := runner.SendInteractiveInput(context.Background(), RemoteSession{
 		MachineID:       "machine_a",
 		TMUXSessionName: "alterego-task-3",
 	}, "Continue and run tests.")

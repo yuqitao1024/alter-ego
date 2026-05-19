@@ -41,6 +41,11 @@ type TurnSteerRequest struct {
 	Input  string `json:"input"`
 }
 
+type TurnInterruptRequest struct {
+	ThreadID string `json:"thread_id"`
+	TurnID   string `json:"turn_id"`
+}
+
 type ThreadGetRequest struct {
 	ThreadID string `json:"thread_id"`
 }
@@ -114,8 +119,18 @@ func (c *AppServerClient) StartTurn(ctx context.Context, req TurnStartRequest) (
 	return result.Turn.ID, nil
 }
 
-func (c *AppServerClient) SteerTurn(ctx context.Context, req TurnSteerRequest) error {
-	return c.call(ctx, "turn/steer", req, nil)
+func (c *AppServerClient) SteerTurn(ctx context.Context, req TurnSteerRequest) (string, error) {
+	var result struct {
+		TurnID string `json:"turnId"`
+	}
+	if err := c.call(ctx, "turn/steer", req, &result); err != nil {
+		return "", err
+	}
+	return result.TurnID, nil
+}
+
+func (c *AppServerClient) InterruptTurn(ctx context.Context, req TurnInterruptRequest) error {
+	return c.call(ctx, "turn/interrupt", req, nil)
 }
 
 func (c *AppServerClient) GetThread(ctx context.Context, req ThreadGetRequest) (AppServerThread, error) {

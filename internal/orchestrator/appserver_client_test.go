@@ -77,6 +77,38 @@ func TestAppServerClientStartsThreadAndTurn(t *testing.T) {
 	}
 }
 
+func TestAppServerClientSteersAndInterruptsTurn(t *testing.T) {
+	t.Parallel()
+
+	transport := newFakeAppServerTransport()
+	transport.enqueueResponse(`{"id":"1","result":{"turnId":"turn_999"}}`)
+	transport.enqueueResponse(`{"id":"2","result":{}}`)
+
+	client := NewAppServerClient(transport)
+
+	turnID, err := client.SteerTurn(context.Background(), TurnSteerRequest{
+		TurnID: "turn_456",
+		Input:  "continue",
+	})
+	if err != nil {
+		t.Fatalf("SteerTurn returned error: %v", err)
+	}
+	if turnID != "turn_999" {
+		t.Fatalf("turnID = %q, want %q", turnID, "turn_999")
+	}
+
+	if err := client.InterruptTurn(context.Background(), TurnInterruptRequest{
+		ThreadID: "thread_123",
+		TurnID:   "turn_999",
+	}); err != nil {
+		t.Fatalf("InterruptTurn returned error: %v", err)
+	}
+
+	if len(transport.sentRequests) != 2 {
+		t.Fatalf("len(sentRequests) = %d, want 2", len(transport.sentRequests))
+	}
+}
+
 func TestAppServerClientSerializesOverlappingRPCs(t *testing.T) {
 	t.Parallel()
 

@@ -120,7 +120,8 @@ func (s *Service) Reply(ctx context.Context, taskID, text string) error {
 	}
 
 	session := sessionFromTask(task)
-	if err := s.runner.SendInteractiveInput(ctx, session, text); err != nil {
+	session, err = s.runner.SendInteractiveInput(ctx, session, text)
+	if err != nil {
 		return fmt.Errorf("send task reply for %q: %w", taskID, err)
 	}
 
@@ -137,6 +138,7 @@ func (s *Service) Reply(ctx context.Context, taskID, text string) error {
 	task.ResponderCooldownUntil = &cooldownUntil
 	task.ActiveResponderName = ""
 	task.ActiveResponderScreenDigest = ""
+	applySessionToTask(&task, session)
 	task.UpdatedAt = s.now()
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return fmt.Errorf("update replied task %q: %w", taskID, err)
@@ -243,6 +245,8 @@ func (s *Service) startInteractiveSession(ctx context.Context, task TaskRun) err
 	task.RemoteWorkdir = coalesceString(session.Workdir, taskRepoWorkdir(template.Repository.RemoteWorkspaceRoot, task.TaskID))
 	task.TMUXSessionName = coalesceString(session.TMUXSessionName, defaultTMUXSessionName(task.TaskID))
 	task.RemoteCodexSessionID = session.CodexSessionID
+	task.ThreadID = session.ThreadID
+	task.ActiveTurnID = session.ActiveTurnID
 	task.UpdatedAt = s.now()
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return err
@@ -263,6 +267,8 @@ func (s *Service) recoverDetachedTask(ctx context.Context, task TaskRun) error {
 	task.RemoteWorkdir = coalesceString(session.Workdir, task.RemoteWorkdir)
 	task.TMUXSessionName = coalesceString(session.TMUXSessionName, task.TMUXSessionName)
 	task.RemoteCodexSessionID = coalesceString(session.CodexSessionID, task.RemoteCodexSessionID)
+	task.ThreadID = coalesceString(session.ThreadID, task.ThreadID)
+	task.ActiveTurnID = coalesceString(session.ActiveTurnID, task.ActiveTurnID)
 	task.LastOutputSummary = coalesceString(session.LastOutputWindow.Summary, task.LastOutputSummary)
 	task.ActiveResponderName = ""
 	task.ActiveResponderScreenDigest = ""
@@ -330,7 +336,8 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 			return s.store.UpdateTask(ctx, task)
 		}
 		if response.AutoInput != "" {
-			if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), response.AutoInput); err != nil {
+			session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), response.AutoInput)
+			if err != nil {
 				if errors.Is(err, ErrRemoteCommandTimeout) {
 					return s.markTaskDetached(ctx, task, "remote session auto-response timed out")
 				}
@@ -339,6 +346,7 @@ func (s *Service) advanceRunningTask(ctx context.Context, task TaskRun) error {
 			task.ActiveResponderName = response.Name
 			task.ActiveResponderScreenDigest = task.LastScreenDigest
 			task.LastInput = response.AutoInput
+			applySessionToTask(&task, session)
 			task.UpdatedAt = s.now()
 			if err := s.store.UpdateTask(ctx, task); err != nil {
 				return err
@@ -466,13 +474,15 @@ decide:
 			reply = executingContinueReply
 		}
 		if reply != "" {
-			if err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), reply); err != nil {
+			session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), reply)
+			if err != nil {
 				if errors.Is(err, ErrRemoteCommandTimeout) {
 					return s.markTaskDetached(ctx, task, "remote session reply timed out")
 				}
 				return fmt.Errorf("send remote input for task %q: %w", task.TaskID, err)
 			}
 			task.LastInput = reply
+			applySessionToTask(&task, session)
 		}
 		task.ActiveResponderName = ""
 		task.ActiveResponderScreenDigest = ""
@@ -535,7 +545,20 @@ func sessionFromTask(task TaskRun) RemoteSession {
 		Workdir:         task.RemoteWorkdir,
 		TMUXSessionName: task.TMUXSessionName,
 		CodexSessionID:  task.RemoteCodexSessionID,
+		ThreadID:        task.ThreadID,
+		ActiveTurnID:    task.ActiveTurnID,
 	}
+}
+
+func applySessionToTask(task *TaskRun, session RemoteSession) {
+	if task == nil {
+		return
+	}
+	task.RemoteWorkdir = coalesceString(session.Workdir, task.RemoteWorkdir)
+	task.TMUXSessionName = coalesceString(session.TMUXSessionName, task.TMUXSessionName)
+	task.RemoteCodexSessionID = coalesceString(session.CodexSessionID, task.RemoteCodexSessionID)
+	task.ThreadID = coalesceString(session.ThreadID, task.ThreadID)
+	task.ActiveTurnID = coalesceString(session.ActiveTurnID, task.ActiveTurnID)
 }
 
 func (s *Service) appendEvent(ctx context.Context, taskID, eventType, message string) error {
@@ -606,6 +629,8 @@ func isRemoteSessionMissingError(err error) bool {
 	case strings.Contains(text, "no server running on"):
 		return true
 	case strings.Contains(text, "tmux session") && strings.Contains(text, "not found"):
+		return true
+	case strings.Contains(text, "thread") && strings.Contains(text, "not found"):
 		return true
 	default:
 		return false

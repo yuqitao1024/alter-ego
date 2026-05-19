@@ -104,9 +104,9 @@ func (f *fakeRemoteRunner) CaptureOutput(context.Context, RemoteSession) (Output
 	return f.outputWindow, nil
 }
 
-func (f *fakeRemoteRunner) SendInteractiveInput(context.Context, RemoteSession, string) error {
+func (f *fakeRemoteRunner) SendInteractiveInput(_ context.Context, session RemoteSession, _ string) (RemoteSession, error) {
 	f.calls = append(f.calls, "send")
-	return nil
+	return session, nil
 }
 
 func (f *fakeRemoteRunner) SendInteractiveKey(context.Context, RemoteSession, string) error {

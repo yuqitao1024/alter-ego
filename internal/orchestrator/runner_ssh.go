@@ -91,17 +91,17 @@ func (r *SSHRunner) CaptureOutput(ctx context.Context, session RemoteSession) (O
 	}, nil
 }
 
-func (r *SSHRunner) SendInteractiveInput(ctx context.Context, session RemoteSession, input string) error {
+func (r *SSHRunner) SendInteractiveInput(ctx context.Context, session RemoteSession, input string) (RemoteSession, error) {
 	machine, err := r.machineResolver(session.MachineID)
 	if err != nil {
-		return err
+		return RemoteSession{}, err
 	}
 
 	command := wrapRemoteCommand(machine, buildSendKeysCommand(session.TMUXSessionName, input))
 	if _, err := r.runWithTimeout(ctx, sendInteractiveTimeout, machine, "send tmux input", command, ""); err != nil {
-		return err
+		return RemoteSession{}, err
 	}
-	return nil
+	return session, nil
 }
 
 func (r *SSHRunner) SendInteractiveKey(ctx context.Context, session RemoteSession, key string) error {

@@ -11,7 +11,8 @@ import (
 type appServerRunnerClient interface {
 	StartThread(ctx context.Context, req ThreadStartRequest) (string, error)
 	StartTurn(ctx context.Context, req TurnStartRequest) (string, error)
-	SteerTurn(ctx context.Context, req TurnSteerRequest) error
+	SteerTurn(ctx context.Context, req TurnSteerRequest) (string, error)
+	InterruptTurn(ctx context.Context, req TurnInterruptRequest) error
 	GetThread(ctx context.Context, req ThreadGetRequest) (AppServerThread, error)
 	ListThreadItems(ctx context.Context, req ThreadItemsListRequest) ([]AppServerThreadItem, error)
 }
@@ -28,6 +29,8 @@ type AppServerRunner struct {
 }
 
 var ErrAppServerThreadMissing = errors.New("app-server thread missing")
+var ErrAppServerResumeUnsupported = errors.New("app-server runner uses thread reconnect semantics; resume --last is unsupported")
+var ErrAppServerStopUnsupported = errors.New("app-server runner does not support stopping remote threads without thread and turn identity")
 
 func NewAppServerRunner(proxy appServerProxyConnector, client appServerRunnerClient) *AppServerRunner {
 	if proxy == nil {
@@ -120,40 +123,46 @@ func (r *AppServerRunner) CaptureOutput(ctx context.Context, session RemoteSessi
 		RawOutput: summary,
 		Summary:   summary,
 		SessionState: SessionState{
-			CurrentCommand: thread.Status,
+			ThreadStatus: thread.Status,
 		},
 	}, nil
 }
 
-func (r *AppServerRunner) SendInteractiveInput(ctx context.Context, session RemoteSession, input string) error {
+func (r *AppServerRunner) SendInteractiveInput(ctx context.Context, session RemoteSession, input string) (RemoteSession, error) {
 	machine, err := r.machineResolver(session.MachineID)
 	if err != nil {
-		return err
+		return RemoteSession{}, err
 	}
 
 	client, closeFn, err := r.connectClient(ctx, machine)
 	if err != nil {
-		return err
+		return RemoteSession{}, err
 	}
 	defer closeFn()
 
 	if strings.TrimSpace(session.ActiveTurnID) != "" {
-		if err := client.SteerTurn(ctx, TurnSteerRequest{
+		turnID, err := client.SteerTurn(ctx, TurnSteerRequest{
 			TurnID: session.ActiveTurnID,
 			Input:  input,
-		}); err != nil {
-			return fmt.Errorf("steer app-server turn: %w", err)
+		})
+		if err != nil {
+			return RemoteSession{}, fmt.Errorf("steer app-server turn: %w", err)
 		}
-		return nil
+		if strings.TrimSpace(turnID) != "" {
+			session.ActiveTurnID = turnID
+		}
+		return session, nil
 	}
 
-	if _, err := client.StartTurn(ctx, TurnStartRequest{
+	turnID, err := client.StartTurn(ctx, TurnStartRequest{
 		ThreadID: session.ThreadID,
 		Input:    input,
-	}); err != nil {
-		return fmt.Errorf("start app-server turn: %w", err)
+	})
+	if err != nil {
+		return RemoteSession{}, fmt.Errorf("start app-server turn: %w", err)
 	}
-	return nil
+	session.ActiveTurnID = turnID
+	return session, nil
 }
 
 func (r *AppServerRunner) SendInteractiveKey(context.Context, RemoteSession, string) error {
@@ -183,17 +192,31 @@ func (r *AppServerRunner) HasSession(ctx context.Context, session RemoteSession)
 }
 
 func (r *AppServerRunner) ResumeLastCodexSession(ctx context.Context, session RemoteSession) error {
-	ok, err := r.HasSession(ctx, session)
+	return fmt.Errorf("%w: thread %q", ErrAppServerResumeUnsupported, session.ThreadID)
+}
+
+func (r *AppServerRunner) StopSession(ctx context.Context, session RemoteSession) error {
+	if strings.TrimSpace(session.ThreadID) == "" || strings.TrimSpace(session.ActiveTurnID) == "" {
+		return ErrAppServerStopUnsupported
+	}
+
+	machine, err := r.machineResolver(session.MachineID)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return fmt.Errorf("app-server thread %q not found", session.ThreadID)
-	}
-	return nil
-}
 
-func (r *AppServerRunner) StopSession(context.Context, RemoteSession) error {
+	client, closeFn, err := r.connectClient(ctx, machine)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+
+	if err := client.InterruptTurn(ctx, TurnInterruptRequest{
+		ThreadID: session.ThreadID,
+		TurnID:   session.ActiveTurnID,
+	}); err != nil {
+		return fmt.Errorf("interrupt app-server turn: %w", err)
+	}
 	return nil
 }
 
