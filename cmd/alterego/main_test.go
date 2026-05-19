@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/yuqitao1024/alter-ego/internal/agent"
@@ -73,11 +72,11 @@ func TestBuildTaskSubsystemRequiresLLMConfig(t *testing.T) {
 	}
 }
 
-func TestBuildTaskSubsystemRequiresMachineAppServerSocket(t *testing.T) {
+func TestBuildTaskSubsystemRequiresMachineAppServerFields(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	writeTaskConfigFixturesWithoutAppServerSocket(t, root)
+	writeTaskConfigFixturesWithoutAppServerFields(t, root)
 
 	_, err := buildTaskSubsystem(context.Background(), taskSubsystemConfig{
 		RegistryRoot: root,
@@ -90,10 +89,7 @@ func TestBuildTaskSubsystemRequiresMachineAppServerSocket(t *testing.T) {
 		},
 	})
 	if err == nil {
-		t.Fatal("buildTaskSubsystem returned nil error, want missing app_server_socket error")
-	}
-	if !strings.Contains(err.Error(), `missing app_server_socket`) {
-		t.Fatalf("buildTaskSubsystem error = %v, want missing app_server_socket", err)
+		t.Fatal("buildTaskSubsystem returned nil error, want missing app-server fields error")
 	}
 }
 
@@ -105,9 +101,10 @@ display_name: Machine A
 host: 127.0.0.1
 port: 22
 user: coder
-app_server_socket: /home/coder/.codex/app-server.sock
-app_server_bootstrap:
-  - codex remote-control -c model=\"gpt-5.4\"
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: coder
 `)
 	writeFile(t, filepath.Join(root, "configs/repositories/repo_backend.yaml"), `id: repo_backend
 display_name: Backend Repo
@@ -130,7 +127,7 @@ workflow_path: docs/workflows/feature_dev.md
 	writeFile(t, filepath.Join(root, "docs/workflows/feature_dev.md"), "Workflow: analyze and implement.\n")
 }
 
-func writeTaskConfigFixturesWithoutAppServerSocket(t *testing.T, root string) {
+func writeTaskConfigFixturesWithoutAppServerFields(t *testing.T, root string) {
 	t.Helper()
 
 	writeTaskConfigFixtures(t, root)

@@ -12,14 +12,18 @@ import (
 )
 
 type MachineConfig struct {
-	ID                 string   `yaml:"id"`
-	DisplayName        string   `yaml:"display_name"`
-	Host               string   `yaml:"host"`
-	Port               int      `yaml:"port"`
-	User               string   `yaml:"user"`
-	ShellInit          []string `yaml:"shell_init"`
-	AppServerSocket    string   `yaml:"app_server_socket"`
-	AppServerBootstrap []string `yaml:"app_server_bootstrap"`
+	ID                   string   `yaml:"id"`
+	DisplayName          string   `yaml:"display_name"`
+	Host                 string   `yaml:"host"`
+	Port                 int      `yaml:"port"`
+	User                 string   `yaml:"user"`
+	ShellInit            []string `yaml:"shell_init"`
+	AppServerListenHost  string   `yaml:"app_server_listen_host"`
+	AppServerListenPort  int      `yaml:"app_server_listen_port"`
+	AppServerServiceName string   `yaml:"app_server_service_name"`
+	AppServerInstallUser string   `yaml:"app_server_install_user"`
+	AppServerSocket      string   `yaml:"-"`
+	AppServerBootstrap   []string `yaml:"-"`
 }
 
 type RepositoryConfig struct {
@@ -117,11 +121,42 @@ func (r *RepositoryConfig) GetID() string { return r.ID }
 func (t *TemplateConfig) GetID() string   { return t.ID }
 
 func (m *MachineConfig) Validate() error {
-	return requireFields("machine", m.ID, []requiredField{
+	missing := make([]string, 0, 5)
+	for _, field := range []requiredField{
 		{name: "id", value: m.ID},
 		{name: "host", value: m.Host},
 		{name: "user", value: m.User},
-	})
+		{name: "app_server_listen_host", value: m.AppServerListenHost},
+		{name: "app_server_service_name", value: m.AppServerServiceName},
+		{name: "app_server_install_user", value: m.AppServerInstallUser},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			missing = append(missing, field.name)
+		}
+	}
+	if m.AppServerListenPort <= 0 {
+		missing = append(missing, "app_server_listen_port")
+	}
+	if len(missing) > 0 {
+		subjectID := m.ID
+		if strings.TrimSpace(subjectID) == "" {
+			subjectID = "<unknown>"
+		}
+		return fmt.Errorf("machine %q is missing required field(s): %s", subjectID, strings.Join(missing, ", "))
+	}
+
+	if strings.TrimSpace(m.AppServerSocket) == "" {
+		m.AppServerSocket = m.AppServerWebSocketURL()
+	}
+	return nil
+}
+
+func (m MachineConfig) AppServerWebSocketURL() string {
+	host := strings.TrimSpace(m.Host)
+	if listenHost := strings.TrimSpace(m.AppServerListenHost); listenHost != "" && listenHost != "0.0.0.0" {
+		host = listenHost
+	}
+	return fmt.Sprintf("ws://%s:%d", host, m.AppServerListenPort)
 }
 
 func (r *RepositoryConfig) Validate() error {

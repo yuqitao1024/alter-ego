@@ -18,9 +18,10 @@ port: 20002
 user: root
 shell_init:
   - source /home/y00621698/env.sh
-app_server_socket: /home/y00621698/.codex/app-server.sock
-app_server_bootstrap:
-  - codex remote-control -c model=\"gpt-5.4\"
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: root
 `)
 	writeConfigFile(t, root, "configs/repositories/simt-stl.yaml", `
 id: simt-stl
@@ -50,11 +51,75 @@ workflow_path: docs/workflows/simt-stl-dev.md
 	if got == nil {
 		t.Fatal("registry.Machines[A5-82] = nil")
 	}
-	if got.AppServerSocket != "/home/y00621698/.codex/app-server.sock" {
-		t.Fatalf("AppServerSocket = %q", got.AppServerSocket)
+	if got.AppServerListenHost != "0.0.0.0" {
+		t.Fatalf("AppServerListenHost = %q", got.AppServerListenHost)
 	}
-	if len(got.AppServerBootstrap) != 1 || got.AppServerBootstrap[0] != `codex remote-control -c model=\"gpt-5.4\"` {
-		t.Fatalf("AppServerBootstrap = %#v", got.AppServerBootstrap)
+	if got.AppServerListenPort != 4317 {
+		t.Fatalf("AppServerListenPort = %d", got.AppServerListenPort)
+	}
+	if got.AppServerServiceName != "codex-app-server" {
+		t.Fatalf("AppServerServiceName = %q", got.AppServerServiceName)
+	}
+	if got.AppServerInstallUser != "root" {
+		t.Fatalf("AppServerInstallUser = %q", got.AppServerInstallUser)
+	}
+}
+
+func TestLoadRegistryRequiresMachineAppServerWebSocketFields(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: coder
+`)
+	writeConfigFile(t, root, "configs/repositories/repo.yaml", `
+id: repo
+remote_repo_url: git@github.com:example/repo.git
+remote_workspace_root: /srv/codex-tasks
+default_branch: main
+machine_ids:
+  - machine_a
+`)
+	writeConfigFile(t, root, "configs/templates/template.yaml", `
+id: feature_dev
+repository_id: repo
+workflow_path: docs/workflows/feature_dev.md
+`)
+	writeConfigFile(t, root, "docs/workflows/feature_dev.md", "workflow\n")
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error, want missing app-server field error")
+	}
+	for _, part := range []string{
+		"app_server_listen_host",
+		"app_server_listen_port",
+		"app_server_service_name",
+		"app_server_install_user",
+	} {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("LoadRegistry error = %q, want substring %q", err, part)
+		}
+	}
+}
+
+func TestMachineConfigAppServerWebSocketURL(t *testing.T) {
+	t.Parallel()
+
+	machine := MachineConfig{
+		ID:                   "machine_a",
+		Host:                 "machine-a.example.com",
+		User:                 "coder",
+		AppServerListenHost:  "0.0.0.0",
+		AppServerListenPort:  4317,
+		AppServerServiceName: "codex-app-server",
+		AppServerInstallUser: "coder",
+	}
+
+	if got, want := machine.AppServerWebSocketURL(), "ws://machine-a.example.com:4317"; got != want {
+		t.Fatalf("AppServerWebSocketURL() = %q, want %q", got, want)
 	}
 }
 
@@ -69,6 +134,10 @@ user: dev
 shell_init:
   - source /opt/codex/env.sh
   - export FOO=bar
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -179,6 +248,10 @@ id: machine_a
 display_name: Machine A
 host: machine-a.example.com
 user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -215,6 +288,10 @@ func TestLoadConfigRejectsRepositoryWithUnknownMachine(t *testing.T) {
 id: machine_a
 host: machine-a.example.com
 user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -253,6 +330,10 @@ id: machine_a
 display_name: Machine A
 host: machine-a.example.com
 user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -288,6 +369,10 @@ func TestLoadConfigRejectsTemplateWorkflowPathOutsideRoot(t *testing.T) {
 id: machine_a
 host: machine-a.example.com
 user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -344,8 +429,16 @@ workflow_path: docs/workflows/example-feature-dev.md
 	if err == nil {
 		t.Fatal("LoadRegistry returned nil error")
 	}
-	if !strings.Contains(err.Error(), "user") {
-		t.Fatalf("LoadRegistry error = %q, want missing required field name", err)
+	for _, part := range []string{
+		"user",
+		"app_server_listen_host",
+		"app_server_listen_port",
+		"app_server_service_name",
+		"app_server_install_user",
+	} {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("LoadRegistry error = %q, want missing required field name %q", err, part)
+		}
 	}
 }
 
@@ -357,6 +450,10 @@ id: machine_a
 host: machine-a.example.com
 user: dev
 unexpected: true
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -391,6 +488,10 @@ func TestLoadConfigRejectsRepositoryMissingRepoURLAndWorkspaceRoot(t *testing.T)
 id: machine_a
 host: machine-a.example.com
 user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
