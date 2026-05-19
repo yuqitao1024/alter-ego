@@ -144,10 +144,6 @@ func (m *MachineConfig) Validate() error {
 		}
 		return fmt.Errorf("machine %q is missing required field(s): %s", subjectID, strings.Join(missing, ", "))
 	}
-
-	if strings.TrimSpace(m.AppServerSocket) == "" {
-		m.AppServerSocket = m.AppServerWebSocketURL()
-	}
 	return nil
 }
 

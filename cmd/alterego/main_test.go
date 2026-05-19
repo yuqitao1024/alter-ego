@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yuqitao1024/alter-ego/internal/agent"
@@ -90,6 +91,16 @@ func TestBuildTaskSubsystemRequiresMachineAppServerFields(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("buildTaskSubsystem returned nil error, want missing app-server fields error")
+	}
+	for _, part := range []string{
+		"app_server_listen_host",
+		"app_server_listen_port",
+		"app_server_service_name",
+		"app_server_install_user",
+	} {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("buildTaskSubsystem error = %q, want substring %q", err, part)
+		}
 	}
 }
 

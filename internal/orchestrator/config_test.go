@@ -123,6 +123,27 @@ func TestMachineConfigAppServerWebSocketURL(t *testing.T) {
 	}
 }
 
+func TestMachineConfigValidateDoesNotPopulateLegacySocketField(t *testing.T) {
+	t.Parallel()
+
+	machine := &MachineConfig{
+		ID:                   "machine_a",
+		Host:                 "machine-a.example.com",
+		User:                 "coder",
+		AppServerListenHost:  "0.0.0.0",
+		AppServerListenPort:  4317,
+		AppServerServiceName: "codex-app-server",
+		AppServerInstallUser: "coder",
+	}
+
+	if err := machine.Validate(); err != nil {
+		t.Fatalf("Validate() returned error: %v", err)
+	}
+	if machine.AppServerSocket != "" {
+		t.Fatalf("AppServerSocket = %q, want empty", machine.AppServerSocket)
+	}
+}
+
 func TestLoadConfigBindsTemplateToRepositoryAndWorkflow(t *testing.T) {
 	root := t.TempDir()
 

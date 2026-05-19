@@ -89,12 +89,6 @@ func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubs
 		return nil, err
 	}
 
-	for _, machine := range registry.MachineList {
-		if machine.AppServerSocket == "" {
-			return nil, errors.New("machine " + machine.ID + ` missing app_server_socket`)
-		}
-	}
-
 	runner := orchestrator.NewAppServerRunner(nil, nil)
 	runner.SetMachineResolver(func(machineID string) (orchestrator.MachineConfig, error) {
 		machine := registry.Machines[machineID]
