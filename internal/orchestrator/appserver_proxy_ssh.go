@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -67,33 +69,62 @@ func (shellSSHAppServerCommandTransport) Start(ctx context.Context, machine Mach
 		return nil, fmt.Errorf("start ssh proxy: %w", err)
 	}
 
-	return &stdioAppServerTransport{
-		cmd:          cmd,
-		stdin:        stdin,
-		stdoutReader: bufio.NewReader(stdout),
-		stderrReader: io.ReadAll,
-		stderr:       stderr,
-	}, nil
+	return newStdioAppServerTransport(stdin, stdout, stderr, cmd.Wait, func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return cmd.Process.Kill()
+	}), nil
 }
 
 type stdioAppServerTransport struct {
-	cmd          *exec.Cmd
 	stdin        io.WriteCloser
 	stdoutReader *bufio.Reader
-	stderrReader func(io.Reader) ([]byte, error)
 	stderr       io.Reader
+	waitFn       func() error
+	killFn       func() error
 
-	closeOnce sync.Once
-	closeErr  error
-	mu        sync.Mutex
+	recvResultCh    chan appServerReadResult
+	stdoutDrainDone chan struct{}
+	stderrDrainDone chan struct{}
+
+	stderrMu     sync.Mutex
+	stderrBuffer bytes.Buffer
+	closeOnce    sync.Once
+	closeErr     error
+	sendMu       sync.Mutex
+}
+
+type appServerReadResult struct {
+	data []byte
+	err  error
+}
+
+func newStdioAppServerTransport(stdin io.WriteCloser, stdout io.Reader, stderr io.Reader, waitFn func() error, killFn func() error) *stdioAppServerTransport {
+	transport := &stdioAppServerTransport{
+		stdin:           stdin,
+		stdoutReader:    bufio.NewReader(stdout),
+		stderr:          stderr,
+		waitFn:          waitFn,
+		killFn:          killFn,
+		recvResultCh:    make(chan appServerReadResult, 16),
+		stdoutDrainDone: make(chan struct{}),
+		stderrDrainDone: make(chan struct{}),
+	}
+	go transport.drainStdout()
+	go transport.drainStderr()
+	return transport
 }
 
 func (t *stdioAppServerTransport) Send(_ context.Context, request []byte) ([]byte, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.sendMu.Lock()
+	defer t.sendMu.Unlock()
 
 	payload := append([]byte(nil), request...)
 	payload = append(payload, '\n')
+	if t.stdin == nil {
+		return nil, errors.New("stdio app-server transport stdin is not configured")
+	}
 	if _, err := t.stdin.Write(payload); err != nil {
 		return nil, err
 	}
@@ -101,21 +132,13 @@ func (t *stdioAppServerTransport) Send(_ context.Context, request []byte) ([]byt
 }
 
 func (t *stdioAppServerTransport) Recv(ctx context.Context) ([]byte, error) {
-	type result struct {
-		data []byte
-		err  error
-	}
-
-	resultCh := make(chan result, 1)
-	go func() {
-		data, err := t.stdoutReader.ReadBytes('\n')
-		resultCh <- result{data: data, err: err}
-	}()
-
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res := <-resultCh:
+	case res, ok := <-t.recvResultCh:
+		if !ok {
+			return nil, io.EOF
+		}
 		if res.err != nil && len(res.data) == 0 {
 			return nil, res.err
 		}
@@ -125,37 +148,88 @@ func (t *stdioAppServerTransport) Recv(ctx context.Context) ([]byte, error) {
 
 func (t *stdioAppServerTransport) Close() error {
 	t.closeOnce.Do(func() {
-		_ = t.stdin.Close()
-		if t.cmd.Process != nil {
-			_ = t.cmd.Process.Kill()
+		if t.stdin != nil {
+			_ = t.stdin.Close()
 		}
-		err := t.cmd.Wait()
-		if err == nil {
+		if t.killFn != nil {
+			_ = t.killFn()
+		}
+		var waitErr error
+		if t.waitFn != nil {
+			waitErr = t.waitFn()
+		}
+		<-t.stdoutDrainDone
+		<-t.stderrDrainDone
+
+		if waitErr == nil {
 			return
 		}
 
-		stderr := ""
-		if output, readErr := t.stderrReader(t.stderr); readErr == nil {
-			stderr = strings.TrimSpace(string(output))
-		}
+		stderr := strings.TrimSpace(t.stderrString())
 		if stderr != "" {
-			t.closeErr = fmt.Errorf("%w: %s", err, stderr)
+			t.closeErr = fmt.Errorf("%w: %s", waitErr, stderr)
 			return
 		}
-		t.closeErr = err
+		t.closeErr = waitErr
 	})
 	return t.closeErr
+}
+
+func (t *stdioAppServerTransport) drainStdout() {
+	defer close(t.stdoutDrainDone)
+	defer close(t.recvResultCh)
+
+	if t.stdoutReader == nil {
+		return
+	}
+
+	for {
+		data, err := t.stdoutReader.ReadBytes('\n')
+		if len(data) > 0 {
+			t.recvResultCh <- appServerReadResult{data: append([]byte(nil), data...)}
+		}
+		if err != nil {
+			if len(data) == 0 {
+				t.recvResultCh <- appServerReadResult{err: err}
+			}
+			return
+		}
+	}
+}
+
+func (t *stdioAppServerTransport) drainStderr() {
+	defer close(t.stderrDrainDone)
+	if t.stderr == nil {
+		return
+	}
+
+	var buffer bytes.Buffer
+	_, _ = io.Copy(&buffer, t.stderr)
+
+	t.stderrMu.Lock()
+	t.stderrBuffer.Write(buffer.Bytes())
+	t.stderrMu.Unlock()
+}
+
+func (t *stdioAppServerTransport) stderrString() string {
+	t.stderrMu.Lock()
+	defer t.stderrMu.Unlock()
+	return t.stderrBuffer.String()
 }
 
 func buildAppServerProxyCommand(machine MachineConfig) string {
 	socketPath := shellQuote(machine.AppServerSocket)
 
-	steps := make([]string, 0, 3)
+	steps := make([]string, 0, 5)
 	if initPrefix := shellInitPrefix(machine.ShellInit); initPrefix != "" {
 		steps = append(steps, initPrefix)
 	}
 	if bootstrapCommand := buildAppServerBootstrapCommand(machine); bootstrapCommand != "" {
-		steps = append(steps, fmt.Sprintf("test -S %s || %s", socketPath, bootstrapCommand))
+		steps = append(steps,
+			fmt.Sprintf("test -S %s || %s", socketPath, bootstrapCommand),
+			buildAppServerSocketWaitCommand(socketPath),
+			fmt.Sprintf("test -S %s", socketPath),
+		)
 	}
 	steps = append(steps, fmt.Sprintf("codex app-server proxy --sock %s", socketPath))
 	return strings.Join(steps, " && ")
@@ -170,6 +244,10 @@ func buildAppServerBootstrapCommand(machine MachineConfig) string {
 		return "(" + strings.Join(bootstrapParts, " && ") + ")"
 	}
 	return ""
+}
+
+func buildAppServerSocketWaitCommand(socketPath string) string {
+	return fmt.Sprintf("for app_server_wait_attempt in 1 2 3 4 5 6 7 8 9 10; do test -S %s && break; sleep 1; done", socketPath)
 }
 
 func filterNonEmpty(values []string) []string {

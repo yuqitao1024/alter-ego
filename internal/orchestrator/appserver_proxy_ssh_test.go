@@ -2,8 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSSHAppServerProxyStartsRemoteProxyCommand(t *testing.T) {
@@ -60,8 +63,48 @@ func TestSSHAppServerProxyWrapsConfiguredBootstrapBehindSocketGuard(t *testing.T
 	if !strings.Contains(transport.lastCommand, "test -S '/home/y00621698/.codex/app-server.sock' || (source /home/y00621698/env.sh && codex remote-control --listen unix:///tmp/app-server.sock)") {
 		t.Fatalf("command = %q, want grouped bootstrap override", transport.lastCommand)
 	}
+	if !strings.Contains(transport.lastCommand, "for app_server_wait_attempt in") {
+		t.Fatalf("command = %q, want readiness wait loop after bootstrap", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "test -S '/home/y00621698/.codex/app-server.sock' && break") {
+		t.Fatalf("command = %q, want readiness loop socket check", transport.lastCommand)
+	}
+	if !strings.Contains(transport.lastCommand, "&& test -S '/home/y00621698/.codex/app-server.sock' && codex app-server proxy --sock '/home/y00621698/.codex/app-server.sock'") {
+		t.Fatalf("command = %q, want final readiness check before proxy launch", transport.lastCommand)
+	}
 	if strings.Contains(transport.lastCommand, "/tmp/alterego-app-server.log") {
 		t.Fatalf("command = %q, want configured bootstrap instead of default remote-control launcher", transport.lastCommand)
+	}
+}
+
+func TestStdioAppServerTransportCloseIncludesDrainedStderr(t *testing.T) {
+	t.Parallel()
+
+	stderrReader, stderrWriter := io.Pipe()
+	transport := newTestStdioAppServerTransport(strings.NewReader(""), stderrReader, errors.New("wait: exit status 1"))
+
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		_, _ = io.WriteString(stderrWriter, strings.Repeat("remote failure\n", 8))
+		_ = stderrWriter.Close()
+	}()
+
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("stderr writer blocked; stderr is not being drained")
+	}
+
+	err := transport.Close()
+	if err == nil {
+		t.Fatal("Close returned nil error, want wait failure")
+	}
+	if !strings.Contains(err.Error(), "wait: exit status 1") {
+		t.Fatalf("Close error = %v, want wait error", err)
+	}
+	if !strings.Contains(err.Error(), "remote failure") {
+		t.Fatalf("Close error = %v, want drained stderr text", err)
 	}
 }
 
@@ -74,4 +117,8 @@ func (f *fakeSSHCommandTransport) Start(_ context.Context, machine MachineConfig
 	f.lastMachine = machine
 	f.lastCommand = command
 	return newFakeAppServerTransport(), nil
+}
+
+func newTestStdioAppServerTransport(stdout io.Reader, stderr io.Reader, waitErr error) *stdioAppServerTransport {
+	return newStdioAppServerTransport(nil, stdout, stderr, func() error { return waitErr }, func() error { return nil })
 }

@@ -18,6 +18,10 @@ type AppServerTransport interface {
 type AppServerClient struct {
 	transport AppServerTransport
 
+	// The underlying proxy transport is a single shared byte stream. Until the
+	// client grows response demultiplexing, it explicitly allows only one RPC in
+	// flight at a time.
+	rpcMu         sync.Mutex
 	mu            sync.Mutex
 	nextRequestID int
 }
@@ -138,6 +142,9 @@ func (c *AppServerClient) call(ctx context.Context, method string, params any, r
 	if c == nil || c.transport == nil {
 		return fmt.Errorf("app-server transport is not configured")
 	}
+
+	c.rpcMu.Lock()
+	defer c.rpcMu.Unlock()
 
 	requestID := c.allocateRequestID()
 	requestBytes, err := json.Marshal(appServerRPCRequest{
