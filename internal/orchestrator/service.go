@@ -618,6 +618,9 @@ func isRemoteSessionMissingError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, ErrAppServerThreadMissing) {
+		return true
+	}
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "can't find pane"):
@@ -627,6 +630,8 @@ func isRemoteSessionMissingError(err error) bool {
 	case strings.Contains(text, "can't find session"):
 		return true
 	case strings.Contains(text, "no server running on"):
+		return true
+	case strings.Contains(text, "thread missing"):
 		return true
 	case strings.Contains(text, "tmux session") && strings.Contains(text, "not found"):
 		return true

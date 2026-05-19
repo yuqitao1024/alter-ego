@@ -152,6 +152,42 @@ func TestTickMarksRunningTaskDetachedWhenSessionNotFoundDuringCapture(t *testing
 	}
 }
 
+func TestTickMarksRunningTaskDetachedWhenAppServerThreadMissingDuringCapture(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	task := seedTask(t, store, TaskRun{
+		TaskID:        "task-missing-thread",
+		TemplateID:    "feature_dev",
+		RepositoryID:  "repo_backend",
+		MachineID:     "machine_a",
+		Status:        StatusRunning,
+		UserRequest:   "Investigate missing thread",
+		CreatedBy:     "tester",
+		RemoteWorkdir: "/srv/backend",
+		AppServerState: AppServerState{
+			ThreadID: "thread_123",
+		},
+	})
+	runner := service.runner.(*fakeServiceRunner)
+	runner.captureErr = fmt.Errorf("get app-server thread: %w", ErrAppServerThreadMissing)
+
+	if err := service.TickOnce(ctx); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusDetached {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusDetached)
+	}
+}
+
 func TestTickTimeoutOnOneTaskDoesNotBlockNextTask(t *testing.T) {
 	t.Parallel()
 
