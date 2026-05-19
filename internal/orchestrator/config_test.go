@@ -7,10 +7,61 @@ import (
 	"testing"
 )
 
+func TestLoadRegistryIncludesMachineAppServerFields(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/A5-82.yaml", `
+id: A5-82
+display_name: NPU2
+host: 127.0.0.1
+port: 20002
+user: root
+shell_init:
+  - source /home/y00621698/env.sh
+app_server_socket: /home/y00621698/.codex/app-server.sock
+app_server_bootstrap:
+  - codex remote-control -c model=\"gpt-5.4\"
+`)
+	writeConfigFile(t, root, "configs/repositories/simt-stl.yaml", `
+id: simt-stl
+display_name: SimT STL
+remote_repo_url: git@github.com:example/simt-stl.git
+remote_workspace_root: /srv/codex-tasks
+default_branch: main
+machine_ids:
+  - A5-82
+`)
+	writeConfigFile(t, root, "configs/templates/simt-stl-dev.yaml", `
+id: simt-stl-dev
+repository_id: simt-stl
+display_name: SimT STL Dev
+workflow_path: docs/workflows/simt-stl-dev.md
+`)
+	writeConfigFile(t, root, "docs/workflows/simt-stl-dev.md", `
+# SimT STL Dev
+`)
+
+	registry, err := LoadRegistry(root)
+	if err != nil {
+		t.Fatalf("LoadRegistry returned error: %v", err)
+	}
+
+	got := registry.Machines["A5-82"]
+	if got == nil {
+		t.Fatal("registry.Machines[A5-82] = nil")
+	}
+	if got.AppServerSocket != "/home/y00621698/.codex/app-server.sock" {
+		t.Fatalf("AppServerSocket = %q", got.AppServerSocket)
+	}
+	if len(got.AppServerBootstrap) != 1 || got.AppServerBootstrap[0] != `codex remote-control -c model=\"gpt-5.4\"` {
+		t.Fatalf("AppServerBootstrap = %#v", got.AppServerBootstrap)
+	}
+}
+
 func TestLoadConfigBindsTemplateToRepositoryAndWorkflow(t *testing.T) {
 	root := t.TempDir()
 
-writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
 id: machine_a
 display_name: Machine A
 host: machine-a.example.com
@@ -19,7 +70,7 @@ shell_init:
   - source /opt/codex/env.sh
   - export FOO=bar
 `)
-writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 display_name: Backend Repo
 remote_repo_url: git@github.com:example/backend.git
@@ -129,7 +180,7 @@ display_name: Machine A
 host: machine-a.example.com
 user: dev
 `)
-writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 remote_repo_url: git@github.com:example/backend.git
 remote_workspace_root: /srv/codex-tasks
@@ -165,7 +216,7 @@ id: machine_a
 host: machine-a.example.com
 user: dev
 `)
-writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 display_name: Backend Repo
 remote_repo_url: git@github.com:example/backend.git
@@ -203,7 +254,7 @@ display_name: Machine A
 host: machine-a.example.com
 user: dev
 `)
-writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 display_name: Backend Repo
 remote_repo_url: git@github.com:example/backend.git
@@ -238,7 +289,7 @@ id: machine_a
 host: machine-a.example.com
 user: dev
 `)
-writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 remote_repo_url: git@github.com:example/backend.git
 remote_workspace_root: /srv/codex-tasks
@@ -272,7 +323,7 @@ id: machine_a
 display_name: Machine A
 host: machine-a.example.com
 `)
-writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 remote_repo_url: git@github.com:example/backend.git
 remote_workspace_root: /srv/codex-tasks
@@ -307,7 +358,7 @@ host: machine-a.example.com
 user: dev
 unexpected: true
 `)
-writeConfigFile(t, root, "configs/repositories/backend.yaml", `
+	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
 remote_repo_url: git@github.com:example/backend.git
 remote_workspace_root: /srv/codex-tasks

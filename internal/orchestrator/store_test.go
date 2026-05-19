@@ -52,9 +52,17 @@ func TestStoreUpdatesTaskStatusAndSessionFields(t *testing.T) {
 	}
 
 	task.Status = StatusRunning
+	task.WorkflowStage = WorkflowStageImplementation
 	task.RemoteWorkdir = "/srv/repos/backend/.codex/task-002"
 	task.TMUXSessionName = "alterego-task-002"
 	task.RemoteCodexSessionID = "codex-session-002"
+	task.ThreadID = "thread-update-002"
+	task.ActiveTurnID = "turn-update-002"
+	task.LastThreadStatus = "running"
+	task.LastTurnStatus = "completed"
+	task.LastObservedItemID = "item-update-002"
+	lastRemoteActivityAt := task.UpdatedAt.Add(15 * time.Second)
+	task.LastRemoteActivityAt = &lastRemoteActivityAt
 	task.LastScreenDigest = "digest:2002"
 	task.ActiveResponderName = "usage_limit_prompt"
 	task.ActiveResponderScreenDigest = "digest:active"
@@ -106,6 +114,43 @@ func TestStorePersistsAwaitingQuestion(t *testing.T) {
 	}
 	if *got.AwaitingQuestion != *task.AwaitingQuestion {
 		t.Fatalf("AwaitingQuestion = %#v, want %#v", *got.AwaitingQuestion, *task.AwaitingQuestion)
+	}
+}
+
+func TestStorePersistsAppServerThreadState(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
+	task := TaskRun{
+		TaskID:             "task-appserver",
+		TemplateID:         "simt-stl-dev",
+		RepositoryID:       "simt-stl",
+		MachineID:          "A5-82",
+		Status:             StatusRunning,
+		Phase:              TaskPhasePlanning,
+		WorkflowStage:      WorkflowStagePlanWriting,
+		ThreadID:           "thread_123",
+		ActiveTurnID:       "turn_456",
+		LastThreadStatus:   "running",
+		LastTurnStatus:     "running",
+		LastObservedItemID: "item_789",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+
+	if err := store.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+
+	assertTaskFields(t, persisted, task)
+	if persisted.AwaitingQuestion != nil {
+		t.Fatalf("AwaitingQuestion = %#v, want nil", persisted.AwaitingQuestion)
 	}
 }
 
@@ -245,6 +290,7 @@ func sampleTaskRun(taskID string, status TaskStatus) TaskRun {
 		MachineID:            "machine_a",
 		Status:               status,
 		Phase:                TaskPhasePlanning,
+		WorkflowStage:        WorkflowStageRequirementDiscussion,
 		UserRequest:          "Implement persisted store",
 		CreatedBy:            "user_123",
 		RemoteWorkdir:        "",
@@ -279,6 +325,9 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	if got.Phase != want.Phase {
 		t.Fatalf("Phase = %q, want %q", got.Phase, want.Phase)
 	}
+	if got.WorkflowStage != want.WorkflowStage {
+		t.Fatalf("WorkflowStage = %q, want %q", got.WorkflowStage, want.WorkflowStage)
+	}
 	if got.RemoteWorkdir != want.RemoteWorkdir {
 		t.Fatalf("RemoteWorkdir = %q, want %q", got.RemoteWorkdir, want.RemoteWorkdir)
 	}
@@ -287,6 +336,21 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	}
 	if got.RemoteCodexSessionID != want.RemoteCodexSessionID {
 		t.Fatalf("RemoteCodexSessionID = %q, want %q", got.RemoteCodexSessionID, want.RemoteCodexSessionID)
+	}
+	if got.ThreadID != want.ThreadID {
+		t.Fatalf("ThreadID = %q, want %q", got.ThreadID, want.ThreadID)
+	}
+	if got.ActiveTurnID != want.ActiveTurnID {
+		t.Fatalf("ActiveTurnID = %q, want %q", got.ActiveTurnID, want.ActiveTurnID)
+	}
+	if got.LastThreadStatus != want.LastThreadStatus {
+		t.Fatalf("LastThreadStatus = %q, want %q", got.LastThreadStatus, want.LastThreadStatus)
+	}
+	if got.LastTurnStatus != want.LastTurnStatus {
+		t.Fatalf("LastTurnStatus = %q, want %q", got.LastTurnStatus, want.LastTurnStatus)
+	}
+	if got.LastObservedItemID != want.LastObservedItemID {
+		t.Fatalf("LastObservedItemID = %q, want %q", got.LastObservedItemID, want.LastObservedItemID)
 	}
 	if got.UserRequest != want.UserRequest {
 		t.Fatalf("UserRequest = %q, want %q", got.UserRequest, want.UserRequest)
@@ -334,6 +398,13 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 		t.Fatalf("DecisionCooldownUntil = %v, want %v", got.DecisionCooldownUntil, want.DecisionCooldownUntil)
 	case !got.DecisionCooldownUntil.Equal(*want.DecisionCooldownUntil):
 		t.Fatalf("DecisionCooldownUntil = %s, want %s", got.DecisionCooldownUntil, want.DecisionCooldownUntil)
+	}
+	switch {
+	case got.LastRemoteActivityAt == nil && want.LastRemoteActivityAt == nil:
+	case got.LastRemoteActivityAt == nil || want.LastRemoteActivityAt == nil:
+		t.Fatalf("LastRemoteActivityAt = %v, want %v", got.LastRemoteActivityAt, want.LastRemoteActivityAt)
+	case !got.LastRemoteActivityAt.Equal(*want.LastRemoteActivityAt):
+		t.Fatalf("LastRemoteActivityAt = %s, want %s", got.LastRemoteActivityAt, want.LastRemoteActivityAt)
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("CreatedAt = %s, want %s", got.CreatedAt, want.CreatedAt)

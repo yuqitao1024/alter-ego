@@ -12,12 +12,14 @@ import (
 )
 
 type MachineConfig struct {
-	ID          string `yaml:"id"`
-	DisplayName string `yaml:"display_name"`
-	Host        string `yaml:"host"`
-	Port        int    `yaml:"port"`
-	User        string `yaml:"user"`
-	ShellInit   []string `yaml:"shell_init"`
+	ID                 string   `yaml:"id"`
+	DisplayName        string   `yaml:"display_name"`
+	Host               string   `yaml:"host"`
+	Port               int      `yaml:"port"`
+	User               string   `yaml:"user"`
+	ShellInit          []string `yaml:"shell_init"`
+	AppServerSocket    string   `yaml:"app_server_socket"`
+	AppServerBootstrap []string `yaml:"app_server_bootstrap"`
 }
 
 type RepositoryConfig struct {

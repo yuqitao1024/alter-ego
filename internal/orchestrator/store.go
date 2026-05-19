@@ -52,11 +52,18 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			machine_id,
 			status,
 			phase,
+			workflow_stage,
 			user_request,
 			created_by,
 			remote_workdir,
 			tmux_session_name,
 			remote_codex_session_id,
+			thread_id,
+			active_turn_id,
+			last_thread_status,
+			last_turn_status,
+			last_observed_item_id,
+			last_remote_activity_at,
 			last_input,
 			last_output_summary,
 			last_screen_digest,
@@ -73,7 +80,7 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			awaiting_question,
 			created_at,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
@@ -81,11 +88,18 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		task.MachineID,
 		task.Status,
 		task.Phase,
+		task.WorkflowStage,
 		task.UserRequest,
 		task.CreatedBy,
 		task.RemoteWorkdir,
 		task.TMUXSessionName,
 		task.RemoteCodexSessionID,
+		task.ThreadID,
+		task.ActiveTurnID,
+		task.LastThreadStatus,
+		task.LastTurnStatus,
+		task.LastObservedItemID,
+		formatOptionalTime(task.LastRemoteActivityAt),
 		task.LastInput,
 		task.LastOutputSummary,
 		task.LastScreenDigest,
@@ -123,11 +137,18 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			machine_id = ?,
 			status = ?,
 			phase = ?,
+			workflow_stage = ?,
 			user_request = ?,
 			created_by = ?,
 			remote_workdir = ?,
 			tmux_session_name = ?,
 			remote_codex_session_id = ?,
+			thread_id = ?,
+			active_turn_id = ?,
+			last_thread_status = ?,
+			last_turn_status = ?,
+			last_observed_item_id = ?,
+			last_remote_activity_at = ?,
 			last_input = ?,
 			last_output_summary = ?,
 			last_screen_digest = ?,
@@ -151,11 +172,18 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		task.MachineID,
 		task.Status,
 		task.Phase,
+		task.WorkflowStage,
 		task.UserRequest,
 		task.CreatedBy,
 		task.RemoteWorkdir,
 		task.TMUXSessionName,
 		task.RemoteCodexSessionID,
+		task.ThreadID,
+		task.ActiveTurnID,
+		task.LastThreadStatus,
+		task.LastTurnStatus,
+		task.LastObservedItemID,
+		formatOptionalTime(task.LastRemoteActivityAt),
 		task.LastInput,
 		task.LastOutputSummary,
 		task.LastScreenDigest,
@@ -198,11 +226,18 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			machine_id,
 			status,
 			phase,
+			workflow_stage,
 			user_request,
 			created_by,
 			remote_workdir,
 			tmux_session_name,
 			remote_codex_session_id,
+			thread_id,
+			active_turn_id,
+			last_thread_status,
+			last_turn_status,
+			last_observed_item_id,
+			last_remote_activity_at,
 			last_input,
 			last_output_summary,
 			last_screen_digest,
@@ -239,11 +274,18 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			machine_id,
 			status,
 			phase,
+			workflow_stage,
 			user_request,
 			created_by,
 			remote_workdir,
 			tmux_session_name,
 			remote_codex_session_id,
+			thread_id,
+			active_turn_id,
+			last_thread_status,
+			last_turn_status,
+			last_observed_item_id,
+			last_remote_activity_at,
 			last_input,
 			last_output_summary,
 			last_screen_digest,
@@ -462,11 +504,18 @@ func (s *Store) init(ctx context.Context) error {
 			machine_id TEXT NOT NULL,
 			status TEXT NOT NULL,
 			phase TEXT NOT NULL DEFAULT 'planning',
+			workflow_stage TEXT NOT NULL DEFAULT 'requirement_discussion',
 			user_request TEXT NOT NULL,
 			created_by TEXT NOT NULL,
 			remote_workdir TEXT NOT NULL,
 			tmux_session_name TEXT NOT NULL,
 			remote_codex_session_id TEXT NOT NULL,
+			thread_id TEXT NOT NULL DEFAULT '',
+			active_turn_id TEXT NOT NULL DEFAULT '',
+			last_thread_status TEXT NOT NULL DEFAULT '',
+			last_turn_status TEXT NOT NULL DEFAULT '',
+			last_observed_item_id TEXT NOT NULL DEFAULT '',
+			last_remote_activity_at TEXT,
 			last_input TEXT NOT NULL,
 			last_output_summary TEXT NOT NULL,
 			last_screen_digest TEXT NOT NULL,
@@ -525,6 +574,13 @@ func (s *Store) init(ctx context.Context) error {
 		`ALTER TABLE tasks ADD COLUMN last_decision_action TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN decision_cooldown_until TEXT`,
 		`ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'planning'`,
+		`ALTER TABLE tasks ADD COLUMN workflow_stage TEXT NOT NULL DEFAULT 'requirement_discussion'`,
+		`ALTER TABLE tasks ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN active_turn_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN last_thread_status TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN last_turn_status TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN last_observed_item_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN last_remote_activity_at TEXT`,
 	}
 	for _, statement := range migrations {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
@@ -543,9 +599,11 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	var task TaskRun
 	var status string
 	var phase string
+	var workflowStage string
 	var awaitingQuestion sql.NullString
 	var responderCooldownUntil sql.NullString
 	var decisionCooldownUntil sql.NullString
+	var lastRemoteActivityAt sql.NullString
 	var createdAt string
 	var updatedAt string
 
@@ -556,11 +614,18 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&task.MachineID,
 		&status,
 		&phase,
+		&workflowStage,
 		&task.UserRequest,
 		&task.CreatedBy,
 		&task.RemoteWorkdir,
 		&task.TMUXSessionName,
 		&task.RemoteCodexSessionID,
+		&task.ThreadID,
+		&task.ActiveTurnID,
+		&task.LastThreadStatus,
+		&task.LastTurnStatus,
+		&task.LastObservedItemID,
+		&lastRemoteActivityAt,
 		&task.LastInput,
 		&task.LastOutputSummary,
 		&task.LastScreenDigest,
@@ -584,6 +649,7 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 
 	task.Status = TaskStatus(status)
 	task.Phase = TaskPhase(phase)
+	task.WorkflowStage = WorkflowStage(workflowStage)
 
 	task.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
@@ -605,6 +671,10 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	task.DecisionCooldownUntil, err = parseOptionalTime(decisionCooldownUntil)
 	if err != nil {
 		return TaskRun{}, fmt.Errorf("parse decision_cooldown_until: %w", err)
+	}
+	task.LastRemoteActivityAt, err = parseOptionalTime(lastRemoteActivityAt)
+	if err != nil {
+		return TaskRun{}, fmt.Errorf("parse last_remote_activity_at: %w", err)
 	}
 
 	return task, nil
