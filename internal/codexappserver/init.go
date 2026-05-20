@@ -54,13 +54,13 @@ func (i *Installer) InitMachine(ctx context.Context, machineID string) error {
 
 func buildInstallCommand(cfg MachineInstallConfig) string {
 	unitPath := fmt.Sprintf("/etc/systemd/system/%s.service", cfg.ServiceName)
-	unitBody := shellSingleQuote(buildSystemdUnit(cfg))
 
 	steps := []string{}
 	if prefix := shellInitPrefix(cfg.ShellInit); prefix != "" {
 		steps = append(steps, prefix)
 	}
 	steps = append(steps,
+		"set -e",
 		"command -v codex >/dev/null 2>&1",
 		fmt.Sprintf("sudo tee %s >/dev/null <<'EOF'\n%s\nEOF", unitPath, buildSystemdUnit(cfg)),
 		"sudo systemctl daemon-reload",
@@ -70,15 +70,15 @@ func buildInstallCommand(cfg MachineInstallConfig) string {
 		fmt.Sprintf("sudo systemctl is-active %s", cfg.ServiceName),
 	)
 
-	_ = unitBody
-	return strings.Join(steps, " && ")
+	return strings.Join(steps, "\n")
 }
 
 func buildSystemdUnit(cfg MachineInstallConfig) string {
-	startCommand := fmt.Sprintf("exec /usr/bin/env codex app-server --listen ws://%s:%d --dangerously-bypass-approvals-and-sandbox", cfg.ListenHost, cfg.ListenPort)
+	startCommand := fmt.Sprintf("exec /usr/bin/env codex --dangerously-bypass-approvals-and-sandbox app-server --listen ws://%s:%d", cfg.ListenHost, cfg.ListenPort)
 	if prefix := shellInitPrefix(cfg.ShellInit); prefix != "" {
 		startCommand = prefix + " && " + startCommand
 	}
+	workdir := defaultHomeDir(cfg.RunUser)
 
 	return strings.TrimSpace(fmt.Sprintf(`
 [Unit]
@@ -88,14 +88,14 @@ After=network.target
 [Service]
 Type=simple
 User=%s
-WorkingDirectory=/home/%s
-ExecStart=/bin/sh -lc %s
+WorkingDirectory=%s
+ExecStart=/bin/bash -lc %s
 Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
-`, cfg.RunUser, cfg.RunUser, shellSingleQuote(startCommand)))
+`, cfg.RunUser, workdir, shellSingleQuote(startCommand)))
 }
 
 func shellInitPrefix(commands []string) string {
@@ -112,4 +112,11 @@ func shellInitPrefix(commands []string) string {
 
 func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func defaultHomeDir(user string) string {
+	if strings.TrimSpace(user) == "root" {
+		return "/root"
+	}
+	return "/home/" + user
 }

@@ -17,14 +17,33 @@ func TestBuildSystemdUnitIncludesDangerousBypassAndWSListen(t *testing.T) {
 	})
 
 	for _, part := range []string{
-		"ExecStart=/bin/sh -lc",
-		"codex app-server --listen ws://0.0.0.0:4317 --dangerously-bypass-approvals-and-sandbox",
+		"ExecStart=/bin/bash -lc",
+		"codex --dangerously-bypass-approvals-and-sandbox app-server --listen ws://0.0.0.0:4317",
 		"User=coder",
+		"WorkingDirectory=/home/coder",
 		"Restart=always",
 	} {
 		if !strings.Contains(unit, part) {
 			t.Fatalf("unit = %q, missing %q", unit, part)
 		}
+	}
+}
+
+func TestBuildSystemdUnitUsesRootHomeForRootUser(t *testing.T) {
+	t.Parallel()
+
+	unit := buildSystemdUnit(MachineInstallConfig{
+		ServiceName: "codex-app-server",
+		ListenHost:  "127.0.0.1",
+		ListenPort:  4317,
+		RunUser:     "root",
+	})
+
+	if !strings.Contains(unit, "WorkingDirectory=/root") {
+		t.Fatalf("unit = %q, want WorkingDirectory=/root", unit)
+	}
+	if strings.Contains(unit, "WorkingDirectory=/home/root") {
+		t.Fatalf("unit = %q, must not use /home/root", unit)
 	}
 }
 
@@ -54,6 +73,7 @@ func TestInstallerRunsSystemctlSequence(t *testing.T) {
 	}
 	for _, part := range []string{
 		"source ~/.zshrc",
+		"set -e",
 		"command -v codex",
 		"systemctl daemon-reload",
 		"systemctl enable codex-app-server",
@@ -64,6 +84,24 @@ func TestInstallerRunsSystemctlSequence(t *testing.T) {
 		if !strings.Contains(ssh.commands[0], part) {
 			t.Fatalf("command = %q, missing %q", ssh.commands[0], part)
 		}
+	}
+}
+
+func TestBuildInstallCommandKeepsHeredocTerminatorSeparate(t *testing.T) {
+	t.Parallel()
+
+	command := buildInstallCommand(MachineInstallConfig{
+		RunUser:     "root",
+		ListenHost:  "192.168.1.10",
+		ListenPort:  4317,
+		ServiceName: "codex-app-server",
+	})
+
+	if !strings.Contains(command, "\nEOF\nsudo systemctl daemon-reload") {
+		t.Fatalf("command = %q, want heredoc terminator before systemctl sequence", command)
+	}
+	if strings.Contains(command, "EOF &&") {
+		t.Fatalf("command = %q, heredoc terminator must not be chained with &&", command)
 	}
 }
 
