@@ -177,6 +177,8 @@ type fakeCodexRuntime struct {
 	startTurnID   string
 	steerTurnID   string
 	watchThreadID string
+	requestID     string
+	requestResult any
 
 	interruptThreadID string
 	interruptTurnID   string
@@ -198,6 +200,12 @@ func (f *fakeCodexRuntime) SendTaskInput(_ context.Context, _ codexappserver.Mac
 		return f.steerTurnID, nil
 	}
 	return "turn-new", nil
+}
+
+func (f *fakeCodexRuntime) RespondToServerRequest(_ context.Context, _ codexappserver.MachineRuntimeConfig, requestID string, result any) error {
+	f.requestID = requestID
+	f.requestResult = result
+	return nil
 }
 
 func (f *fakeCodexRuntime) InterruptTask(_ context.Context, _ codexappserver.MachineRuntimeConfig, threadID, activeTurnID string) error {

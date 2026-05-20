@@ -103,6 +103,33 @@ func (c *Client) ResumeThread(ctx context.Context, threadID string) error {
 	return c.call(ctx, "thread/resume", ThreadResumeRequest{ThreadID: threadID}, nil)
 }
 
+func (c *Client) RespondToServerRequest(ctx context.Context, requestID string, result any) error {
+	if c == nil || c.transport == nil {
+		return errors.New("codex app-server transport is not configured")
+	}
+
+	var payload json.RawMessage
+	if result != nil {
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			return fmt.Errorf("server request response: marshal result: %w", err)
+		}
+		payload = encoded
+	}
+
+	responseBytes, err := json.Marshal(rpcMessage{
+		ID:     requestID,
+		Result: payload,
+	})
+	if err != nil {
+		return fmt.Errorf("server request response: marshal response: %w", err)
+	}
+	if err := c.transport.Send(ctx, responseBytes); err != nil {
+		return fmt.Errorf("server request response: send response: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) Notifications() <-chan rpcMessage {
 	return c.notifications
 }
@@ -225,8 +252,10 @@ func (c *Client) readLoop() {
 			return
 		}
 
-		if message.ID != "" {
-			c.routeResponse(message)
+		if message.ID != "" && c.routeResponse(message) {
+			continue
+		}
+		if message.ID != "" && strings.TrimSpace(message.Method) == "" {
 			continue
 		}
 

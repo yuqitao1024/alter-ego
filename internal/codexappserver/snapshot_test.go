@@ -3,57 +3,80 @@ package codexappserver
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
-func TestThreadWatcherAppliesTurnAndItemNotifications(t *testing.T) {
+func TestDecodeServerRequest(t *testing.T) {
 	t.Parallel()
 
-	watcher := newThreadWatcher("thread-1")
+	msg := rpcMessage{
+		ID:     "srv-1",
+		Method: "item/tool/requestUserInput",
+		Params: map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"prompt":   "Choose A or B",
+		},
+	}
 
-	watcher.apply(notificationEnvelope("thread/started", `{"thread":{"id":"thread-1","status":"running"}}`))
-	watcher.apply(notificationEnvelope("turn/started", `{"turn":{"id":"turn-1","status":"running","thread_id":"thread-1"}}`))
-	watcher.apply(notificationEnvelope("item/started", `{"item":{"id":"item-1","type":"agent_message","text":"Planning","thread_id":"thread-1"}}`))
-	watcher.apply(notificationEnvelope("item/completed", `{"item":{"id":"item-1","type":"agent_message","text":"Planning complete","thread_id":"thread-1"}}`))
-	watcher.apply(notificationEnvelope("turn/completed", `{"turn":{"id":"turn-1","status":"completed","thread_id":"thread-1"}}`))
-
-	snapshot := watcher.Snapshot()
-	if snapshot.ThreadID != "thread-1" {
-		t.Fatalf("snapshot.ThreadID = %q", snapshot.ThreadID)
+	req, ok, err := DecodeServerRequest(msg)
+	if err != nil {
+		t.Fatalf("DecodeServerRequest returned error: %v", err)
 	}
-	if snapshot.ActiveTurnID != "turn-1" {
-		t.Fatalf("snapshot.ActiveTurnID = %q", snapshot.ActiveTurnID)
+	if !ok {
+		t.Fatal("DecodeServerRequest returned ok=false")
 	}
-	if snapshot.ActiveTurnStatus != "completed" {
-		t.Fatalf("snapshot.ActiveTurnStatus = %q", snapshot.ActiveTurnStatus)
-	}
-	if snapshot.LatestAgentMessage != "Planning complete" {
-		t.Fatalf("snapshot.LatestAgentMessage = %q", snapshot.LatestAgentMessage)
+	if req.RequestID != "srv-1" || req.ThreadID != "thread-1" || req.TurnID != "turn-1" {
+		t.Fatalf("req = %#v", req)
 	}
 }
 
-func TestThreadWatcherIgnoresItemsWithoutMatchingThreadID(t *testing.T) {
+func TestThreadWatcherPublishesServerRequestAndResolvedEvent(t *testing.T) {
 	t.Parallel()
 
 	watcher := newThreadWatcher("thread-1")
-	watcher.apply(notificationEnvelope("item/completed", `{"item":{"id":"item-1","type":"agent_message","text":"wrong route"}}`))
+	watcher.apply(rpcMessage{
+		ID:     "srv-1",
+		Method: "item/tool/requestUserInput",
+		Params: mustRawJSON(t, map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"prompt":   "Choose A or B",
+		}),
+	})
 
-	snapshot := watcher.Snapshot()
-	if snapshot.LatestAgentMessage != "" {
-		t.Fatalf("snapshot.LatestAgentMessage = %q, want empty", snapshot.LatestAgentMessage)
+	select {
+	case event := <-watcher.Events():
+		if event.ServerRequest == nil || event.ServerRequest.RequestID != "srv-1" {
+			t.Fatalf("event = %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server request event was not published")
 	}
-	if snapshot.SubscriptionState != SubscriptionStateConnecting {
-		t.Fatalf("snapshot.SubscriptionState = %q, want %q", snapshot.SubscriptionState, SubscriptionStateConnecting)
+
+	watcher.apply(rpcMessage{
+		Method: "serverRequest/resolved",
+		Params: mustRawJSON(t, map[string]any{
+			"requestId": "srv-1",
+		}),
+	})
+
+	select {
+	case event := <-watcher.Events():
+		if event.ResolvedRequestID != "srv-1" {
+			t.Fatalf("ResolvedRequestID = %q, want srv-1", event.ResolvedRequestID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resolved event was not published")
 	}
 }
 
-func notificationEnvelope(method string, payload string) rpcMessage {
-	var params map[string]any
-	if err := json.Unmarshal([]byte(payload), &params); err != nil {
-		panic(err)
-	}
+func mustRawJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
 
-	return rpcMessage{
-		Method: method,
-		Params: params,
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
 	}
+	return json.RawMessage(data)
 }

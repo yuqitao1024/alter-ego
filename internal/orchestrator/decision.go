@@ -6,52 +6,41 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 )
 
-const fixedDecisionRules = `You are Alter Ego's remote Codex task coordinator.
-- Advance remote Codex work deterministically using the current thread state and workflow context.
-- Ask the user when the task requires requirement clarification, scope confirmation, an implementation solution choice, or missing context.
-- If Codex is still working, return wait.
-- If Codex is waiting for a direct operator answer, either ask the user or reply to Codex directly.
-- If the task is already complete and Codex is only waiting for the next operator instruction, return complete_task.
-- planning phase covers requirement discussion, scope clarification, spec writing, plan writing, and solution comparison.
-- executing phase starts once Codex has entered development or testing work.
-- once a task is in executing, you must not move it back to planning on your own. Re-entering planning requires ask_user so the human can approve it in Lark.
-- in executing, do not generate detailed step-by-step implementation instructions unless the user explicitly re-approved a return to planning.
-- Return strict JSON with one action: reply_to_codex, ask_user, complete_task, or wait.
-- Return exactly one JSON object.
-- Do not wrap the JSON in Markdown code fences.
-- Do not add any explanation before or after the JSON.
-- The response must be valid JSON parsable by Go's encoding/json package.`
+const supervisorRequestRules = `You are Alter Ego's Codex supervisor.
+- Alter Ego is a supervisor, not a co-worker.
+- If Codex did not issue an explicit app-server server request, Alter Ego must not send Codex any reply.
+- Classify the current explicit server request as either plan_decision, execution_approval, or ignore.
+- Prefer plan_decision when the request asks for scope, architecture, prioritization, or other product/solution choices.
+- Prefer execution_approval when the request is a routine continue/resume/approval that does not change scope.
+- Set reply_policy to auto_continue only when the request is safe to answer automatically.
+- Set reply_policy to ask_user when the user should decide in Feishu.
+- Return strict JSON only.`
 
-const (
-	DecisionActionWait         = "wait"
-	DecisionActionAskUser      = "ask_user"
-	DecisionActionReplyToCodex = "reply_to_codex"
-	DecisionActionCompleteTask = "complete_task"
-)
+const progressUpdateRules = `You are Alter Ego's Codex supervisor.
+- Evaluate whether the latest summary represents material progress worth reporting to the user.
+- Never suggest sending input to Codex.
+- Return strict JSON only.`
 
-type DecisionContext struct {
-	Task         TaskRun
-	WorkflowText string
-	UserRequest  string
-	OutputWindow OutputWindow
-}
+const completionSignalRules = `You are Alter Ego's Codex supervisor.
+- Evaluate completion-related summaries only.
+- completion_disposition must be one of: none, signal_complete, confirmed_done, reported_remaining.
+- signal_complete means Codex appears to claim the task is done and should receive the one fixed completion-check prompt.
+- confirmed_done means Codex explicitly confirmed all requested work is complete after the completion-check prompt.
+- reported_remaining means Codex explicitly said work remains after the completion-check prompt.
+- Return strict JSON only.`
 
-type DecisionResult struct {
-	Action        string
-	DecisionType  string
-	NextPhase     TaskPhase
-	WorkflowStage WorkflowStage
-	NextInput     string
-	CodexReply    string
-	Summary       string
-	Question      *AwaitingQuestion
+type SupervisorContext struct {
+	Task    TaskRun
+	Request TaskServerRequest
+	Summary string
 }
 
 type DecisionEngine interface {
-	DecideNextStep(ctx context.Context, in DecisionContext) (DecisionResult, error)
+	ClassifySupervisorEvent(ctx context.Context, in SupervisorContext) (SupervisorDecision, error)
+	EvaluateProgressUpdate(ctx context.Context, task TaskRun, summary string) (SupervisorDecision, error)
+	EvaluateCompletionSignal(ctx context.Context, task TaskRun, summary string) (SupervisorDecision, error)
 }
 
 type DecisionModel interface {
@@ -63,121 +52,57 @@ type ModelDecisionEngine struct {
 }
 
 func NewModelDecisionEngine(model DecisionModel) *ModelDecisionEngine {
-	return &ModelDecisionEngine{
-		model: model,
-	}
+	return &ModelDecisionEngine{model: model}
 }
 
-type decisionPayload struct {
-	Action        string `json:"action"`
-	DecisionType  string `json:"decision_type"`
-	NextPhase     string `json:"next_phase"`
-	WorkflowStage string `json:"workflow_stage"`
-	Summary       string `json:"summary"`
-	CodexReply    string `json:"codex_reply"`
-	UserQuestion  string `json:"user_question"`
-}
-
-func (p *decisionPayload) UnmarshalJSON(data []byte) error {
-	type rawDecisionPayload struct {
-		Action        string          `json:"action"`
-		DecisionType  json.RawMessage `json:"decision_type"`
-		NextPhase     string          `json:"next_phase"`
-		WorkflowStage string          `json:"workflow_stage"`
-		Summary       string          `json:"summary"`
-		CodexReply    string          `json:"codex_reply"`
-		UserQuestion  string          `json:"user_question"`
-	}
-
-	var raw rawDecisionPayload
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-
-	p.Action = raw.Action
-	p.NextPhase = raw.NextPhase
-	p.WorkflowStage = raw.WorkflowStage
-	p.Summary = raw.Summary
-	p.CodexReply = raw.CodexReply
-	p.UserQuestion = raw.UserQuestion
-
-	decisionType, err := normalizeDecisionType(raw.DecisionType)
-	if err != nil {
-		return err
-	}
-	p.DecisionType = decisionType
-	return nil
-}
-
-func normalizeDecisionType(raw json.RawMessage) (string, error) {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" || trimmed == "null" {
-		return "", nil
-	}
-
-	var asString string
-	if err := json.Unmarshal(raw, &asString); err == nil {
-		return asString, nil
-	}
-
-	var asNumber json.Number
-	if err := json.Unmarshal(raw, &asNumber); err == nil {
-		return asNumber.String(), nil
-	}
-
-	return "", fmt.Errorf("parse decision_type: unsupported JSON value %s", trimmed)
-}
-
-func (e *ModelDecisionEngine) DecideNextStep(ctx context.Context, in DecisionContext) (DecisionResult, error) {
+func (e *ModelDecisionEngine) ClassifySupervisorEvent(ctx context.Context, in SupervisorContext) (SupervisorDecision, error) {
 	if e == nil || e.model == nil {
-		return DecisionResult{}, fmt.Errorf("decision model is not configured")
+		return SupervisorDecision{}, fmt.Errorf("decision model is not configured")
+	}
+	userPrompt := buildSupervisorRequestPrompt(in)
+	return e.completeStructured(ctx, supervisorRequestRules, userPrompt)
+}
+
+func (e *ModelDecisionEngine) EvaluateProgressUpdate(ctx context.Context, task TaskRun, summary string) (SupervisorDecision, error) {
+	if e == nil || e.model == nil {
+		return SupervisorDecision{}, fmt.Errorf("decision model is not configured")
+	}
+	userPrompt := buildProgressPrompt(task, summary)
+	return e.completeStructured(ctx, progressUpdateRules, userPrompt)
+}
+
+func (e *ModelDecisionEngine) EvaluateCompletionSignal(ctx context.Context, task TaskRun, summary string) (SupervisorDecision, error) {
+	if e == nil || e.model == nil {
+		return SupervisorDecision{}, fmt.Errorf("decision model is not configured")
+	}
+	userPrompt := buildCompletionPrompt(task, summary)
+	return e.completeStructured(ctx, completionSignalRules, userPrompt)
+}
+
+func (e *ModelDecisionEngine) completeStructured(ctx context.Context, systemPrompt, userPrompt string) (SupervisorDecision, error) {
+	raw, err := e.model.Complete(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return SupervisorDecision{}, err
 	}
 
-	raw, err := e.model.Complete(ctx, fixedDecisionRules, BuildDecisionPrompt(in))
-	if err != nil {
-		return DecisionResult{}, err
-	}
 	raw = extractJSONPayload(raw)
 
-	var payload decisionPayload
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &payload); err != nil {
-		return DecisionResult{}, fmt.Errorf("parse decision JSON: %w", err)
+	var decision SupervisorDecision
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decision); err != nil {
+		return SupervisorDecision{}, fmt.Errorf("parse decision JSON: %w", err)
 	}
+	return normalizeSupervisorDecision(decision), nil
+}
 
-	result := DecisionResult{
-		Action:        strings.TrimSpace(payload.Action),
-		DecisionType:  strings.TrimSpace(payload.DecisionType),
-		NextPhase:     normalizeTaskPhaseValue(payload.NextPhase),
-		WorkflowStage: normalizeWorkflowStageValue(payload.WorkflowStage),
-		Summary:       strings.TrimSpace(payload.Summary),
-		CodexReply:    strings.TrimSpace(payload.CodexReply),
-	}
-	if result.WorkflowStage == "" {
-		result.WorkflowStage = workflowStageForPhase(result.NextPhase, in.Task.WorkflowStage)
-	}
-	if result.NextPhase == "" {
-		result.NextPhase = taskPhaseForWorkflowStage(result.WorkflowStage)
-	}
-	if result.Action == DecisionActionAskUser {
-		questionText := strings.TrimSpace(payload.UserQuestion)
-		if questionText == "" {
-			questionText = strings.TrimSpace(in.Task.LastOutputSummary)
-		}
-		result.Question = &AwaitingQuestion{
-			QuestionText:   questionText,
-			OptionsSummary: "",
-			ContextExcerpt: strings.TrimSpace(in.Task.LastOutputSummary),
-			QuestionType:   coalesceString(result.DecisionType, "missing_context"),
-			AskedAt:        time.Now().UTC(),
-		}
-	}
-	if result.Action == "" {
-		result.Action = DecisionActionWait
-	}
-	if result.Summary == "" {
-		result.Summary = strings.TrimSpace(in.Task.LastOutputSummary)
-	}
-	return result, nil
+func normalizeSupervisorDecision(decision SupervisorDecision) SupervisorDecision {
+	decision.Classification = SupervisorClassification(strings.ToLower(strings.TrimSpace(string(decision.Classification))))
+	decision.ReplyPolicy = ReplyPolicy(strings.ToLower(strings.TrimSpace(string(decision.ReplyPolicy))))
+	decision.CompletionDisposition = CompletionDisposition(strings.ToLower(strings.TrimSpace(string(decision.CompletionDisposition))))
+	decision.Reason = strings.TrimSpace(decision.Reason)
+	decision.UserUpdate = strings.TrimSpace(decision.UserUpdate)
+	decision.UserQuestion = strings.TrimSpace(decision.UserQuestion)
+	decision.CodexReply = strings.TrimSpace(decision.CodexReply)
+	return decision
 }
 
 func LoadWorkflow(path string) (string, error) {
@@ -188,79 +113,62 @@ func LoadWorkflow(path string) (string, error) {
 	return string(data), nil
 }
 
-func BuildDecisionPrompt(in DecisionContext) string {
-	userRequest := in.UserRequest
-	if strings.TrimSpace(userRequest) == "" {
-		userRequest = in.Task.UserRequest
-	}
-
+func buildSupervisorRequestPrompt(in SupervisorContext) string {
 	var builder strings.Builder
-	builder.WriteString(fixedDecisionRules)
-	builder.WriteString("\n\n[Workflow]\n")
-	builder.WriteString(strings.TrimSpace(in.WorkflowText))
-	builder.WriteString("\n\n[Runtime Context]\n")
+	builder.WriteString("[Task]\n")
 	builder.WriteString("task_id: ")
 	builder.WriteString(in.Task.TaskID)
-	builder.WriteString("\nrepository_id: ")
-	builder.WriteString(in.Task.RepositoryID)
-	builder.WriteString("\nmachine_id: ")
-	builder.WriteString(in.Task.MachineID)
-	builder.WriteString("\nthread_id: ")
-	builder.WriteString(in.Task.ThreadID)
-	builder.WriteString("\ntask_phase: ")
-	builder.WriteString(string(normalizeTaskPhase(in.Task)))
-	builder.WriteString("\nworkflow_stage: ")
-	builder.WriteString(string(normalizeWorkflowStage(in.Task.WorkflowStage, in.Task.Phase)))
 	builder.WriteString("\nuser_request: ")
-	builder.WriteString(userRequest)
-	builder.WriteString("\nlast_input: ")
-	builder.WriteString(in.Task.LastInput)
-	builder.WriteString("\nlast_output_summary: ")
-	builder.WriteString(in.Task.LastOutputSummary)
-	builder.WriteString("\nthread_status: ")
-	builder.WriteString(in.OutputWindow.SessionState.ThreadStatus)
-	builder.WriteString("\ncompletion_rule: If the requested workflow is already complete and Codex only needs another operator prompt, return complete_task.")
-	builder.WriteString("\nthread_summary:\n")
-	builder.WriteString(strings.TrimSpace(in.OutputWindow.RawOutput))
-	builder.WriteString("\n\nReturn exactly one JSON object with fields: action, decision_type, next_phase, workflow_stage, summary, codex_reply, user_question.")
+	builder.WriteString(in.Task.UserRequest)
+	builder.WriteString("\ncompletion_check_status: ")
+	builder.WriteString(string(in.Task.CompletionCheckStatus))
+	builder.WriteString("\n\n[Server Request]\n")
+	builder.WriteString("request_id: ")
+	builder.WriteString(in.Request.RequestID)
+	builder.WriteString("\nrequest_type: ")
+	builder.WriteString(string(in.Request.RequestType))
+	builder.WriteString("\nrequest_payload: ")
+	builder.WriteString(in.Request.RequestPayload)
+	builder.WriteString("\n\n[Latest Summary]\n")
+	builder.WriteString(strings.TrimSpace(in.Summary))
+	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, should_reply_codex, should_notify_user, reply_policy, reason, user_update, user_question, codex_reply.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
-	builder.WriteString("\nThe response must be valid JSON parsable by Go's encoding/json package.")
 	return builder.String()
 }
 
-func normalizeTaskPhaseValue(raw string) TaskPhase {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case string(TaskPhaseExecuting):
-		return TaskPhaseExecuting
-	case string(TaskPhasePlanning):
-		return TaskPhasePlanning
-	default:
-		return ""
-	}
+func buildProgressPrompt(task TaskRun, summary string) string {
+	var builder strings.Builder
+	builder.WriteString("[Task]\n")
+	builder.WriteString("task_id: ")
+	builder.WriteString(task.TaskID)
+	builder.WriteString("\nuser_request: ")
+	builder.WriteString(task.UserRequest)
+	builder.WriteString("\nlast_output_summary: ")
+	builder.WriteString(task.LastOutputSummary)
+	builder.WriteString("\n\n[Latest Summary]\n")
+	builder.WriteString(strings.TrimSpace(summary))
+	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, should_notify_user, user_update, reason.")
+	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
+	builder.WriteString("\nDo not add any explanation before or after the JSON.")
+	return builder.String()
 }
 
-func normalizeWorkflowStageValue(raw string) WorkflowStage {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case string(WorkflowStageRequirementDiscussion):
-		return WorkflowStageRequirementDiscussion
-	case string(WorkflowStageSpecWriting):
-		return WorkflowStageSpecWriting
-	case string(WorkflowStageSpecReview):
-		return WorkflowStageSpecReview
-	case string(WorkflowStagePlanWriting):
-		return WorkflowStagePlanWriting
-	case string(WorkflowStagePlanReview):
-		return WorkflowStagePlanReview
-	case string(WorkflowStageImplementation):
-		return WorkflowStageImplementation
-	case string(WorkflowStageVerification):
-		return WorkflowStageVerification
-	case string(WorkflowStageIntegration):
-		return WorkflowStageIntegration
-	default:
-		return ""
-	}
+func buildCompletionPrompt(task TaskRun, summary string) string {
+	var builder strings.Builder
+	builder.WriteString("[Task]\n")
+	builder.WriteString("task_id: ")
+	builder.WriteString(task.TaskID)
+	builder.WriteString("\ncompletion_check_status: ")
+	builder.WriteString(string(task.CompletionCheckStatus))
+	builder.WriteString("\nuser_request: ")
+	builder.WriteString(task.UserRequest)
+	builder.WriteString("\n\n[Latest Summary]\n")
+	builder.WriteString(strings.TrimSpace(summary))
+	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, completion_disposition, should_notify_user, user_update, reason.")
+	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
+	builder.WriteString("\nDo not add any explanation before or after the JSON.")
+	return builder.String()
 }
 
 func extractJSONPayload(raw string) string {

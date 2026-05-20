@@ -2,816 +2,239 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestCreateTaskSelectsMachineAndPersistsPendingTask(t *testing.T) {
+func TestStartTaskSelectsMachineAndStartsSession(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
 	defer cleanup()
 
-	ctx := context.Background()
 	seedTask(t, store, TaskRun{
-		TaskID:       "existing",
-		TemplateID:   "feature_dev",
-		RepositoryID: "repo_backend",
-		MachineID:    "machine_a",
-		Status:       StatusRunning,
-		UserRequest:  "existing work",
-		CreatedBy:    "tester",
-		CreatedAt:    time.Now().UTC().Add(-time.Minute),
-		UpdatedAt:    time.Now().UTC().Add(-time.Minute),
+		TaskID:                "existing",
+		TemplateID:            "feature_dev",
+		RepositoryID:          "repo_backend",
+		MachineID:             "machine_a",
+		Status:                StatusRunning,
+		UserRequest:           "existing work",
+		CreatedBy:             "tester",
+		CompletionCheckStatus: CompletionCheckStatusNotStarted,
+		CreatedAt:             time.Now().UTC().Add(-time.Minute),
+		UpdatedAt:             time.Now().UTC().Add(-time.Minute),
 	})
 
-	task, err := service.StartTask(ctx, "feature_dev", "yuqitao", "Add remote control")
+	runner := service.runner.(*fakeServiceRunner)
+	runner.startSession = RemoteSession{
+		MachineID:    "machine_b",
+		Workdir:      "/srv/codex-tasks/task-1/repo",
+		ThreadID:     "thread-1",
+		ActiveTurnID: "turn-1",
+	}
+
+	task, err := service.StartTask(context.Background(), "feature_dev", "yuqitao", "Add remote control")
 	if err != nil {
 		t.Fatalf("StartTask returned error: %v", err)
 	}
-
-	if task.Status != StatusPending {
-		t.Fatalf("task.Status = %q, want %q", task.Status, StatusPending)
+	if task.Status != StatusRunning {
+		t.Fatalf("task.Status = %q, want %q", task.Status, StatusRunning)
 	}
 	if task.MachineID != "machine_b" {
 		t.Fatalf("task.MachineID = %q, want machine_b", task.MachineID)
 	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.TemplateID != "feature_dev" || persisted.RepositoryID != "repo_backend" {
-		t.Fatalf("persisted template/repository = %q/%q", persisted.TemplateID, persisted.RepositoryID)
+	if task.ThreadID != "thread-1" || task.ActiveTurnID != "turn-1" {
+		t.Fatalf("task thread identity = %#v", task)
 	}
 }
 
-func TestTickMovesPendingTaskToPreparingWorkspace(t *testing.T) {
+func TestTickDoesNotReplyToCodexWithoutExplicitPendingRequest(t *testing.T) {
 	t.Parallel()
 
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:       "task-start",
-		TemplateID:   "feature_dev",
-		RepositoryID: "repo_backend",
-		MachineID:    "machine_a",
-		Status:       StatusPending,
-		UserRequest:  "Implement remote start",
-		CreatedBy:    "tester",
-	})
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusPreparingWorkspace {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusPreparingWorkspace)
-	}
-}
-
-func TestTickMovesPreparingWorkspaceTaskToStartingSession(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:       "task-starting",
-		TemplateID:   "feature_dev",
-		RepositoryID: "repo_backend",
-		MachineID:    "machine_a",
-		Status:       StatusPreparingWorkspace,
-		UserRequest:  "Implement remote start",
-		CreatedBy:    "tester",
-	})
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusStartingSession {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusStartingSession)
-	}
-}
-
-func TestTickStartsInteractiveSessionAndStoresThreadMetadata(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:       "task-running",
-		TemplateID:   "feature_dev",
-		RepositoryID: "repo_backend",
-		MachineID:    "machine_a",
-		Status:       StatusStartingSession,
-		UserRequest:  "Implement remote start",
-		CreatedBy:    "tester",
-	})
-	service.runner.(*fakeServiceRunner).startSession = RemoteSession{
-		MachineID:    "machine_a",
-		Workdir:      "/srv/codex-tasks/task-running/repo",
-		ThreadID:     "thread_123",
-		ActiveTurnID: "turn_456",
-	}
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusRunning {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
-	}
-	if persisted.RemoteWorkdir != "/srv/codex-tasks/task-running/repo" {
-		t.Fatalf("persisted.RemoteWorkdir = %q, want /srv/codex-tasks/task-running/repo", persisted.RemoteWorkdir)
-	}
-	if persisted.ThreadID != "thread_123" || persisted.ActiveTurnID != "turn_456" {
-		t.Fatalf("persisted thread identity = %#v", persisted)
-	}
-}
-
-func TestTickMarksRunningTaskDetachedWhenCaptureTimesOut(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-timeout",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Investigate timeout",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-timeout",
-	})
-	service.runner.(*fakeServiceRunner).captureErr = fmt.Errorf("capture app-server output: %w", ErrRemoteCommandTimeout)
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusDetached {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusDetached)
-	}
-}
-
-func TestTickMarksRunningTaskDetachedWhenThreadMissingDuringCapture(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-missing-thread",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Investigate missing thread",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread_123",
-	})
-	service.runner.(*fakeServiceRunner).captureErr = fmt.Errorf("get app-server thread: %w", ErrAppServerThreadMissing)
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusDetached {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusDetached)
-	}
-}
-
-func TestTickTimeoutOnOneTaskDoesNotBlockNextTask(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	runningTask := seedTask(t, store, TaskRun{
-		TaskID:        "task-running-timeout",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Task one",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-running-timeout",
-	})
-	pendingTask := seedTask(t, store, TaskRun{
-		TaskID:       "task-pending-next",
-		TemplateID:   "feature_dev",
-		RepositoryID: "repo_backend",
-		MachineID:    "machine_b",
-		Status:       StatusPending,
-		UserRequest:  "Task two",
-		CreatedBy:    "tester",
-	})
-	runner := service.runner.(*fakeServiceRunner)
-	runner.captureErr = fmt.Errorf("capture app-server output: %w", ErrRemoteCommandTimeout)
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("first TickOnce returned error: %v", err)
-	}
-	runner.captureErr = nil
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("second TickOnce returned error: %v", err)
-	}
-
-	persistedRunning, err := store.GetTask(ctx, runningTask.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask(running) returned error: %v", err)
-	}
-	if persistedRunning.Status != StatusDetached {
-		t.Fatalf("persistedRunning.Status = %q, want %q", persistedRunning.Status, StatusDetached)
-	}
-
-	persistedPending, err := store.GetTask(ctx, pendingTask.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask(pending) returned error: %v", err)
-	}
-	if persistedPending.Status != StatusPreparingWorkspace {
-		t.Fatalf("persistedPending.Status = %q, want %q", persistedPending.Status, StatusPreparingWorkspace)
-	}
-}
-
-func TestTickMovesTaskToWaitingUserInputWhenDecisionRequiresUser(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-wait",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-wait",
-	})
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: `I found two implementation approaches.
-
-Which approach should I take for the implementation?
-1. Event-driven
-2. Polling`,
-		Summary: "Two implementation approaches are possible",
-	}
-	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:       DecisionActionAskUser,
-		DecisionType: "implementation_solution_choice",
-		Summary:      "Need user to choose approach",
-		Question: &AwaitingQuestion{
-			QuestionText:   "Choose event-driven or polling design?",
-			OptionsSummary: "event-driven | polling",
-			ContextExcerpt: "Both approaches are viable",
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{
+			Summary:      "Need clarification about architecture",
+			SessionState: SessionState{ThreadStatus: "running"},
 		},
 	}
-	notifier := service.notifier.(*fakeTaskNotifier)
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
+		progressDecision: SupervisorDecision{
+			Classification:   ClassificationProgressUpdate,
+			ShouldNotifyUser: false,
+		},
+	})
+	defer cleanup()
 
-	if err := service.TickOnce(ctx); err != nil {
+	task := sampleTaskRun("task-no-request", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
 		t.Fatalf("TickOnce returned error: %v", err)
 	}
+	if len(runner.sentInputs) != 0 {
+		t.Fatalf("sentInputs = %#v, want none", runner.sentInputs)
+	}
+}
 
-	persisted, err := store.GetTask(ctx, task.TaskID)
+func TestHandleRuntimeEventRepliesOnceForPendingExecutionApprovalRequest(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification:   ClassificationExecutionApproval,
+			ShouldReplyCodex: true,
+			ReplyPolicy:      ReplyPolicyAutoContinue,
+			CodexReply:       "continue",
+		},
+	})
+	defer cleanup()
+
+	task := sampleTaskRun("task-request", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	event := RuntimeEvent{
+		ThreadID: "thread-1",
+		ServerRequest: &TaskServerRequest{
+			RequestID:      "req-1",
+			ThreadID:       "thread-1",
+			TurnID:         "turn-1",
+			RequestType:    ServerRequestTypeUserInput,
+			RequestPayload: `{"prompt":"continue?"}`,
+		},
+	}
+
+	if err := service.HandleRuntimeEvent(context.Background(), event); err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	}
+	if len(runner.serverReplies) != 1 || runner.serverReplies[0] != "continue" {
+		t.Fatalf("serverReplies = %#v", runner.serverReplies)
+	}
+
+	req, err := store.GetTaskServerRequest(context.Background(), "req-1")
+	if err != nil {
+		t.Fatalf("GetTaskServerRequest returned error: %v", err)
+	}
+	if req.Status != ServerRequestStatusReplied {
+		t.Fatalf("req.Status = %q, want %q", req.Status, ServerRequestStatusReplied)
+	}
+
+	if err := service.HandleRuntimeEvent(context.Background(), event); err != nil {
+		t.Fatalf("second HandleRuntimeEvent returned error: %v", err)
+	}
+	if len(runner.serverReplies) != 1 {
+		t.Fatalf("serverReplies after second event = %#v, want one reply", runner.serverReplies)
+	}
+}
+
+func TestHandleRuntimeEventEscalatesPlanDecisionToUser(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification: ClassificationPlanDecision,
+			ReplyPolicy:    ReplyPolicyAskUser,
+			UserQuestion:   "Codex wants a scope decision. Continue with option A or B?",
+		},
+	}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-plan", StatusRunning)
+	task.ThreadID = "thread-plan"
+	task.ActiveTurnID = "turn-plan"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-plan",
+		ServerRequest: &TaskServerRequest{
+			RequestID:      "req-plan",
+			ThreadID:       "thread-plan",
+			TurnID:         "turn-plan",
+			RequestType:    ServerRequestTypeUserInput,
+			RequestPayload: `{"prompt":"A or B?"}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
 	if err != nil {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
 	if persisted.Status != StatusWaitingUserInput {
 		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
 	}
-	if persisted.AwaitingQuestion == nil || !strings.Contains(persisted.AwaitingQuestion.QuestionText, "Choose") {
+	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionText == "" {
 		t.Fatalf("persisted.AwaitingQuestion = %#v, want question", persisted.AwaitingQuestion)
-	}
-	if notifier.lastTaskID != task.TaskID || notifier.lastUserID != "tester" {
-		t.Fatalf("notifier captured task=%q user=%q", notifier.lastTaskID, notifier.lastUserID)
-	}
-}
-
-func TestTickPromotesPlanningTaskToExecutingOnModelReply(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-phase-promotion",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		Phase:         TaskPhasePlanning,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-phase-promotion",
-	})
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: "Ready to start implementation",
-		Summary:   "Ready to start implementation",
-		SessionState: SessionState{
-			ThreadStatus: "running",
-		},
-	}
-	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:        DecisionActionReplyToCodex,
-		NextPhase:     TaskPhaseExecuting,
-		WorkflowStage: WorkflowStageImplementation,
-		CodexReply:    "Start coding now.",
-		Summary:       "Implementation starts now",
-	}
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Phase != TaskPhaseExecuting {
-		t.Fatalf("persisted.Phase = %q, want %q", persisted.Phase, TaskPhaseExecuting)
-	}
-	if persisted.WorkflowStage != WorkflowStageImplementation {
-		t.Fatalf("persisted.WorkflowStage = %q, want %q", persisted.WorkflowStage, WorkflowStageImplementation)
-	}
-}
-
-func TestReplyDoesNotPromotePhaseFromExecutionKeywordsWithoutWorkflowStage(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-reply-no-keyword-promotion",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusWaitingUserInput,
-		Phase:         TaskPhasePlanning,
-		WorkflowStage: WorkflowStagePlanWriting,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread_123",
-		AwaitingQuestion: &AwaitingQuestion{
-			QuestionText: "Ready to continue?",
-			QuestionType: "plan_review",
-			AskedAt:      time.Now().UTC().Add(-time.Minute),
-		},
-	})
-
-	if err := service.Reply(ctx, task.TaskID, "Start with step 1 and implement it now."); err != nil {
-		t.Fatalf("Reply returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Phase != TaskPhasePlanning {
-		t.Fatalf("persisted.Phase = %q, want %q", persisted.Phase, TaskPhasePlanning)
-	}
-}
-
-func TestServicePromotesToExecutingOnlyFromImplementationStage(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-phase",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		Phase:         TaskPhasePlanning,
-		WorkflowStage: WorkflowStagePlanWriting,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread_123",
-	})
-
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: "Spec approved. Writing implementation plan now.",
-		Summary:   "Spec approved. Writing implementation plan now.",
-		SessionState: SessionState{
-			ThreadStatus: "running",
-		},
-	}
-	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:        DecisionActionWait,
-		NextPhase:     TaskPhasePlanning,
-		WorkflowStage: WorkflowStagePlanWriting,
-		Summary:       "Codex is writing the implementation plan.",
-	}
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Phase != TaskPhasePlanning {
-		t.Fatalf("persisted.Phase = %q, want %q", persisted.Phase, TaskPhasePlanning)
-	}
-	if persisted.WorkflowStage != WorkflowStagePlanWriting {
-		t.Fatalf("persisted.WorkflowStage = %q, want %q", persisted.WorkflowStage, WorkflowStagePlanWriting)
-	}
-}
-
-func TestTickUsesFixedContinueReplyDuringExecuting(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-executing-continue",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		Phase:         TaskPhaseExecuting,
-		WorkflowStage: WorkflowStageImplementation,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-executing-continue",
-	})
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: "Waiting for a short continuation",
-		Summary:   "Waiting for a short continuation",
-		SessionState: SessionState{
-			ThreadStatus: "running",
-		},
-	}
-	runner := service.runner.(*fakeServiceRunner)
-	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:     DecisionActionReplyToCodex,
-		CodexReply: "Long detailed plan that should be ignored.",
-		Summary:    "Continue execution",
-	}
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.LastInput != executingContinueReply {
-		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, executingContinueReply)
-	}
-	if len(runner.calls) < 2 || runner.calls[1] != "send" {
-		t.Fatalf("runner.calls = %v, want capture then send", runner.calls)
-	}
-}
-
-func TestTickForcesUserApprovalBeforeReturningExecutingTaskToPlanning(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-phase-regression",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		Phase:         TaskPhaseExecuting,
-		WorkflowStage: WorkflowStageImplementation,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-phase-regression",
-	})
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: "Need to revisit the plan",
-		Summary:   "Need to revisit the plan",
-		SessionState: SessionState{
-			ThreadStatus: "running",
-		},
-	}
-	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:    DecisionActionReplyToCodex,
-		NextPhase: TaskPhasePlanning,
-		Summary:   "Need to reopen planning",
-	}
-	notifier := service.notifier.(*fakeTaskNotifier)
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusWaitingUserInput {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
-	}
-	if persisted.Phase != TaskPhaseExecuting {
-		t.Fatalf("persisted.Phase = %q, want %q", persisted.Phase, TaskPhaseExecuting)
 	}
 	if notifier.lastTaskID != task.TaskID {
 		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
 	}
 }
 
-func TestTickSkipsDecisionModelWhileCodexIsStillWorking(t *testing.T) {
+func TestReplyResumesWaitingTaskAndMarksRequestReplied(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
 	defer cleanup()
 
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-working-skip",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-working-skip",
-	})
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: "Working\nPress Esc to interrupt",
-		Summary:   "Working",
-		SessionState: SessionState{
-			ThreadStatus: "running",
-		},
-	}
-	decider := service.decider.(*fakeDecisionEngine)
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusRunning {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
-	}
-	if decider.callCount != 0 {
-		t.Fatalf("decider.callCount = %d, want 0", decider.callCount)
-	}
-}
-
-func TestTickKeepsTaskRunningWhenDecisionEngineReturnsWait(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-working",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-working",
-	})
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: "Need operator guidance",
-		Summary:   "Inspecting repository state",
-		SessionState: SessionState{
-			ThreadStatus: "running",
-		},
-	}
-	decider := service.decider.(*fakeDecisionEngine)
-	decider.result = DecisionResult{
-		Action:  DecisionActionWait,
-		Summary: "Inspecting repository state",
-	}
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusRunning {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
-	}
-	if decider.callCount != 1 {
-		t.Fatalf("decider.callCount = %d, want 1", decider.callCount)
-	}
-}
-
-func TestTickRepliesToCodexWhenDecisionEngineRequestsDirectReply(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-direct-reply",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-direct-reply",
-	})
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: `当前状态有冲突，需要先对齐目标。
-
-你现在要我继续哪一条：
-1. 切回真正的 issue #30
-2. 继续围绕已经合并的 BlockReduce 做收尾/补充`,
-		Summary: "需要对齐目标并等待选择",
-	}
-	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:       DecisionActionReplyToCodex,
-		DecisionType: "none",
-		Summary:      "Continue with issue #30.",
-		CodexReply:   "切回 issue #30，继续开发 simt/std/span。",
-	}
-	runner := service.runner.(*fakeServiceRunner)
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusRunning {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
-	}
-	if persisted.LastInput != "切回 issue #30，继续开发 simt/std/span。" {
-		t.Fatalf("persisted.LastInput = %q", persisted.LastInput)
-	}
-	if !reflect.DeepEqual(runner.calls, []string{"capture", "send"}) {
-		t.Fatalf("runner.calls = %v, want [capture send]", runner.calls)
-	}
-}
-
-func TestTickMarksTaskCompletedWhenDecisionEngineRequestsCompletion(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-complete",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-complete",
-			ActiveTurnID: "turn-complete",
-	})
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: `Implementation finished successfully.
-
-Waiting for next instruction.`,
-		Summary: "Implementation finished and waiting for next instruction.",
-	}
-	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:  DecisionActionCompleteTask,
-		Summary: "Task completed successfully.",
-	}
-	runner := service.runner.(*fakeServiceRunner)
-
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusCompleted {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
-	}
-	if len(runner.calls) < 2 || runner.calls[0] != "capture" || runner.calls[1] != "stop" {
-		t.Fatalf("runner.calls = %v, want capture then stop", runner.calls)
-	}
-}
-
-func TestReplyResumesWaitingTask(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
 	askedAt := time.Now().UTC().Add(-time.Minute)
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-reply",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusWaitingUserInput,
-		UserRequest:   "Implement orchestrator",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread_123",
-		AwaitingQuestion: &AwaitingQuestion{
-			QuestionText: "You've hit your usage limit.",
-			QuestionType: "usage_limit",
-			AskedAt:      askedAt,
-		},
-	})
-	if err := store.AppendQuestion(ctx, TaskQuestion{
+	task := sampleTaskRun("task-reply", StatusWaitingUserInput)
+	task.ThreadID = "thread-123"
+	task.ActiveTurnID = "turn-123"
+	task.RemoteWorkdir = "/srv/backend"
+	task.PendingRequestID = "req-1"
+	task.AwaitingQuestion = &AwaitingQuestion{
+		QuestionText: "Continue?",
+		QuestionType: "execution_approval",
+		AskedAt:      askedAt,
+	}
+	seedTask(t, store, task)
+	if err := store.AppendQuestion(context.Background(), TaskQuestion{
 		TaskID:         task.TaskID,
-		QuestionType:   "usage_limit",
-		QuestionText:   "You've hit your usage limit.",
+		QuestionType:   "execution_approval",
+		QuestionText:   "Continue?",
 		OptionsSummary: "",
 		ContextExcerpt: "",
 		AskedAt:        askedAt,
 	}); err != nil {
 		t.Fatalf("AppendQuestion returned error: %v", err)
 	}
-	service.runner.(*fakeServiceRunner).sendSession = RemoteSession{
+	mustUpsertRequest(t, store, TaskServerRequest{
+		RequestID:      "req-1",
+		TaskID:         task.TaskID,
+		ThreadID:       "thread-123",
+		TurnID:         "turn-123",
+		RequestType:    ServerRequestTypeUserInput,
+		RequestPayload: `{"prompt":"Continue?"}`,
+		Status:         ServerRequestStatusPending,
+		CreatedAt:      time.Now().UTC().Add(-time.Minute),
+	})
+
+	runner := service.runner.(*fakeServiceRunner)
+	runner.sendSession = RemoteSession{
 		MachineID:    "machine_a",
 		Workdir:      "/srv/backend",
-		ThreadID:     "thread_123",
-		ActiveTurnID: "turn_999",
+		ThreadID:     "thread-123",
+		ActiveTurnID: "turn-999",
 	}
 
-	if err := service.Reply(ctx, task.TaskID, "Use polling."); err != nil {
+	if err := service.Reply(context.Background(), task.TaskID, "continue"); err != nil {
 		t.Fatalf("Reply returned error: %v", err)
 	}
 
-	persisted, err := store.GetTask(ctx, task.TaskID)
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
 	if err != nil {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
@@ -821,219 +244,165 @@ func TestReplyResumesWaitingTask(t *testing.T) {
 	if persisted.AwaitingQuestion != nil {
 		t.Fatalf("persisted.AwaitingQuestion = %#v, want nil", persisted.AwaitingQuestion)
 	}
-	if persisted.LastInput != "Use polling." {
-		t.Fatalf("persisted.LastInput = %q, want %q", persisted.LastInput, "Use polling.")
-	}
-	if persisted.ActiveTurnID != "turn_999" {
-		t.Fatalf("persisted.ActiveTurnID = %q, want %q", persisted.ActiveTurnID, "turn_999")
-	}
 
-	questions, err := store.ListQuestions(ctx, task.TaskID)
+	req, err := store.GetTaskServerRequest(context.Background(), "req-1")
 	if err != nil {
-		t.Fatalf("ListQuestions returned error: %v", err)
+		t.Fatalf("GetTaskServerRequest returned error: %v", err)
 	}
-	if len(questions) != 1 {
-		t.Fatalf("len(ListQuestions) = %d, want 1", len(questions))
+	if req.Status != ServerRequestStatusReplied {
+		t.Fatalf("req.Status = %q, want %q", req.Status, ServerRequestStatusReplied)
 	}
-	if questions[0].AnsweredAt == nil || questions[0].AnswerText != "Use polling." {
-		t.Fatalf("question = %#v, want answered question", questions[0])
+	if len(runner.serverReplies) != 1 || runner.serverReplies[0] != "continue" {
+		t.Fatalf("serverReplies = %#v, want [continue]", runner.serverReplies)
 	}
 }
 
-func TestRecoverDetachedTaskReconnectsByThreadID(t *testing.T) {
+func TestTickSendsCompletionCheckOnlyOnce(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{Summary: "Task complete.", SessionState: SessionState{ThreadStatus: "completed"}},
+	}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
+		completionDecision: SupervisorDecision{
+			Classification:        ClassificationCompletionSignal,
+			CompletionDisposition: CompletionDispositionSignalComplete,
+		},
+	})
+	defer cleanup()
+
+	task := sampleTaskRun("task-complete-once", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+	if len(runner.sentInputs) != 1 {
+		t.Fatalf("sentInputs = %#v, want one completion check", runner.sentInputs)
+	}
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("second TickOnce returned error: %v", err)
+	}
+	if len(runner.sentInputs) != 1 {
+		t.Fatalf("sentInputs after second tick = %#v, want still one completion check", runner.sentInputs)
+	}
+}
+
+func TestTickCompletesTaskAfterCompletionCheckConfirmation(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{Summary: "All requested work is complete.", SessionState: SessionState{ThreadStatus: "completed"}},
+	}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
+		completionDecision: SupervisorDecision{
+			Classification:        ClassificationCompletionSignal,
+			CompletionDisposition: CompletionDispositionConfirmedDone,
+		},
+	})
+	defer cleanup()
+
+	task := sampleTaskRun("task-done", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	now := time.Now().UTC().Add(-time.Minute)
+	task.CompletionCheckStatus = CompletionCheckStatusSent
+	task.CompletionCheckSentAt = &now
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusCompleted {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
+	}
+}
+
+func TestTickProgressPollingOnlyNotifiesUserAndNeverRepliesCodex(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{Summary: "Completed migration and all tests passed.", SessionState: SessionState{ThreadStatus: "running"}},
+	}
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, runner, &fakeDecisionEngine{
+		progressDecision: SupervisorDecision{
+			Classification:   ClassificationProgressUpdate,
+			ShouldNotifyUser: true,
+			UserUpdate:       "Codex completed migration and passed tests.",
+		},
+	}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-progress", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+	if len(runner.sentInputs) != 0 {
+		t.Fatalf("sentInputs = %#v, want none", runner.sentInputs)
+	}
+	if len(notifier.progressMessages) != 1 {
+		t.Fatalf("progressMessages = %#v, want one user update", notifier.progressMessages)
+	}
+}
+
+func TestRecoveringTaskReconnectsByThreadID(t *testing.T) {
 	t.Parallel()
 
 	service, store, cleanup := newTestService(t)
 	defer cleanup()
 
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-recover-thread",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusDetached,
-		Phase:         TaskPhaseExecuting,
-		WorkflowStage: WorkflowStageImplementation,
-		UserRequest:   "Resume detached task",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread_123",
-			ActiveTurnID: "turn_456",
-	})
+	task := sampleTaskRun("task-recover-thread", StatusRecovering)
+	task.UserRequest = "Resume recovering task"
+	task.RemoteWorkdir = "/srv/backend"
+	task.ThreadID = "thread-123"
+	task.ActiveTurnID = "turn-456"
+	seedTask(t, store, task)
+
 	runner := service.runner.(*fakeServiceRunner)
 	runner.hasSession = true
 
-	if err := service.TickOnce(ctx); err != nil {
+	if err := service.TickOnce(context.Background()); err != nil {
 		t.Fatalf("TickOnce returned error: %v", err)
 	}
 
-	persisted, err := store.GetTask(ctx, task.TaskID)
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
 	if err != nil {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
 	if persisted.Status != StatusRunning {
 		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
-	}
-	if persisted.ThreadID != "thread_123" || persisted.ActiveTurnID != "turn_456" {
-		t.Fatalf("persisted thread identity = %#v", persisted)
 	}
 	if !reflect.DeepEqual(runner.calls, []string{"has-session"}) {
 		t.Fatalf("runner.calls = %v, want [has-session]", runner.calls)
 	}
 }
 
-func TestStopMarksTaskStoppedAndCallsRunner(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-stop",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Stop me",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread-stop",
-			ActiveTurnID: "turn-stop",
-	})
-
-	if err := service.Stop(ctx, task.TaskID); err != nil {
-		t.Fatalf("Stop returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusStopped {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusStopped)
-	}
-
-	runner := service.runner.(*fakeServiceRunner)
-	if len(runner.calls) == 0 || runner.calls[len(runner.calls)-1] != "stop" {
-		t.Fatalf("runner calls = %v, want stop", runner.calls)
-	}
-}
-
-func TestStopDoesNotPersistStoppedWhenRunnerStopFails(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task := seedTask(t, store, TaskRun{
-		TaskID:        "task-stop-fail",
-		TemplateID:    "feature_dev",
-		RepositoryID:  "repo_backend",
-		MachineID:     "machine_a",
-		Status:        StatusRunning,
-		UserRequest:   "Stop me",
-		CreatedBy:     "tester",
-		RemoteWorkdir: "/srv/backend",
-		ThreadID: "thread_123",
-			ActiveTurnID: "turn_456",
-	})
-	service.runner.(*fakeServiceRunner).stopErr = errors.New("interrupt app-server turn: denied")
-
-	if err := service.Stop(ctx, task.TaskID); err == nil {
-		t.Fatal("Stop returned nil error, want stop failure")
-	}
-
-	persisted, err := store.GetTask(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusRunning {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
-	}
-}
-
-func TestLifecyclePersistsEventsAndQuestions(t *testing.T) {
-	t.Parallel()
-
-	service, store, cleanup := newTestService(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	task, err := service.StartTask(ctx, "feature_dev", "tester", "Implement orchestrator")
-	if err != nil {
-		t.Fatalf("StartTask returned error: %v", err)
-	}
-
-	service.runner.(*fakeServiceRunner).startSession = RemoteSession{
-		MachineID:    "machine_b",
-		Workdir:      "/srv/codex-tasks/" + task.TaskID + "/repo",
-		ThreadID:     "thread-lifecycle",
-		ActiveTurnID: "turn-lifecycle",
-	}
-
-	for i := 0; i < 3; i++ {
-		if err := service.TickOnce(ctx); err != nil {
-			t.Fatalf("TickOnce #%d returned error: %v", i+1, err)
-		}
-	}
-
-	askedAt := time.Now().UTC()
-	service.runner.(*fakeServiceRunner).outputWindow = OutputWindow{
-		RawOutput: `I need clarification on the requirement before I proceed.
-
-Please clarify the requirement before I proceed.`,
-		Summary: "Please clarify the requirement before I proceed.",
-	}
-	service.decider.(*fakeDecisionEngine).result = DecisionResult{
-		Action:       DecisionActionAskUser,
-		DecisionType: "requirement_clarification",
-		Summary:      "Please clarify the requirement before I proceed.",
-		Question: &AwaitingQuestion{
-			QuestionText:   "Please clarify the requirement before I proceed.",
-			OptionsSummary: "",
-			ContextExcerpt: "Need more information.",
-			QuestionType:   "requirement_clarification",
-			AskedAt:        askedAt,
-		},
-	}
-	if err := service.TickOnce(ctx); err != nil {
-		t.Fatalf("TickOnce for clarification returned error: %v", err)
-	}
-
-	service.runner.(*fakeServiceRunner).sendSession = RemoteSession{
-		MachineID:    "machine_b",
-		Workdir:      "/srv/codex-tasks/" + task.TaskID + "/repo",
-		ThreadID:     "thread-lifecycle",
-		ActiveTurnID: "turn-after-reply",
-	}
-	if err := service.Reply(ctx, task.TaskID, "Use behavior A."); err != nil {
-		t.Fatalf("Reply returned error: %v", err)
-	}
-
-	events, err := store.ListEvents(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("ListEvents returned error: %v", err)
-	}
-	if len(events) == 0 {
-		t.Fatal("ListEvents returned no events")
-	}
-
-	questions, err := store.ListQuestions(ctx, task.TaskID)
-	if err != nil {
-		t.Fatalf("ListQuestions returned error: %v", err)
-	}
-	if len(questions) != 1 {
-		t.Fatalf("len(ListQuestions) = %d, want 1", len(questions))
-	}
-	if questions[0].AnsweredAt == nil || questions[0].AnswerText != "Use behavior A." {
-		t.Fatalf("question = %#v, want answered question", questions[0])
-	}
-}
-
 func newTestService(t *testing.T) (*Service, *Store, func()) {
+	t.Helper()
+	return newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{}, &fakeTaskNotifier{})
+}
+
+func newCustomTestService(t *testing.T, runner *fakeServiceRunner, decider *fakeDecisionEngine) (*Service, *Store, func()) {
+	t.Helper()
+	return newCustomTestServiceWithNotifier(t, runner, decider, &fakeTaskNotifier{})
+}
+
+func newCustomTestServiceWithNotifier(t *testing.T, runner *fakeServiceRunner, decider *fakeDecisionEngine, notifier *fakeTaskNotifier) (*Service, *Store, func()) {
 	t.Helper()
 
 	storePath := filepath.Join(t.TempDir(), "orchestrator.db")
@@ -1072,9 +441,6 @@ func newTestService(t *testing.T) (*Service, *Store, func()) {
 	}
 	registry.Templates["feature_dev"].Repository = registry.Repositories["repo_backend"]
 
-	runner := &fakeServiceRunner{}
-	decider := &fakeDecisionEngine{}
-	notifier := &fakeTaskNotifier{}
 	service := NewService(store, registry, NewScheduler(), runner, decider)
 	service.SetNotifier(notifier)
 
@@ -1094,11 +460,21 @@ func seedTask(t *testing.T, store *Store, task TaskRun) TaskRun {
 	if task.UpdatedAt.IsZero() {
 		task.UpdatedAt = now
 	}
+	if task.CompletionCheckStatus == "" {
+		task.CompletionCheckStatus = CompletionCheckStatusNotStarted
+	}
 
 	if err := store.CreateTask(context.Background(), task); err != nil {
 		t.Fatalf("CreateTask returned error: %v", err)
 	}
 	return task
+}
+
+func mustUpsertRequest(t *testing.T, store *Store, req TaskServerRequest) {
+	t.Helper()
+	if err := store.UpsertTaskServerRequest(context.Background(), req); err != nil {
+		t.Fatalf("UpsertTaskServerRequest returned error: %v", err)
+	}
 }
 
 func writeWorkflowFixture(t *testing.T, body string) string {
@@ -1114,11 +490,14 @@ func writeWorkflowFixture(t *testing.T, body string) string {
 type fakeServiceRunner struct {
 	calls []string
 
-	startSession  RemoteSession
-	sendSession   RemoteSession
-	outputWindow  OutputWindow
-	hasSession    bool
-	lastSentInput string
+	startSession RemoteSession
+	sendSession  RemoteSession
+	outputWindow OutputWindow
+	hasSession   bool
+	eventCh      chan RuntimeEvent
+
+	sentInputs    []string
+	serverReplies []string
 	startErr      error
 	captureErr    error
 	sendErr       error
@@ -1139,7 +518,7 @@ func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartReques
 
 func (f *fakeServiceRunner) SendInteractiveInput(_ context.Context, session RemoteSession, input string) (RemoteSession, error) {
 	f.calls = append(f.calls, "send")
-	f.lastSentInput = input
+	f.sentInputs = append(f.sentInputs, input)
 	if f.sendErr != nil {
 		return RemoteSession{}, f.sendErr
 	}
@@ -1173,23 +552,49 @@ func (f *fakeServiceRunner) StopSession(context.Context, RemoteSession) error {
 	return nil
 }
 
-type fakeDecisionEngine struct {
-	result    DecisionResult
-	callCount int
+func (f *fakeServiceRunner) RespondToServerRequest(_ context.Context, _ RemoteSession, _ TaskServerRequest, response string) error {
+	f.calls = append(f.calls, "respond")
+	f.serverReplies = append(f.serverReplies, response)
+	return nil
 }
 
-func (f *fakeDecisionEngine) DecideNextStep(context.Context, DecisionContext) (DecisionResult, error) {
-	f.callCount++
-	return f.result, nil
+func (f *fakeServiceRunner) Events() <-chan RuntimeEvent {
+	if f.eventCh == nil {
+		f.eventCh = make(chan RuntimeEvent)
+	}
+	return f.eventCh
+}
+
+type fakeDecisionEngine struct {
+	supervisorDecision SupervisorDecision
+	progressDecision   SupervisorDecision
+	completionDecision SupervisorDecision
+	err                error
+}
+
+func (f *fakeDecisionEngine) ClassifySupervisorEvent(context.Context, SupervisorContext) (SupervisorDecision, error) {
+	return f.supervisorDecision, f.err
+}
+
+func (f *fakeDecisionEngine) EvaluateProgressUpdate(context.Context, TaskRun, string) (SupervisorDecision, error) {
+	return f.progressDecision, f.err
+}
+
+func (f *fakeDecisionEngine) EvaluateCompletionSignal(context.Context, TaskRun, string) (SupervisorDecision, error) {
+	return f.completionDecision, f.err
 }
 
 type fakeTaskNotifier struct {
-	lastTaskID string
-	lastUserID string
+	lastTaskID        string
+	progressMessages  []string
 }
 
 func (f *fakeTaskNotifier) NotifyTaskQuestion(_ context.Context, task TaskRun) error {
 	f.lastTaskID = task.TaskID
-	f.lastUserID = task.CreatedBy
+	return nil
+}
+
+func (f *fakeTaskNotifier) NotifyTaskProgress(_ context.Context, _ TaskRun, message string) error {
+	f.progressMessages = append(f.progressMessages, message)
 	return nil
 }

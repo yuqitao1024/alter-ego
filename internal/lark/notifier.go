@@ -33,3 +33,12 @@ func (n *TaskNotifier) NotifyTaskQuestion(ctx context.Context, task orchestrator
 	)
 	return n.sender.SendDirectMessage(ctx, task.CreatedBy, text)
 }
+
+func (n *TaskNotifier) NotifyTaskProgress(ctx context.Context, task orchestrator.TaskRun, message string) error {
+	if n == nil || n.sender == nil || message == "" {
+		return nil
+	}
+
+	text := fmt.Sprintf("Task %s progress update:\n\n%s", task.TaskID, message)
+	return n.sender.SendDirectMessage(ctx, task.CreatedBy, text)
+}

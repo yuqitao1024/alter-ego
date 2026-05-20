@@ -80,6 +80,11 @@ func (f *fakeRemoteRunner) SendInteractiveInput(_ context.Context, session Remot
 	return session, nil
 }
 
+func (f *fakeRemoteRunner) RespondToServerRequest(context.Context, RemoteSession, TaskServerRequest, string) error {
+	f.calls = append(f.calls, "respond")
+	return nil
+}
+
 func (f *fakeRemoteRunner) HasSession(context.Context, RemoteSession) (bool, error) {
 	f.calls = append(f.calls, "has-session")
 	return f.hasSession, nil
@@ -87,5 +92,9 @@ func (f *fakeRemoteRunner) HasSession(context.Context, RemoteSession) (bool, err
 
 func (f *fakeRemoteRunner) StopSession(context.Context, RemoteSession) error {
 	f.calls = append(f.calls, "stop")
+	return nil
+}
+
+func (f *fakeRemoteRunner) Events() <-chan RuntimeEvent {
 	return nil
 }

@@ -54,8 +54,9 @@ type TurnStartRequest struct {
 }
 
 type TurnSteerRequest struct {
-	TurnID string      `json:"turnId"`
-	Input  []InputItem `json:"input"`
+	ThreadID       string      `json:"threadId"`
+	ExpectedTurnID string      `json:"expectedTurnId,omitempty"`
+	Input          []InputItem `json:"input"`
 }
 
 type TurnInterruptRequest struct {
@@ -82,4 +83,81 @@ type ThreadItem struct {
 	Type    string          `json:"type,omitempty"`
 	Status  string          `json:"status,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+type ServerRequest struct {
+	RequestID string
+	Method    string
+	ThreadID  string
+	TurnID    string
+	Prompt    string
+	RawParams json.RawMessage
+}
+
+type ThreadEvent struct {
+	Message           rpcMessage
+	ServerRequest     *ServerRequest
+	ResolvedRequestID string
+}
+
+func DecodeServerRequest(msg rpcMessage) (ServerRequest, bool, error) {
+	if msg.ID == "" || msg.Method == "" {
+		return ServerRequest{}, false, nil
+	}
+
+	switch msg.Method {
+	case "item/tool/requestUserInput", "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
+	default:
+		return ServerRequest{}, false, nil
+	}
+
+	params, ok := messageParams(msg)
+	if !ok {
+		return ServerRequest{}, false, nil
+	}
+
+	var payload struct {
+		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
+		Prompt   string `json:"prompt"`
+		Thread   struct {
+			ID string `json:"id"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return ServerRequest{}, false, err
+	}
+	threadID := payload.ThreadID
+	if threadID == "" {
+		threadID = payload.Thread.ID
+	}
+	return ServerRequest{
+		RequestID: msg.ID,
+		Method:    msg.Method,
+		ThreadID:  threadID,
+		TurnID:    payload.TurnID,
+		Prompt:    payload.Prompt,
+		RawParams: params,
+	}, true, nil
+}
+
+func DecodeResolvedServerRequest(msg rpcMessage) (string, bool, error) {
+	if msg.Method != "serverRequest/resolved" {
+		return "", false, nil
+	}
+	params, ok := messageParams(msg)
+	if !ok {
+		return "", false, nil
+	}
+
+	var payload struct {
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", false, err
+	}
+	if payload.RequestID == "" {
+		return "", false, nil
+	}
+	return payload.RequestID, true, nil
 }

@@ -3,56 +3,79 @@ package orchestrator
 import "time"
 
 type TaskStatus string
-type TaskPhase string
-type WorkflowStage string
+type CompletionCheckStatus string
+type ServerRequestType string
+type ServerRequestStatus string
 
 const (
-	StatusPending            TaskStatus = "pending"
-	StatusPreparingWorkspace TaskStatus = "preparing_workspace"
-	StatusStartingSession    TaskStatus = "starting_session"
-	StatusRunning            TaskStatus = "running"
-	StatusWaitingUserInput   TaskStatus = "waiting_user_input"
-	StatusDetached           TaskStatus = "detached"
-	StatusCompleted          TaskStatus = "completed"
-	StatusFailed             TaskStatus = "failed"
-	StatusStopped            TaskStatus = "stopped"
+	StatusPending          TaskStatus = "pending"
+	StatusStarting         TaskStatus = "starting"
+	StatusRunning          TaskStatus = "running"
+	StatusWaitingUserInput TaskStatus = "waiting_user_input"
+	StatusRecovering       TaskStatus = "recovering"
+	StatusCompleted        TaskStatus = "completed"
+	StatusFailed           TaskStatus = "failed"
+	StatusStopped          TaskStatus = "stopped"
 )
 
 const (
-	TaskPhasePlanning  TaskPhase = "planning"
-	TaskPhaseExecuting TaskPhase = "executing"
+	CompletionCheckStatusNotStarted      CompletionCheckStatus = "not_started"
+	CompletionCheckStatusSent            CompletionCheckStatus = "sent"
+	CompletionCheckStatusConfirmedDone   CompletionCheckStatus = "confirmed_done"
+	CompletionCheckStatusReportedPending CompletionCheckStatus = "reported_remaining"
 )
 
 const (
-	WorkflowStageRequirementDiscussion WorkflowStage = "requirement_discussion"
-	WorkflowStageSpecWriting           WorkflowStage = "spec_writing"
-	WorkflowStageSpecReview            WorkflowStage = "spec_review"
-	WorkflowStagePlanWriting           WorkflowStage = "plan_writing"
-	WorkflowStagePlanReview            WorkflowStage = "plan_review"
-	WorkflowStageImplementation        WorkflowStage = "implementation"
-	WorkflowStageVerification          WorkflowStage = "verification"
-	WorkflowStageIntegration           WorkflowStage = "integration"
+	ServerRequestTypeUserInput       ServerRequestType = "request_user_input"
+	ServerRequestTypeCommandApproval ServerRequestType = "command_approval"
+	ServerRequestTypeFileApproval    ServerRequestType = "file_change_approval"
+)
+
+const (
+	ServerRequestStatusPending  ServerRequestStatus = "pending"
+	ServerRequestStatusReplying ServerRequestStatus = "replying"
+	ServerRequestStatusReplied  ServerRequestStatus = "replied"
+	ServerRequestStatusResolved ServerRequestStatus = "resolved"
+	ServerRequestStatusIgnored  ServerRequestStatus = "ignored"
 )
 
 type TaskRun struct {
-	TaskID               string
-	TemplateID           string
-	RepositoryID         string
-	MachineID            string
-	Status               TaskStatus
-	Phase                TaskPhase
-	WorkflowStage        WorkflowStage
-	UserRequest          string
-	CreatedBy            string
-	RemoteWorkdir        string
+	TaskID                string
+	TemplateID            string
+	RepositoryID          string
+	MachineID             string
+	Status                TaskStatus
+	UserRequest           string
+	CreatedBy             string
+	RemoteWorkdir         string
 	ThreadID              string
 	ActiveTurnID          string
 	LastInput             string
 	LastOutputSummary     string
 	LastDecisionAction    string
+	PendingRequestID      string
+	CompletionCheckStatus CompletionCheckStatus
+	CompletionCheckSentAt *time.Time
+	CompletionCheckDoneAt *time.Time
 	AwaitingQuestion      *AwaitingQuestion
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+}
+
+type TaskServerRequest struct {
+	RequestID      string
+	TaskID         string
+	ThreadID       string
+	TurnID         string
+	RequestType    ServerRequestType
+	RequestPayload string
+	Status         ServerRequestStatus
+	DecisionSource string
+	ReplyContent   string
+	CreatedAt      time.Time
+	ReplyStartedAt *time.Time
+	RepliedAt      *time.Time
+	ResolvedAt     *time.Time
 }
 
 type AwaitingQuestion struct {

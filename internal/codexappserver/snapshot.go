@@ -34,6 +34,8 @@ type ThreadWatcher struct {
 	threadID string
 	mu       sync.RWMutex
 	snapshot ThreadSnapshot
+	events   chan ThreadEvent
+	requests map[string]struct{}
 }
 
 func newThreadWatcher(threadID string) *ThreadWatcher {
@@ -43,6 +45,8 @@ func newThreadWatcher(threadID string) *ThreadWatcher {
 			ThreadID:          threadID,
 			SubscriptionState: SubscriptionStateConnecting,
 		},
+		events:   make(chan ThreadEvent, 64),
+		requests: make(map[string]struct{}),
 	}
 }
 
@@ -50,6 +54,10 @@ func (w *ThreadWatcher) Snapshot() ThreadSnapshot {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.snapshot
+}
+
+func (w *ThreadWatcher) Events() <-chan ThreadEvent {
+	return w.events
 }
 
 func (w *ThreadWatcher) markConnecting() {
@@ -71,6 +79,31 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 	params, ok := messageParams(msg)
 	if !ok {
 		return
+	}
+
+	if req, matched, err := DecodeServerRequest(msg); err == nil && matched && req.ThreadID == w.threadID {
+		w.mu.Lock()
+		w.requests[req.RequestID] = struct{}{}
+		w.mu.Unlock()
+		w.events <- ThreadEvent{
+			Message:       msg,
+			ServerRequest: &req,
+		}
+	}
+	if requestID, matched, err := DecodeResolvedServerRequest(msg); err == nil && matched {
+		w.mu.Lock()
+		_, ok := w.requests[requestID]
+		if ok {
+			delete(w.requests, requestID)
+		}
+		w.mu.Unlock()
+		if !ok {
+			return
+		}
+		w.events <- ThreadEvent{
+			Message:           msg,
+			ResolvedRequestID: requestID,
+		}
 	}
 
 	w.mu.Lock()

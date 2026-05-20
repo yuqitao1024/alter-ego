@@ -9,7 +9,7 @@ func TestSelectMachineChoosesLeastLoadedMachine(t *testing.T) {
 	}
 	active := []TaskRun{
 		{TaskID: "task-1", MachineID: "machine_a", Status: StatusRunning},
-		{TaskID: "task-2", MachineID: "machine_a", Status: StatusDetached},
+		{TaskID: "task-2", MachineID: "machine_a", Status: StatusRecovering},
 		{TaskID: "task-3", MachineID: "machine_b", Status: StatusRunning},
 	}
 
@@ -61,7 +61,7 @@ func TestSchedulerRotatesRunnableTasksRoundRobin(t *testing.T) {
 	scheduler := NewScheduler()
 	tasks := []TaskRun{
 		{TaskID: "task-a", Status: StatusRunning},
-		{TaskID: "task-b", Status: StatusDetached},
+		{TaskID: "task-b", Status: StatusRecovering},
 		{TaskID: "task-c", Status: StatusWaitingUserInput},
 		{TaskID: "task-d", Status: StatusRunning},
 	}

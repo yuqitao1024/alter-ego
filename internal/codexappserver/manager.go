@@ -26,6 +26,7 @@ type ClientAPI interface {
 	SteerTurn(ctx context.Context, req TurnSteerRequest) (string, error)
 	InterruptTurn(ctx context.Context, req TurnInterruptRequest) error
 	ResumeThread(ctx context.Context, threadID string) error
+	RespondToServerRequest(ctx context.Context, requestID string, result any) error
 }
 
 type ManagerOptions struct {
@@ -136,8 +137,9 @@ func (m *Manager) SendTaskInput(ctx context.Context, machine MachineRuntimeConfi
 
 	if strings.TrimSpace(activeTurnID) != "" {
 		return runtime.client.SteerTurn(ctx, TurnSteerRequest{
-			TurnID: activeTurnID,
-			Input:  textInput(input),
+			ThreadID:       threadID,
+			ExpectedTurnID: activeTurnID,
+			Input:          textInput(input),
 		})
 	}
 
@@ -158,6 +160,14 @@ func (m *Manager) InterruptTask(ctx context.Context, machine MachineRuntimeConfi
 		ThreadID: threadID,
 		TurnID:   activeTurnID,
 	})
+}
+
+func (m *Manager) RespondToServerRequest(ctx context.Context, machine MachineRuntimeConfig, requestID string, result any) error {
+	runtime, err := m.ensureMachine(ctx, machine)
+	if err != nil {
+		return err
+	}
+	return runtime.client.RespondToServerRequest(ctx, requestID, result)
 }
 
 func (m *Manager) Close() error {

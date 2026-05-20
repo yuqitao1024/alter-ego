@@ -408,10 +408,112 @@ func TestClientDoesNotDropNotificationsWhenBufferIsFull(t *testing.T) {
 	}
 }
 
+func TestClientPublishesServerInitiatedRequestsWithIDs(t *testing.T) {
+	t.Parallel()
+
+	transport := &stubTransport{
+		recvCh: make(chan recvResult, 2),
+	}
+	client := newTestClient(transport)
+	defer client.Close()
+
+	transport.recvCh <- recvResult{payload: mustJSON(t, rpcMessage{
+		ID:     "srv-1",
+		Method: "item/tool/requestUserInput",
+		Params: map[string]any{"threadId": "thread-1", "prompt": "Choose A or B"},
+	})}
+
+	select {
+	case msg := <-client.Notifications():
+		if msg.Method != "item/tool/requestUserInput" {
+			t.Fatalf("Method = %q, want item/tool/requestUserInput", msg.Method)
+		}
+		if msg.ID != "srv-1" {
+			t.Fatalf("ID = %q, want srv-1", msg.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server request notification was not published")
+	}
+}
+
+func TestClientRespondToServerRequestSendsJSONRPCResult(t *testing.T) {
+	t.Parallel()
+
+	transport := &stubTransport{
+		recvCh: make(chan recvResult),
+	}
+	client := newTestClient(transport)
+	defer client.Close()
+
+	if err := client.RespondToServerRequest(context.Background(), "srv-1", map[string]any{"decision": "accept"}); err != nil {
+		t.Fatalf("RespondToServerRequest returned error: %v", err)
+	}
+	if len(transport.sent) != 1 {
+		t.Fatalf("len(sent) = %d, want 1", len(transport.sent))
+	}
+
+	var msg rpcMessage
+	if err := json.Unmarshal(transport.sent[0], &msg); err != nil {
+		t.Fatalf("Unmarshal sent message: %v", err)
+	}
+	if msg.ID != "srv-1" || msg.Method != "" {
+		t.Fatalf("msg = %#v", msg)
+	}
+}
+
+func TestClientSteerTurnSendsThreadIdAndExpectedTurnId(t *testing.T) {
+	t.Parallel()
+
+	transport := &stubTransport{
+		recvCh: make(chan recvResult, 1),
+	}
+	client := newTestClient(transport)
+	defer client.Close()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		transport.recvCh <- recvResult{payload: mustJSON(t, rpcMessage{
+			ID:     "1",
+			Result: mustJSON(t, map[string]any{"turnId": "turn-2"}),
+		})}
+	}()
+
+	_, err := client.SteerTurn(context.Background(), TurnSteerRequest{
+		ThreadID:       "thread-1",
+		ExpectedTurnID: "turn-1",
+		Input:          []InputItem{{Type: "text", Text: "continue"}},
+	})
+	if err != nil {
+		t.Fatalf("SteerTurn returned error: %v", err)
+	}
+	if len(transport.sent) != 1 {
+		t.Fatalf("len(sent) = %d, want 1", len(transport.sent))
+	}
+
+	var msg rpcMessage
+	if err := json.Unmarshal(transport.sent[0], &msg); err != nil {
+		t.Fatalf("Unmarshal sent message: %v", err)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(mustJSON(t, msg.Params), &params); err != nil {
+		t.Fatalf("Unmarshal params: %v", err)
+	}
+	if params["threadId"] != "thread-1" {
+		t.Fatalf("threadId = %#v, want thread-1", params["threadId"])
+	}
+	if params["expectedTurnId"] != "turn-1" {
+		t.Fatalf("expectedTurnId = %#v, want turn-1", params["expectedTurnId"])
+	}
+	if _, ok := params["turnId"]; ok {
+		t.Fatalf("params unexpectedly included turnId: %#v", params)
+	}
+}
+
 type stubTransport struct {
 	recvCh  chan recvResult
 	closeMu sync.Mutex
 	closed  bool
+	sent    [][]byte
 }
 
 type recvResult struct {
@@ -419,7 +521,8 @@ type recvResult struct {
 	err     error
 }
 
-func (s *stubTransport) Send(context.Context, []byte) error {
+func (s *stubTransport) Send(_ context.Context, payload []byte) error {
+	s.sent = append(s.sent, append([]byte(nil), payload...))
 	return nil
 }
 

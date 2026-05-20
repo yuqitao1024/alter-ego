@@ -10,8 +10,10 @@ type RemoteRunner interface {
 	StartInteractiveSession(ctx context.Context, req StartRequest) (RemoteSession, error)
 	CaptureOutput(ctx context.Context, session RemoteSession) (OutputWindow, error)
 	SendInteractiveInput(ctx context.Context, session RemoteSession, input string) (RemoteSession, error)
+	RespondToServerRequest(ctx context.Context, session RemoteSession, req TaskServerRequest, response string) error
 	HasSession(ctx context.Context, session RemoteSession) (bool, error)
 	StopSession(ctx context.Context, session RemoteSession) error
+	Events() <-chan RuntimeEvent
 }
 
 type StartRequest struct {
@@ -43,6 +45,13 @@ type OutputWindow struct {
 
 type SessionState struct {
 	ThreadStatus   string
+}
+
+type RuntimeEvent struct {
+	MachineID         string
+	ThreadID          string
+	ServerRequest     *TaskServerRequest
+	ResolvedRequestID string
 }
 
 func (s SessionState) CodexActive() bool {

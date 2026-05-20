@@ -2,9 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
 )
@@ -13,6 +15,7 @@ type codexRuntime interface {
 	StartTaskSession(ctx context.Context, machine codexappserver.MachineRuntimeConfig, req codexappserver.StartTaskSessionRequest) (string, string, error)
 	WatchTaskThread(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID string) (*codexappserver.ThreadWatcher, error)
 	SendTaskInput(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID, input string) (string, error)
+	RespondToServerRequest(ctx context.Context, machine codexappserver.MachineRuntimeConfig, requestID string, result any) error
 	InterruptTask(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID string) error
 	Snapshot(machineID, threadID string) (codexappserver.ThreadSnapshot, bool)
 }
@@ -21,6 +24,9 @@ type AppServerRunner struct {
 	transport       sshTransport
 	manager         codexRuntime
 	machineResolver func(machineID string) (MachineConfig, error)
+	events          chan RuntimeEvent
+	mu              sync.Mutex
+	bridgedThreads  map[string]struct{}
 }
 
 var ErrAppServerThreadMissing = errors.New("app-server thread missing")
@@ -30,6 +36,8 @@ func NewAppServerRunner(manager codexRuntime) *AppServerRunner {
 	return &AppServerRunner{
 		transport: shellSSHTransport{},
 		manager:   manager,
+		events:    make(chan RuntimeEvent, 64),
+		bridgedThreads: make(map[string]struct{}),
 		machineResolver: func(machineID string) (MachineConfig, error) {
 			return MachineConfig{}, fmt.Errorf("machine resolver is not configured for %q", machineID)
 		},
@@ -60,6 +68,9 @@ func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req Start
 
 	if _, err := r.manager.WatchTaskThread(ctx, machineRuntimeConfig(req.Machine), threadID); err != nil {
 		return RemoteSession{}, fmt.Errorf("watch app-server thread: %w", err)
+	}
+	if err := r.bridgeWatcher(ctx, req.Machine.ID, threadID); err != nil {
+		return RemoteSession{}, err
 	}
 
 	return RemoteSession{
@@ -103,10 +114,30 @@ func (r *AppServerRunner) SendInteractiveInput(ctx context.Context, session Remo
 	return session, nil
 }
 
+func (r *AppServerRunner) RespondToServerRequest(ctx context.Context, session RemoteSession, req TaskServerRequest, response string) error {
+	machine, err := r.machineResolver(session.MachineID)
+	if err != nil {
+		return err
+	}
+
+	payload := any(strings.TrimSpace(response))
+	if req.RequestType == ServerRequestTypeCommandApproval || req.RequestType == ServerRequestTypeFileApproval {
+		payload = mapApprovalResponse(response)
+	}
+	if err := r.manager.RespondToServerRequest(ctx, machineRuntimeConfig(machine), req.RequestID, payload); err != nil {
+		return fmt.Errorf("respond to server request: %w", err)
+	}
+	return nil
+}
+
 func (r *AppServerRunner) HasSession(ctx context.Context, session RemoteSession) (bool, error) {
 	_ = ctx
 	_, ok := r.manager.Snapshot(session.MachineID, session.ThreadID)
 	return ok, nil
+}
+
+func (r *AppServerRunner) Events() <-chan RuntimeEvent {
+	return r.events
 }
 
 func (r *AppServerRunner) StopSession(ctx context.Context, session RemoteSession) error {
@@ -137,6 +168,88 @@ func machineRuntimeConfig(machine MachineConfig) codexappserver.MachineRuntimeCo
 	return codexappserver.MachineRuntimeConfig{
 		MachineID:    machine.ID,
 		WebSocketURL: machine.AppServerWebSocketURL(),
+	}
+}
+
+func (r *AppServerRunner) bridgeWatcher(ctx context.Context, machineID, threadID string) error {
+	r.mu.Lock()
+	key := machineID + "/" + threadID
+	if _, ok := r.bridgedThreads[key]; ok {
+		r.mu.Unlock()
+		return nil
+	}
+	r.bridgedThreads[key] = struct{}{}
+	r.mu.Unlock()
+
+	machine, err := r.machineResolver(machineID)
+	if err != nil {
+		return err
+	}
+	watcher, err := r.manager.WatchTaskThread(ctx, machineRuntimeConfig(machine), threadID)
+	if err != nil {
+		return err
+	}
+	if watcher == nil {
+		return nil
+	}
+
+	go func() {
+		for event := range watcher.Events() {
+			r.events <- RuntimeEvent{
+				MachineID:         machineID,
+				ThreadID:          threadID,
+				ServerRequest:     convertServerRequest(event.ServerRequest),
+				ResolvedRequestID: event.ResolvedRequestID,
+			}
+		}
+	}()
+	return nil
+}
+
+func convertServerRequest(req *codexappserver.ServerRequest) *TaskServerRequest {
+	if req == nil {
+		return nil
+	}
+	payload := string(req.RawParams)
+	if payload == "" {
+		raw, _ := json.Marshal(req)
+		payload = string(raw)
+	}
+	return &TaskServerRequest{
+		RequestID:      req.RequestID,
+		ThreadID:       req.ThreadID,
+		TurnID:         req.TurnID,
+		RequestType:    mapServerRequestType(req.Method),
+		RequestPayload: payload,
+	}
+}
+
+func mapServerRequestType(method string) ServerRequestType {
+	switch method {
+	case "item/tool/requestUserInput":
+		return ServerRequestTypeUserInput
+	case "item/commandExecution/requestApproval":
+		return ServerRequestTypeCommandApproval
+	case "item/fileChange/requestApproval":
+		return ServerRequestTypeFileApproval
+	default:
+		return ServerRequestTypeUserInput
+	}
+}
+
+func mapApprovalResponse(response string) string {
+	normalized := strings.ToLower(strings.TrimSpace(response))
+	switch normalized {
+	case "", "continue", "approve", "approved", "accept", "yes", "y", "ok":
+		return "accept"
+	case "accept_for_session", "accept-session", "accept for session":
+		return "accept_for_session"
+	case "decline", "reject", "no", "n":
+		return "decline"
+	case "cancel":
+		return "cancel"
+	default:
+		return "accept"
 	}
 }
 

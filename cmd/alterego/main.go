@@ -76,6 +76,8 @@ type taskSubsystem struct {
 	Manager          io.Closer
 }
 
+const taskTickInterval = 2 * time.Minute
+
 func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubsystem, error) {
 	_ = ctx
 
@@ -164,13 +166,18 @@ func (s *taskSubsystem) Run(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(taskTickInterval)
 	defer ticker.Stop()
+	eventCh := s.Runner.Events()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case event := <-eventCh:
+			if err := s.Service.HandleRuntimeEvent(ctx, event); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("task subsystem runtime event failed: %v", err)
+			}
 		case <-ticker.C:
 			if err := s.Service.TickOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				log.Printf("task subsystem tick failed: %v", err)

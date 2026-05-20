@@ -52,11 +52,10 @@ func TestStoreUpdatesTaskStatusAndSessionFields(t *testing.T) {
 	}
 
 	task.Status = StatusRunning
-	task.WorkflowStage = WorkflowStageImplementation
 	task.RemoteWorkdir = "/srv/repos/backend/.codex/task-002"
 	task.ThreadID = "thread-update-002"
 	task.ActiveTurnID = "turn-update-002"
-	task.LastDecisionAction = DecisionActionWait
+	task.LastDecisionAction = "wait"
 	task.UpdatedAt = task.UpdatedAt.Add(2 * time.Minute)
 	if err := store.UpdateTask(ctx, task); err != nil {
 		t.Fatalf("UpdateTask returned error: %v", err)
@@ -106,17 +105,16 @@ func TestStorePersistsThreadIdentity(t *testing.T) {
 
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
 	task := TaskRun{
-		TaskID:        "task-appserver",
-		TemplateID:    "simt-stl-dev",
-		RepositoryID:  "simt-stl",
-		MachineID:     "A5-82",
-		Status:        StatusRunning,
-		Phase:         TaskPhasePlanning,
-		WorkflowStage: WorkflowStagePlanWriting,
-		ThreadID:      "thread_123",
-		ActiveTurnID:  "turn_456",
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		TaskID:                "task-appserver",
+		TemplateID:            "simt-stl-dev",
+		RepositoryID:          "simt-stl",
+		MachineID:             "A5-82",
+		Status:                StatusRunning,
+		ThreadID:              "thread_123",
+		ActiveTurnID:          "turn_456",
+		CompletionCheckStatus: CompletionCheckStatusNotStarted,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 
 	if err := store.CreateTask(context.Background(), task); err != nil {
@@ -134,6 +132,95 @@ func TestStorePersistsThreadIdentity(t *testing.T) {
 	}
 }
 
+func TestStorePersistsSupervisorControlFields(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
+	task := TaskRun{
+		TaskID:                "task-supervisor",
+		TemplateID:            "feature_dev",
+		RepositoryID:          "repo_backend",
+		MachineID:             "machine_a",
+		Status:                StatusRecovering,
+		UserRequest:           "continue",
+		CreatedBy:             "ou_1",
+		ThreadID:              "thread-1",
+		ActiveTurnID:          "turn-1",
+		LastOutputSummary:     "running tests",
+		PendingRequestID:      "req-1",
+		CompletionCheckStatus: CompletionCheckStatusSent,
+		CompletionCheckSentAt: ptrTime(now.Add(time.Minute)),
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+
+	if err := store.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask returned error: %v", err)
+	}
+
+	got, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+
+	if got.Status != StatusRecovering {
+		t.Fatalf("Status = %q, want %q", got.Status, StatusRecovering)
+	}
+	if got.PendingRequestID != "req-1" {
+		t.Fatalf("PendingRequestID = %q, want %q", got.PendingRequestID, "req-1")
+	}
+	if got.CompletionCheckStatus != CompletionCheckStatusSent {
+		t.Fatalf("CompletionCheckStatus = %q, want %q", got.CompletionCheckStatus, CompletionCheckStatusSent)
+	}
+	if got.CompletionCheckSentAt == nil || !got.CompletionCheckSentAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("CompletionCheckSentAt = %#v, want %s", got.CompletionCheckSentAt, now.Add(time.Minute))
+	}
+}
+
+func TestStorePersistsTaskServerRequestLifecycle(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	defer store.Close()
+
+	req := TaskServerRequest{
+		RequestID:      "req-1",
+		TaskID:         "task-1",
+		ThreadID:       "thread-1",
+		TurnID:         "turn-1",
+		RequestType:    ServerRequestTypeUserInput,
+		RequestPayload: `{"prompt":"choose"}`,
+		Status:         ServerRequestStatusPending,
+		CreatedAt:      time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC),
+	}
+
+	if err := store.UpsertTaskServerRequest(context.Background(), req); err != nil {
+		t.Fatalf("UpsertTaskServerRequest returned error: %v", err)
+	}
+
+	if err := store.MarkTaskServerRequestReplying(context.Background(), "req-1", req.CreatedAt.Add(time.Minute)); err != nil {
+		t.Fatalf("MarkTaskServerRequestReplying returned error: %v", err)
+	}
+
+	if err := store.MarkTaskServerRequestReplied(context.Background(), "req-1", "continue", req.CreatedAt.Add(2*time.Minute)); err != nil {
+		t.Fatalf("MarkTaskServerRequestReplied returned error: %v", err)
+	}
+
+	got, err := store.GetTaskServerRequest(context.Background(), "req-1")
+	if err != nil {
+		t.Fatalf("GetTaskServerRequest returned error: %v", err)
+	}
+	if got.Status != ServerRequestStatusReplied {
+		t.Fatalf("Status = %q, want %q", got.Status, ServerRequestStatusReplied)
+	}
+	if got.ReplyContent != "continue" {
+		t.Fatalf("ReplyContent = %q, want %q", got.ReplyContent, "continue")
+	}
+}
+
 func TestStoreListsActiveTasksForScheduler(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -143,9 +230,8 @@ func TestStoreListsActiveTasksForScheduler(t *testing.T) {
 		sampleTaskRun("task-pending", StatusPending),
 		sampleTaskRun("task-running", StatusRunning),
 		sampleTaskRun("task-waiting", StatusWaitingUserInput),
-		sampleTaskRun("task-detached", StatusDetached),
-		sampleTaskRun("task-preparing", StatusPreparingWorkspace),
-		sampleTaskRun("task-starting", StatusStartingSession),
+		sampleTaskRun("task-recovering", StatusRecovering),
+		sampleTaskRun("task-starting", StatusStarting),
 		sampleTaskRun("task-completed", StatusCompleted),
 		sampleTaskRun("task-failed", StatusFailed),
 		sampleTaskRun("task-stopped", StatusStopped),
@@ -166,7 +252,7 @@ func TestStoreListsActiveTasksForScheduler(t *testing.T) {
 		gotByID[task.TaskID] = task
 	}
 
-	wantActiveIDs := []string{"task-pending", "task-running", "task-waiting", "task-detached", "task-preparing", "task-starting"}
+	wantActiveIDs := []string{"task-pending", "task-running", "task-waiting", "task-recovering", "task-starting"}
 	if len(gotByID) != len(wantActiveIDs) {
 		t.Fatalf("len(ListActiveTasks) = %d, want %d", len(gotByID), len(wantActiveIDs))
 	}
@@ -261,23 +347,26 @@ func openTestStore(t *testing.T) *Store {
 	return store
 }
 
+func ptrTime(value time.Time) *time.Time {
+	return &value
+}
+
 func sampleTaskRun(taskID string, status TaskStatus) TaskRun {
 	now := time.Date(2026, 5, 11, 9, 30, 0, 0, time.UTC)
 	return TaskRun{
-		TaskID:               taskID,
-		TemplateID:           "feature_dev",
-		RepositoryID:         "repo_backend",
-		MachineID:            "machine_a",
-		Status:               status,
-		Phase:                TaskPhasePlanning,
-		WorkflowStage:        WorkflowStageRequirementDiscussion,
-		UserRequest:          "Implement persisted store",
-		CreatedBy:            "user_123",
-		RemoteWorkdir:        "",
-		LastInput:            "Continue with Task 2",
-		LastOutputSummary:    "Store not started yet",
-		CreatedAt:            now,
-		UpdatedAt:            now,
+		TaskID:                taskID,
+		TemplateID:            "feature_dev",
+		RepositoryID:          "repo_backend",
+		MachineID:             "machine_a",
+		Status:                status,
+		UserRequest:           "Implement persisted store",
+		CreatedBy:             "user_123",
+		RemoteWorkdir:         "",
+		LastInput:             "Continue with Task 2",
+		LastOutputSummary:     "Store not started yet",
+		CompletionCheckStatus: CompletionCheckStatusNotStarted,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 }
 
@@ -298,12 +387,6 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	}
 	if got.Status != want.Status {
 		t.Fatalf("Status = %q, want %q", got.Status, want.Status)
-	}
-	if got.Phase != want.Phase {
-		t.Fatalf("Phase = %q, want %q", got.Phase, want.Phase)
-	}
-	if got.WorkflowStage != want.WorkflowStage {
-		t.Fatalf("WorkflowStage = %q, want %q", got.WorkflowStage, want.WorkflowStage)
 	}
 	if got.RemoteWorkdir != want.RemoteWorkdir {
 		t.Fatalf("RemoteWorkdir = %q, want %q", got.RemoteWorkdir, want.RemoteWorkdir)
@@ -329,10 +412,33 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	if got.LastDecisionAction != want.LastDecisionAction {
 		t.Fatalf("LastDecisionAction = %q, want %q", got.LastDecisionAction, want.LastDecisionAction)
 	}
+	if got.PendingRequestID != want.PendingRequestID {
+		t.Fatalf("PendingRequestID = %q, want %q", got.PendingRequestID, want.PendingRequestID)
+	}
+	if got.CompletionCheckStatus != want.CompletionCheckStatus {
+		t.Fatalf("CompletionCheckStatus = %q, want %q", got.CompletionCheckStatus, want.CompletionCheckStatus)
+	}
+	if !timesEqual(got.CompletionCheckSentAt, want.CompletionCheckSentAt) {
+		t.Fatalf("CompletionCheckSentAt = %#v, want %#v", got.CompletionCheckSentAt, want.CompletionCheckSentAt)
+	}
+	if !timesEqual(got.CompletionCheckDoneAt, want.CompletionCheckDoneAt) {
+		t.Fatalf("CompletionCheckDoneAt = %#v, want %#v", got.CompletionCheckDoneAt, want.CompletionCheckDoneAt)
+	}
 	if !got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("CreatedAt = %s, want %s", got.CreatedAt, want.CreatedAt)
 	}
 	if !got.UpdatedAt.Equal(want.UpdatedAt) {
 		t.Fatalf("UpdatedAt = %s, want %s", got.UpdatedAt, want.UpdatedAt)
+	}
+}
+
+func timesEqual(left, right *time.Time) bool {
+	switch {
+	case left == nil && right == nil:
+		return true
+	case left == nil || right == nil:
+		return false
+	default:
+		return left.Equal(*right)
 	}
 }

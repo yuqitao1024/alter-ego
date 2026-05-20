@@ -87,6 +87,7 @@ func TestManagerRedialsMachineAfterNotificationStreamCloses(t *testing.T) {
 
 type fakeClient struct {
 	notifications chan rpcMessage
+	resumeThreadIDs []string
 }
 
 func newFakeClient() *fakeClient {
@@ -95,7 +96,11 @@ func newFakeClient() *fakeClient {
 
 func (f *fakeClient) Close() error                     { return nil }
 func (f *fakeClient) Notifications() <-chan rpcMessage { return f.notifications }
-func (f *fakeClient) ResumeThread(context.Context, string) error { return nil }
+func (f *fakeClient) ResumeThread(_ context.Context, threadID string) error {
+	f.resumeThreadIDs = append(f.resumeThreadIDs, threadID)
+	return nil
+}
+func (f *fakeClient) RespondToServerRequest(context.Context, string, any) error { return nil }
 func (f *fakeClient) StartThread(context.Context, ThreadStartRequest) (string, error) {
 	return "thread-1", nil
 }
