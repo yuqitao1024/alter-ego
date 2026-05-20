@@ -165,6 +165,39 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 	}
 }
 
+func TestStartThreadAcceptsStructuredThreadStatus(t *testing.T) {
+	t.Parallel()
+
+	transport := &stubTransport{
+		recvCh: make(chan recvResult, 1),
+	}
+	client := newTestClient(transport)
+	defer client.Close()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		transport.recvCh <- recvResult{payload: mustJSON(t, rpcMessage{
+			ID: "1",
+			Result: mustJSON(t, map[string]any{
+				"thread": map[string]any{
+					"id": "thread-1",
+					"status": map[string]any{
+						"type": "idle",
+					},
+				},
+			}),
+		})}
+	}()
+
+	threadID, err := client.StartThread(context.Background(), ThreadStartRequest{Cwd: "/srv/task/repo"})
+	if err != nil {
+		t.Fatalf("StartThread returned error: %v", err)
+	}
+	if threadID != "thread-1" {
+		t.Fatalf("threadID = %q, want thread-1", threadID)
+	}
+}
+
 func TestNewClientSendsInitializedNotificationAfterInitialize(t *testing.T) {
 	t.Parallel()
 

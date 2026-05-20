@@ -70,13 +70,13 @@ type ThreadResumeRequest struct {
 }
 
 type Thread struct {
-	ID     string `json:"id"`
-	Status string `json:"status,omitempty"`
+	ID     string          `json:"id"`
+	Status json.RawMessage `json:"status,omitempty"`
 }
 
 type Turn struct {
-	ID     string `json:"id"`
-	Status string `json:"status,omitempty"`
+	ID     string          `json:"id"`
+	Status json.RawMessage `json:"status,omitempty"`
 }
 
 type ThreadItem struct {
