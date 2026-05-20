@@ -90,6 +90,10 @@ Machine configuration can also define a lightweight shell preamble that is injec
 id: machine_a
 host: build-a.example.com
 user: codex
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: codex
 shell_init:
   - source /opt/codex/env.sh
 ```
@@ -120,55 +124,38 @@ For each new task, Alter Ego will:
 4. clone the repository;
 5. checkout `default_branch`;
 6. run `post_clone_bootstrap`;
-7. start the remote app-server proxy;
+7. connect to the machine's long-lived Codex app-server websocket endpoint;
 8. create a task-scoped app-server thread;
 9. start `codex` inside that thread.
 
 Interactive task lifecycle:
 
 1. `pending`
-2. `preparing_workspace`
-3. `starting_session`
-4. `running`
-5. `waiting_user_input` when Codex needs clarification, scope confirmation, an implementation choice, or missing context
-6. `detached` when the local operator loses attachment but the remote app-server thread may still exist
-7. `completed` when the model arbitrator concludes the requested workflow is finished
-8. `failed` when startup, recovery, or remote execution cannot continue
-9. `stopped` when the operator explicitly stops the task
-
-Each task also has a long-lived phase:
-
-- `planning` for requirement discussion, spec writing, and plan writing
-- `executing` for development, testing, build, commit, push, and PR work
-
-Once a task enters `executing`, it cannot automatically return to `planning`. Re-entering planning must first go through `waiting_user_input` and explicit operator approval in Lark.
+2. `starting`
+3. `running`
+4. `waiting_user_input` when Codex issues an explicit app-server server request that needs user involvement
+5. `recovering` when Alter Ego loses contact with the remote app-server thread and is attempting recovery
+6. `completed` when Codex confirms the requested workflow is finished
+7. `failed` when startup, recovery, or remote execution cannot continue
+8. `stopped` when the operator explicitly stops the task
 
 Task state and operator audit data are stored in SQLite:
 
 - `tasks`
 - `task_events`
 - `task_questions`
+- `task_server_requests`
 
 Replies from `/task reply` are injected back into the live remote session rather than starting a new Codex run.
 
 Task decision flow:
 
-1. reconnect to the remote app-server proxy and fetch the current thread state;
-2. run deterministic responders for known structured handshakes;
-3. if a responder queued a deterministic follow-up action, execute that follow-up before any model arbitration;
-4. if the thread is still alive but Codex has dropped back to an inactive state, start a new turn;
-5. if Codex is clearly still working, do not call the model arbitrator;
-6. if the same app-server snapshot was arbitrated recently, do not call the model again until the cooldown expires;
-7. otherwise send the workflow, task context, and structured thread snapshot to the configured LLM;
-8. the LLM must return one of:
-   - `wait`
-   - `reply_to_codex`
-   - `ask_user`
-   - `complete_task`
-
-`wait` is not a persisted task state. It is only a one-tick decision outcome that leaves the task in `running` without sending any new input.
-
-Deterministic responders are reserved for prompts with a safe fixed answer, such as trust confirmation or login/usage escalation. `Create a plan?` is not auto-dismissed; that prompt is left to the normal decision flow instead of sending `Escape` or a synthetic continuation reply.
+1. subscribe to Codex app-server websocket events and keep the latest thread snapshot in memory;
+2. persist each explicit app-server server request and handle it exactly once;
+3. only reply to Codex when an explicit server request is pending;
+4. use the model to classify whether a pending request can be auto-handled or should be escalated to the user;
+5. keep the 2-minute polling loop only for progress reporting and completion-check logic, never for inventing new Codex input;
+6. send the one-time completion-check prompt after Codex signals completion, and never send it twice.
 
 Run locally:
 
@@ -183,7 +170,7 @@ Generic Linux packaging assets live in [packaging/README.md](/Users/yuqitao/aiag
 - the Linux `alterego` binary
 - `alteregod.service`
 - an empty environment template
-- example task configuration
+- example task configuration with valid app-server fields
 
 It intentionally excludes any real secrets or real deployment configuration.
 

@@ -46,6 +46,14 @@ The service expects:
 - SQLite state: `/var/lib/alterego/tasks.db`
 
 Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`; machine YAML now carries the app-server socket and bootstrap command list for each remote host.
+Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`; machine YAML must include the Codex app-server fields:
+
+- `app_server_listen_host`
+- `app_server_listen_port`
+- `app_server_service_name`
+- `app_server_install_user`
+
+The packaged example configs already include these fields.
 
 ## Notes
 

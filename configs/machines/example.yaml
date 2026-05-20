@@ -3,5 +3,9 @@ display_name: Primary Build Machine
 host: build-a.example.com
 port: 22
 user: codex
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: codex
 shell_init:
   - source /opt/codex/env.sh
