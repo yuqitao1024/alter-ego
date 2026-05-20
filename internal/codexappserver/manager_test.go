@@ -2,10 +2,15 @@ package codexappserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestManagerReusesOneConnectionPerMachine(t *testing.T) {
@@ -82,6 +87,63 @@ func TestManagerRedialsMachineAfterNotificationStreamCloses(t *testing.T) {
 	}
 	if snapshot := watcher.Snapshot(); snapshot.SubscriptionState != SubscriptionStateConnecting {
 		t.Fatalf("snapshot.SubscriptionState = %q, want %q", snapshot.SubscriptionState, SubscriptionStateConnecting)
+	}
+}
+
+func TestManagerDefaultDialClientIncludesVersionInInitialize(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("Upgrade() error: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		_, payload, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("ReadMessage() error: %v", err)
+			return
+		}
+
+		var request rpcMessage
+		if err := json.Unmarshal(payload, &request); err != nil {
+			t.Errorf("Unmarshal() error: %v", err)
+			return
+		}
+		var params struct {
+			ClientInfo ClientInfo `json:"clientInfo"`
+		}
+		if err := json.Unmarshal(mustJSON(t, request.Params), &params); err != nil {
+			t.Fatalf("Unmarshal params: %v", err)
+		}
+		if params.ClientInfo.Name != "alterego" {
+			t.Fatalf("clientInfo.name = %q, want alterego", params.ClientInfo.Name)
+		}
+		if params.ClientInfo.Version == "" {
+			t.Fatal("clientInfo.version is empty")
+		}
+
+		if err := conn.WriteJSON(rpcMessage{ID: request.ID, Result: mustJSON(t, map[string]any{"userAgent": "alterego-test"})}); err != nil {
+			t.Errorf("WriteJSON initialize response: %v", err)
+			return
+		}
+
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	manager := NewManager(ManagerOptions{})
+	machine := MachineRuntimeConfig{MachineID: "machine_a", WebSocketURL: wsURLFromHTTP(server.URL)}
+
+	watcher, err := manager.WatchTaskThread(context.Background(), machine, "thread-1")
+	if err != nil {
+		t.Fatalf("WatchTaskThread returned error: %v", err)
+	}
+	if watcher == nil {
+		t.Fatal("watcher is nil")
 	}
 }
 

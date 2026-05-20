@@ -54,7 +54,8 @@ func NewManager(opts ManagerOptions) *Manager {
 				URL:         machine.WebSocketURL,
 				BearerToken: machine.BearerToken,
 				ClientInfo: ClientInfo{
-					Name: "alterego",
+					Name:    "alterego",
+					Version: "1",
 				},
 			})
 		}

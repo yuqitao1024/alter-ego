@@ -224,6 +224,71 @@ func TestNewClientSendsInitializedNotificationAfterInitialize(t *testing.T) {
 	}
 }
 
+func TestNewClientIncludesClientInfoVersionInInitialize(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("Upgrade() error: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		_, payload, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("ReadMessage() error: %v", err)
+			return
+		}
+
+		var request rpcMessage
+		if err := json.Unmarshal(payload, &request); err != nil {
+			t.Errorf("Unmarshal() error: %v", err)
+			return
+		}
+		if request.Method != "initialize" {
+			t.Fatalf("request.Method = %q, want initialize", request.Method)
+		}
+
+		var params struct {
+			ClientInfo ClientInfo `json:"clientInfo"`
+		}
+		if err := json.Unmarshal(mustJSON(t, request.Params), &params); err != nil {
+			t.Fatalf("Unmarshal params: %v", err)
+		}
+		if params.ClientInfo.Version == "" {
+			t.Fatal("clientInfo.version is empty")
+		}
+
+		if err := conn.WriteJSON(rpcMessage{
+			ID:     request.ID,
+			Result: mustJSON(t, map[string]any{"userAgent": "alterego-test"}),
+		}); err != nil {
+			t.Errorf("WriteJSON() error: %v", err)
+			return
+		}
+
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	client, err := NewClient(ctx, ClientOptions{
+		URL: wsURLFromHTTP(server.URL),
+		ClientInfo: ClientInfo{
+			Name:    "alterego",
+			Version: "test-version",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	defer client.Close()
+}
+
 func TestNewClientReturnsInitializeError(t *testing.T) {
 	t.Parallel()
 
