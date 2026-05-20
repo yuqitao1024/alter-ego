@@ -17,7 +17,8 @@ func TestBuildSystemdUnitIncludesDangerousBypassAndWSListen(t *testing.T) {
 	})
 
 	for _, part := range []string{
-		"ExecStart=/usr/bin/env codex app-server --listen ws://0.0.0.0:4317 --dangerously-bypass-approvals-and-sandbox",
+		"ExecStart=/bin/sh -lc",
+		"codex app-server --listen ws://0.0.0.0:4317 --dangerously-bypass-approvals-and-sandbox",
 		"User=coder",
 		"Restart=always",
 	} {
@@ -52,6 +53,7 @@ func TestInstallerRunsSystemctlSequence(t *testing.T) {
 		t.Fatalf("ssh.commands = %d, want 1", len(ssh.commands))
 	}
 	for _, part := range []string{
+		"source ~/.zshrc",
 		"command -v codex",
 		"systemctl daemon-reload",
 		"systemctl enable codex-app-server",

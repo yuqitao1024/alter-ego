@@ -98,7 +98,7 @@ shell_init:
   - source /opt/codex/env.sh
 ```
 
-Use `shell_init` only for idempotent environment setup such as exporting `CODEX_HOME`, toolchain paths, or proxy variables. Keep repository-specific preparation in `pre_clone_bootstrap` and `post_clone_bootstrap`.
+Use `shell_init` only for idempotent environment setup such as exporting `CODEX_HOME`, toolchain paths, or proxy variables. It is injected into SSH commands and the app-server startup command. Keep repository-specific preparation in `pre_clone_bootstrap` and `post_clone_bootstrap`.
 
 Repository configuration now uses task-scoped checkout settings instead of a fixed repository path. A repository entry should define:
 

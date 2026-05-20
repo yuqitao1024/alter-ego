@@ -75,6 +75,11 @@ func buildInstallCommand(cfg MachineInstallConfig) string {
 }
 
 func buildSystemdUnit(cfg MachineInstallConfig) string {
+	startCommand := fmt.Sprintf("exec /usr/bin/env codex app-server --listen ws://%s:%d --dangerously-bypass-approvals-and-sandbox", cfg.ListenHost, cfg.ListenPort)
+	if prefix := shellInitPrefix(cfg.ShellInit); prefix != "" {
+		startCommand = prefix + " && " + startCommand
+	}
+
 	return strings.TrimSpace(fmt.Sprintf(`
 [Unit]
 Description=Codex App Server
@@ -84,13 +89,13 @@ After=network.target
 Type=simple
 User=%s
 WorkingDirectory=/home/%s
-ExecStart=/usr/bin/env codex app-server --listen ws://%s:%d --dangerously-bypass-approvals-and-sandbox
+ExecStart=/bin/sh -lc %s
 Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
-`, cfg.RunUser, cfg.RunUser, cfg.ListenHost, cfg.ListenPort))
+`, cfg.RunUser, cfg.RunUser, shellSingleQuote(startCommand)))
 }
 
 func shellInitPrefix(commands []string) string {
