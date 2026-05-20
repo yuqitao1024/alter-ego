@@ -22,6 +22,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: root
+app_server_ws_auth_token: test-token
 `)
 	writeConfigFile(t, root, "configs/repositories/simt-stl.yaml", `
 id: simt-stl
@@ -63,6 +64,9 @@ workflow_path: docs/workflows/simt-stl-dev.md
 	if got.AppServerInstallUser != "root" {
 		t.Fatalf("AppServerInstallUser = %q", got.AppServerInstallUser)
 	}
+	if got.AppServerWSAuthToken != "test-token" {
+		t.Fatalf("AppServerWSAuthToken = %q", got.AppServerWSAuthToken)
+	}
 }
 
 func TestLoadRegistryRequiresMachineAppServerWebSocketFields(t *testing.T) {
@@ -98,6 +102,7 @@ workflow_path: docs/workflows/feature_dev.md
 		"app_server_listen_port",
 		"app_server_service_name",
 		"app_server_install_user",
+		"app_server_ws_auth_token",
 	} {
 		if !strings.Contains(err.Error(), part) {
 			t.Fatalf("LoadRegistry error = %q, want substring %q", err, part)
@@ -116,6 +121,7 @@ func TestMachineConfigAppServerWebSocketURL(t *testing.T) {
 		AppServerListenPort:  4317,
 		AppServerServiceName: "codex-app-server",
 		AppServerInstallUser: "coder",
+		AppServerWSAuthToken: "test-token",
 	}
 
 	if got, want := machine.AppServerWebSocketURL(), "ws://machine-a.example.com:4317"; got != want {
@@ -134,6 +140,7 @@ func TestMachineConfigValidateDoesNotPopulateLegacySocketField(t *testing.T) {
 		AppServerListenPort:  4317,
 		AppServerServiceName: "codex-app-server",
 		AppServerInstallUser: "coder",
+		AppServerWSAuthToken: "test-token",
 	}
 
 	if err := machine.Validate(); err != nil {
@@ -159,6 +166,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: dev
+app_server_ws_auth_token: test-token
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -273,6 +281,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: dev
+app_server_ws_auth_token: test-token
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -313,6 +322,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: dev
+app_server_ws_auth_token: test-token
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -355,6 +365,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: dev
+app_server_ws_auth_token: test-token
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -394,6 +405,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: dev
+app_server_ws_auth_token: test-token
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -475,6 +487,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: dev
+app_server_ws_auth_token: test-token
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend
@@ -513,6 +526,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: dev
+app_server_ws_auth_token: test-token
 `)
 	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
 id: repo_backend

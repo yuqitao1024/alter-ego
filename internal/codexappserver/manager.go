@@ -10,6 +10,7 @@ import (
 type MachineRuntimeConfig struct {
 	MachineID    string
 	WebSocketURL string
+	BearerToken  string
 }
 
 type StartTaskSessionRequest struct {
@@ -50,7 +51,8 @@ func NewManager(opts ManagerOptions) *Manager {
 	if dialClient == nil {
 		dialClient = func(ctx context.Context, machine MachineRuntimeConfig) (ClientAPI, error) {
 			return NewClient(ctx, ClientOptions{
-				URL: machine.WebSocketURL,
+				URL:         machine.WebSocketURL,
+				BearerToken: machine.BearerToken,
 				ClientInfo: ClientInfo{
 					Name: "alterego",
 				},

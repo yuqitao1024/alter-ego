@@ -39,7 +39,7 @@ func TestWebSocketTransportSendRecv(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	transport, err := DialWebSocket(ctx, wsURLFromHTTP(server.URL))
+	transport, err := DialWebSocket(ctx, wsURLFromHTTP(server.URL), "")
 	if err != nil {
 		t.Fatalf("DialWebSocket returned error: %v", err)
 	}
@@ -48,6 +48,46 @@ func TestWebSocketTransportSendRecv(t *testing.T) {
 	if err := transport.Send(ctx, []byte(`{"method":"ping"}`)); err != nil {
 		t.Fatalf("Send returned error: %v", err)
 	}
+	got, err := transport.Recv(ctx)
+	if err != nil {
+		t.Fatalf("Recv returned error: %v", err)
+	}
+	if string(got) != `{"method":"ping"}` {
+		t.Fatalf("Recv payload = %s", string(got))
+	}
+}
+
+func TestDialWebSocketIncludesBearerAuthorizationHeader(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("Authorization"), "Bearer test-token"; got != want {
+			t.Fatalf("Authorization header = %q, want %q", got, want)
+		}
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("Upgrade() error: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"method":"ping"}`)); err != nil {
+			t.Errorf("WriteMessage() error: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	transport, err := DialWebSocket(ctx, wsURLFromHTTP(server.URL), "test-token")
+	if err != nil {
+		t.Fatalf("DialWebSocket returned error: %v", err)
+	}
+	defer transport.Close()
+
 	got, err := transport.Recv(ctx)
 	if err != nil {
 		t.Fatalf("Recv returned error: %v", err)
@@ -142,7 +182,7 @@ func TestWebSocketTransportRecvReturnsFrameBeforeCloseErrorFromReadLoop(t *testi
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	transport, err := DialWebSocket(ctx, wsURLFromHTTP(server.URL))
+	transport, err := DialWebSocket(ctx, wsURLFromHTTP(server.URL), "")
 	if err != nil {
 		t.Fatalf("DialWebSocket returned error: %v", err)
 	}

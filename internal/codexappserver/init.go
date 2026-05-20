@@ -16,6 +16,7 @@ type MachineInstallConfig struct {
 	ListenPort  int
 	ServiceName string
 	ShellInit   []string
+	WSToken     string
 }
 
 type MachineConfigResolver func(machineID string) (MachineInstallConfig, error)
@@ -62,6 +63,9 @@ func buildInstallCommand(cfg MachineInstallConfig) string {
 	steps = append(steps,
 		"set -e",
 		"command -v codex >/dev/null 2>&1",
+		"sudo install -d -m 755 /etc/codex-app-server",
+		"sudo install -m 600 /dev/null /etc/codex-app-server/ws.token",
+		fmt.Sprintf("printf '%%s\\n' %s | sudo tee /etc/codex-app-server/ws.token >/dev/null", shellSingleQuote(cfg.WSToken)),
 		fmt.Sprintf("sudo tee %s >/dev/null <<'EOF'\n%s\nEOF", unitPath, buildSystemdUnit(cfg)),
 		"sudo systemctl daemon-reload",
 		fmt.Sprintf("sudo systemctl enable %s", cfg.ServiceName),
@@ -74,7 +78,7 @@ func buildInstallCommand(cfg MachineInstallConfig) string {
 }
 
 func buildSystemdUnit(cfg MachineInstallConfig) string {
-	startCommand := fmt.Sprintf("exec /usr/bin/env codex --dangerously-bypass-approvals-and-sandbox app-server --listen ws://%s:%d", cfg.ListenHost, cfg.ListenPort)
+	startCommand := fmt.Sprintf("exec /usr/bin/env codex --dangerously-bypass-approvals-and-sandbox app-server --listen ws://%s:%d --ws-auth capability-token --ws-token-file /etc/codex-app-server/ws.token", cfg.ListenHost, cfg.ListenPort)
 	if prefix := shellInitPrefix(cfg.ShellInit); prefix != "" {
 		startCommand = prefix + " && " + startCommand
 	}

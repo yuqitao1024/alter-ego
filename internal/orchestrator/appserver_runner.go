@@ -168,6 +168,7 @@ func machineRuntimeConfig(machine MachineConfig) codexappserver.MachineRuntimeCo
 	return codexappserver.MachineRuntimeConfig{
 		MachineID:    machine.ID,
 		WebSocketURL: machine.AppServerWebSocketURL(),
+		BearerToken:  machine.AppServerWSAuthToken,
 	}
 }
 

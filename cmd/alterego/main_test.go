@@ -116,6 +116,7 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: coder
+app_server_ws_auth_token: test-token
 `)
 	writeFile(t, filepath.Join(root, "configs/repositories/repo_backend.yaml"), `id: repo_backend
 display_name: Backend Repo

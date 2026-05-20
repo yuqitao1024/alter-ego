@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -31,8 +32,13 @@ type recvEvent struct {
 	err     error
 }
 
-func DialWebSocket(ctx context.Context, rawURL string) (*WebSocketTransport, error) {
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, rawURL, nil)
+func DialWebSocket(ctx context.Context, rawURL string, bearerToken string) (*WebSocketTransport, error) {
+	headers := http.Header{}
+	if bearerToken != "" {
+		headers.Set("Authorization", "Bearer "+bearerToken)
+	}
+
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, rawURL, headers)
 	if err != nil {
 		return nil, fmt.Errorf("dial websocket: %w", err)
 	}

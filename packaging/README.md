@@ -52,6 +52,7 @@ Remote task execution is configured from the unpacked repository tree under `/op
 - `app_server_listen_port`
 - `app_server_service_name`
 - `app_server_install_user`
+- `app_server_ws_auth_token`
 
 The packaged example configs already include these fields.
 

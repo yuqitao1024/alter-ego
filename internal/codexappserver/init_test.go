@@ -19,6 +19,8 @@ func TestBuildSystemdUnitIncludesDangerousBypassAndWSListen(t *testing.T) {
 	for _, part := range []string{
 		"ExecStart=/bin/bash -lc",
 		"codex --dangerously-bypass-approvals-and-sandbox app-server --listen ws://0.0.0.0:4317",
+		"--ws-auth capability-token",
+		"--ws-token-file /etc/codex-app-server/ws.token",
 		"User=coder",
 		"WorkingDirectory=/home/coder",
 		"Restart=always",
@@ -62,6 +64,7 @@ func TestInstallerRunsSystemctlSequence(t *testing.T) {
 			ListenPort:  4317,
 			ServiceName: "codex-app-server",
 			ShellInit:   []string{"source ~/.zshrc"},
+			WSToken:     "test-token",
 		}, nil
 	})
 
@@ -75,6 +78,9 @@ func TestInstallerRunsSystemctlSequence(t *testing.T) {
 		"source ~/.zshrc",
 		"set -e",
 		"command -v codex",
+		"install -d -m 755 /etc/codex-app-server",
+		"install -m 600 /dev/null /etc/codex-app-server/ws.token",
+		"printf '%s\\n' 'test-token' | sudo tee /etc/codex-app-server/ws.token >/dev/null",
 		"systemctl daemon-reload",
 		"systemctl enable codex-app-server",
 		"systemctl restart codex-app-server",
@@ -95,6 +101,7 @@ func TestBuildInstallCommandKeepsHeredocTerminatorSeparate(t *testing.T) {
 		ListenHost:  "192.168.1.10",
 		ListenPort:  4317,
 		ServiceName: "codex-app-server",
+		WSToken:     "test-token",
 	})
 
 	if !strings.Contains(command, "\nEOF\nsudo systemctl daemon-reload") {

@@ -31,7 +31,7 @@ type callResult struct {
 }
 
 func NewClient(ctx context.Context, opts ClientOptions) (*Client, error) {
-	transport, err := DialWebSocket(ctx, opts.URL)
+	transport, err := DialWebSocket(ctx, opts.URL, opts.BearerToken)
 	if err != nil {
 		return nil, err
 	}

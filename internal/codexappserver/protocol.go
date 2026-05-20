@@ -23,8 +23,9 @@ type ClientInfo struct {
 }
 
 type ClientOptions struct {
-	URL        string
-	ClientInfo ClientInfo
+	URL         string
+	BearerToken string
+	ClientInfo  ClientInfo
 }
 
 type InitializeRequest struct {

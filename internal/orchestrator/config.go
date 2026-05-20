@@ -22,6 +22,7 @@ type MachineConfig struct {
 	AppServerListenPort  int      `yaml:"app_server_listen_port"`
 	AppServerServiceName string   `yaml:"app_server_service_name"`
 	AppServerInstallUser string   `yaml:"app_server_install_user"`
+	AppServerWSAuthToken string   `yaml:"app_server_ws_auth_token"`
 	AppServerSocket      string   `yaml:"-"`
 	AppServerBootstrap   []string `yaml:"-"`
 }
@@ -129,6 +130,7 @@ func (m *MachineConfig) Validate() error {
 		{name: "app_server_listen_host", value: m.AppServerListenHost},
 		{name: "app_server_service_name", value: m.AppServerServiceName},
 		{name: "app_server_install_user", value: m.AppServerInstallUser},
+		{name: "app_server_ws_auth_token", value: m.AppServerWSAuthToken},
 	} {
 		if strings.TrimSpace(field.value) == "" {
 			missing = append(missing, field.name)

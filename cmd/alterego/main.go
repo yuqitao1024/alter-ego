@@ -111,6 +111,7 @@ func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubs
 			ListenPort:  machine.AppServerListenPort,
 			ServiceName: machine.AppServerServiceName,
 			ShellInit:   append([]string(nil), machine.ShellInit...),
+			WSToken:     machine.AppServerWSAuthToken,
 		}, nil
 	})
 

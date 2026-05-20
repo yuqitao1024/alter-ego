@@ -94,11 +94,14 @@ app_server_listen_host: 0.0.0.0
 app_server_listen_port: 4317
 app_server_service_name: codex-app-server
 app_server_install_user: codex
+app_server_ws_auth_token: change-me-to-a-long-random-token
 shell_init:
   - source /opt/codex/env.sh
 ```
 
 Use `shell_init` only for idempotent environment setup such as exporting `CODEX_HOME`, toolchain paths, or proxy variables. It is injected into SSH commands and the app-server startup command. Keep repository-specific preparation in `pre_clone_bootstrap` and `post_clone_bootstrap`.
+
+Non-loopback Codex app-server websocket listeners also require websocket auth. Set a per-machine `app_server_ws_auth_token`; Alter Ego will install it onto the remote machine as a capability token file and will connect with `Authorization: Bearer <token>`.
 
 Repository configuration now uses task-scoped checkout settings instead of a fixed repository path. A repository entry should define:
 
