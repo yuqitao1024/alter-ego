@@ -10,6 +10,7 @@ type Config struct {
 	AppID          string
 	AppSecret      string
 	Domain         string
+	CallbackAddr   string
 	AllowUsers     map[string]bool
 	AllowGroups    map[string]bool
 	RequireMention bool
@@ -20,6 +21,7 @@ func ConfigFromEnv() (Config, error) {
 		"ALTER_EGO_LARK_APP_ID":          os.Getenv("ALTER_EGO_LARK_APP_ID"),
 		"ALTER_EGO_LARK_APP_SECRET":      os.Getenv("ALTER_EGO_LARK_APP_SECRET"),
 		"ALTER_EGO_LARK_DOMAIN":          os.Getenv("ALTER_EGO_LARK_DOMAIN"),
+		"ALTER_EGO_LARK_CALLBACK_ADDR":   os.Getenv("ALTER_EGO_LARK_CALLBACK_ADDR"),
 		"ALTER_EGO_LARK_ALLOW_USERS":     os.Getenv("ALTER_EGO_LARK_ALLOW_USERS"),
 		"ALTER_EGO_LARK_ALLOW_GROUPS":    os.Getenv("ALTER_EGO_LARK_ALLOW_GROUPS"),
 		"ALTER_EGO_LARK_REQUIRE_MENTION": os.Getenv("ALTER_EGO_LARK_REQUIRE_MENTION"),
@@ -31,6 +33,7 @@ func ConfigFromMap(values map[string]string) (Config, error) {
 		AppID:          strings.TrimSpace(values["ALTER_EGO_LARK_APP_ID"]),
 		AppSecret:      strings.TrimSpace(values["ALTER_EGO_LARK_APP_SECRET"]),
 		Domain:         strings.TrimSpace(values["ALTER_EGO_LARK_DOMAIN"]),
+		CallbackAddr:   strings.TrimSpace(values["ALTER_EGO_LARK_CALLBACK_ADDR"]),
 		AllowUsers:     parseCSVSet(values["ALTER_EGO_LARK_ALLOW_USERS"]),
 		AllowGroups:    parseCSVSet(values["ALTER_EGO_LARK_ALLOW_GROUPS"]),
 		RequireMention: true,

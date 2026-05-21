@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -60,7 +61,7 @@ func (s *Service) StartTask(ctx context.Context, templateID, createdBy, userRequ
 
 	now := s.now()
 	task := TaskRun{
-		TaskID:                fmt.Sprintf("task-%d", now.UnixNano()),
+		TaskID:                newTaskID(now),
 		TemplateID:            template.ID,
 		RepositoryID:          template.Repository.ID,
 		MachineID:             machineID,
@@ -82,6 +83,10 @@ func (s *Service) StartTask(ctx context.Context, templateID, createdBy, userRequ
 		return TaskRun{}, err
 	}
 	return s.store.GetTask(ctx, task.TaskID)
+}
+
+func newTaskID(now time.Time) string {
+	return "task-" + strconv.FormatInt(now.UnixMilli(), 36)
 }
 
 func (s *Service) TickOnce(ctx context.Context) error {

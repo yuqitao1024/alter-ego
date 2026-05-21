@@ -20,6 +20,7 @@ Optional environment variables:
 export ALTER_EGO_LARK_DOMAIN="lark"
 export ALTER_EGO_LARK_ALLOW_GROUPS="oc_xxx"
 export ALTER_EGO_LARK_REQUIRE_MENTION="true"
+export ALTER_EGO_LARK_CALLBACK_ADDR=":8080"
 ```
 
 To enable real chat replies instead of the stub handler, configure:
@@ -49,9 +50,12 @@ Supported commands:
 - `/reset`
 - `/task start <template> <requirement text>`
 - `/task list`
+- `/task list -a`
 - `/task status <task-id>`
 - `/task reply <task-id> <decision text>`
 - `/task stop <task-id>`
+- `/task delete <task-id>`
+- `/task delete -a`
 
 ## Remote Codex Tasks
 
@@ -141,6 +145,22 @@ Interactive task lifecycle:
 6. `completed` when Codex confirms the requested workflow is finished
 7. `failed` when startup, recovery, or remote execution cannot continue
 8. `stopped` when the operator explicitly stops the task
+
+Task list output now uses Lark interactive cards when sent from the Lark channel. Each task card includes action buttons:
+
+- `status` to fetch the current task summary
+- `stop` for `running` or `waiting_user_input`
+- `delete` for terminal tasks, with a confirm dialog
+
+To receive card action callbacks, expose a local HTTP listener and point the Lark app's card callback URL at `http://<host>:<port>/lark/card/callback`.
+
+Set:
+
+```sh
+export ALTER_EGO_LARK_CALLBACK_ADDR=":8080"
+```
+
+and configure the Lark app's card callback URL to the externally reachable address that maps to that listener.
 
 Task state and operator audit data are stored in SQLite:
 

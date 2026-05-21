@@ -13,6 +13,7 @@ import (
 
 type MessageCreator interface {
 	CreateTextMessage(ctx context.Context, receiveIDType, receiveID, text string) error
+	CreateMessage(ctx context.Context, receiveIDType, receiveID, msgType, content string) error
 }
 
 type Sender struct {
@@ -26,6 +27,13 @@ func NewSender(creator MessageCreator) *Sender {
 func (s *Sender) SendMessage(ctx context.Context, message channel.OutgoingMessage) error {
 	if message.Conversation.ID == "" {
 		return fmt.Errorf("conversation ID is required")
+	}
+	if message.Card != nil {
+		content, err := json.Marshal(message.Card.Payload)
+		if err != nil {
+			return err
+		}
+		return s.creator.CreateMessage(ctx, larkimv1.ReceiveIdTypeChatId, message.Conversation.ID, "interactive", string(content))
 	}
 	if message.Text == "" {
 		return fmt.Errorf("message text is required")
@@ -56,12 +64,15 @@ func (c *SDKMessageCreator) CreateTextMessage(ctx context.Context, receiveIDType
 	if err != nil {
 		return err
 	}
+	return c.CreateMessage(ctx, receiveIDType, receiveID, "text", content)
+}
 
+func (c *SDKMessageCreator) CreateMessage(ctx context.Context, receiveIDType, receiveID, msgType, content string) error {
 	req := larkimv1.NewCreateMessageReqBuilder().
 		ReceiveIdType(receiveIDType).
 		Body(larkimv1.NewCreateMessageReqBodyBuilder().
 			ReceiveId(receiveID).
-			MsgType("text").
+			MsgType(msgType).
 			Content(content).
 			Build()).
 		Build()

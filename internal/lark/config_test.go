@@ -52,3 +52,17 @@ func TestConfigFromEnvParsesRequireMentionFalse(t *testing.T) {
 		t.Fatal("RequireMention = true, want false")
 	}
 }
+
+func TestConfigFromEnvParsesCallbackAddr(t *testing.T) {
+	cfg, err := ConfigFromMap(map[string]string{
+		"ALTER_EGO_LARK_APP_ID":        "cli_test",
+		"ALTER_EGO_LARK_APP_SECRET":    "secret",
+		"ALTER_EGO_LARK_CALLBACK_ADDR": ":8080",
+	})
+	if err != nil {
+		t.Fatalf("ConfigFromMap returned error: %v", err)
+	}
+	if cfg.CallbackAddr != ":8080" {
+		t.Fatalf("CallbackAddr = %q", cfg.CallbackAddr)
+	}
+}

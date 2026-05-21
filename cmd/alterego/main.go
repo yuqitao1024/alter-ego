@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -52,6 +53,16 @@ func run() error {
 	handler := agent.NewRouter(commandHandler, taskSubsystem.TaskHandler, chatHandler)
 
 	adapter := lark.NewAdapter(larkCfg, handler)
+	if larkCfg.CallbackAddr != "" {
+		callbackHandler := lark.NewCallbackHandler(adapter)
+		mux := http.NewServeMux()
+		mux.Handle("/lark/card/callback", callbackHandler)
+		go func() {
+			if err := http.ListenAndServe(larkCfg.CallbackAddr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("lark callback server stopped: %v", err)
+			}
+		}()
+	}
 	err = adapter.Start(ctx)
 	if errors.Is(err, context.Canceled) {
 		return nil

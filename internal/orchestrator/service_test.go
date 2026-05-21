@@ -51,6 +51,24 @@ func TestStartTaskSelectsMachineAndStartsSession(t *testing.T) {
 	}
 }
 
+func TestStartTaskUsesBase36MillisecondTaskID(t *testing.T) {
+	t.Parallel()
+
+	service, _, cleanup := newTestService(t)
+	defer cleanup()
+	service.now = func() time.Time {
+		return time.Unix(1_234_567, 890_123_456).UTC()
+	}
+
+	task, err := service.StartTask(context.Background(), "feature_dev", "yuqitao", "Add remote control")
+	if err != nil {
+		t.Fatalf("StartTask returned error: %v", err)
+	}
+	if task.TaskID != "task-kf12oi" {
+		t.Fatalf("TaskID = %q, want task-kf12oi", task.TaskID)
+	}
+}
+
 func TestTickDoesNotReplyToCodexWithoutExplicitPendingRequest(t *testing.T) {
 	t.Parallel()
 

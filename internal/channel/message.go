@@ -29,9 +29,28 @@ type MessageEvent struct {
 	Platform     string
 }
 
+type CardMessage struct {
+	Payload interface{}
+}
+
 type OutgoingMessage struct {
 	Text         string
 	Conversation Conversation
+	Card         *CardMessage
+}
+
+type CardActionEvent struct {
+	ID           string
+	Action       string
+	Value        map[string]interface{}
+	Conversation Conversation
+	Sender       Sender
+	Platform     string
+}
+
+type CardActionResponse struct {
+	ToastText string
+	Message   *OutgoingMessage
 }
 
 type Handler interface {

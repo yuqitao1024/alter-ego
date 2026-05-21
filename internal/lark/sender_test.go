@@ -13,6 +13,8 @@ type fakeMessageCreator struct {
 	receiveIDType string
 	receiveID     string
 	text          string
+	msgType       string
+	content       string
 	err           error
 }
 
@@ -20,6 +22,14 @@ func (f *fakeMessageCreator) CreateTextMessage(ctx context.Context, receiveIDTyp
 	f.receiveIDType = receiveIDType
 	f.receiveID = receiveID
 	f.text = text
+	return f.err
+}
+
+func (f *fakeMessageCreator) CreateMessage(ctx context.Context, receiveIDType, receiveID, msgType, content string) error {
+	f.receiveIDType = receiveIDType
+	f.receiveID = receiveID
+	f.msgType = msgType
+	f.content = content
 	return f.err
 }
 
@@ -102,6 +112,35 @@ func TestSenderRejectsEmptyMessageText(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("SendMessage returned nil error for empty message text")
+	}
+}
+
+func TestSenderSendsInteractiveCard(t *testing.T) {
+	fake := &fakeMessageCreator{}
+	sender := NewSender(fake)
+
+	err := sender.SendMessage(context.Background(), channel.OutgoingMessage{
+		Conversation: channel.Conversation{ID: "oc_chat", Kind: channel.ConversationGroup},
+		Card: &channel.CardMessage{
+			Payload: map[string]interface{}{
+				"header": map[string]interface{}{
+					"title": "Tasks",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage returned error: %v", err)
+	}
+
+	if fake.msgType != "interactive" {
+		t.Fatalf("msgType = %q, want interactive", fake.msgType)
+	}
+	if fake.content == "" {
+		t.Fatal("content is empty")
+	}
+	if !json.Valid([]byte(fake.content)) {
+		t.Fatalf("content is not valid JSON: %q", fake.content)
 	}
 }
 

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -58,8 +59,14 @@ func TestTaskCommandListFormatsActiveTasks(t *testing.T) {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
 
-	if !strings.Contains(reply.Text, "task-1") || !strings.Contains(reply.Text, "task-2") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	if reply.Text != "" {
+		t.Fatalf("reply.Text = %q, want empty text when card is present", reply.Text)
+	}
+	if !cardContains(reply.Card.Payload, "task-1") || !cardContains(reply.Card.Payload, "task-2") {
+		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
 	}
 }
 
@@ -78,9 +85,118 @@ func TestTaskCommandListAllFormatsAllTasks(t *testing.T) {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
 
-	if !strings.Contains(reply.Text, "task-1") || !strings.Contains(reply.Text, "task-2") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
 	}
+	if !cardContains(reply.Card.Payload, "task-1") || !cardContains(reply.Card.Payload, "task-2") {
+		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
+	}
+}
+
+func TestTaskCommandCardActionStopsTask(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeTaskService{}
+	handler := NewTaskCommandHandler(service)
+
+	reply, err := handler.HandleCardAction(context.Background(), channel.CardActionEvent{
+		Action:       "stop",
+		Conversation: channel.Conversation{ID: "oc_1", Kind: channel.ConversationGroup},
+		Value: map[string]interface{}{
+			"source":  "alterego",
+			"version": float64(1),
+			"kind":    "task_action",
+			"action":  "stop",
+			"task_id": "task-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleCardAction returned error: %v", err)
+	}
+
+	if service.stopTaskID != "task-1" {
+		t.Fatalf("stopTaskID = %q", service.stopTaskID)
+	}
+	if reply.ToastText != "Task task-1 stopped." {
+		t.Fatalf("reply.ToastText = %q", reply.ToastText)
+	}
+}
+
+func TestTaskCommandCardActionDeletesTask(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeTaskService{}
+	handler := NewTaskCommandHandler(service)
+
+	reply, err := handler.HandleCardAction(context.Background(), channel.CardActionEvent{
+		Action:       "delete",
+		Conversation: channel.Conversation{ID: "oc_1", Kind: channel.ConversationGroup},
+		Value: map[string]interface{}{
+			"source":  "alterego",
+			"version": float64(1),
+			"kind":    "task_action",
+			"action":  "delete",
+			"task_id": "task-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleCardAction returned error: %v", err)
+	}
+
+	if service.deleteTaskID != "task-1" {
+		t.Fatalf("deleteTaskID = %q", service.deleteTaskID)
+	}
+	if reply.ToastText != "Task task-1 deleted." {
+		t.Fatalf("reply.ToastText = %q", reply.ToastText)
+	}
+}
+
+func TestTaskCommandCardActionSendsStatusMessage(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeTaskService{
+		statusTask: orchestrator.TaskRun{
+			TaskID:            "task-1",
+			TemplateID:        "feature_dev",
+			MachineID:         "machine_a",
+			Status:            orchestrator.StatusRunning,
+			LastOutputSummary: "Working on tests",
+		},
+	}
+	handler := NewTaskCommandHandler(service)
+
+	reply, err := handler.HandleCardAction(context.Background(), channel.CardActionEvent{
+		Action:       "status",
+		Conversation: channel.Conversation{ID: "oc_1", Kind: channel.ConversationGroup},
+		Value: map[string]interface{}{
+			"source":  "alterego",
+			"version": float64(1),
+			"kind":    "task_action",
+			"action":  "status",
+			"task_id": "task-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleCardAction returned error: %v", err)
+	}
+
+	if reply.Message == nil {
+		t.Fatal("reply.Message is nil")
+	}
+	if !strings.Contains(reply.Message.Text, "Working on tests") {
+		t.Fatalf("reply.Message.Text = %q", reply.Message.Text)
+	}
+	if reply.Message.Conversation.ID != "oc_1" {
+		t.Fatalf("reply.Message.Conversation = %#v", reply.Message.Conversation)
+	}
+}
+
+func cardContains(payload interface{}, needle string) bool {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(b), needle)
 }
 
 func TestTaskCommandStatusFormatsTaskDetails(t *testing.T) {
