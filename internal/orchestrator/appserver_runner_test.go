@@ -92,8 +92,8 @@ func TestAppServerRunnerStartInteractiveSessionStartsWatcher(t *testing.T) {
 	if runtime.startRequest.ApprovalPolicy != "never" {
 		t.Fatalf("startRequest.ApprovalPolicy = %q, want never", runtime.startRequest.ApprovalPolicy)
 	}
-	if runtime.startRequest.SandboxPolicy.Type != "workspaceWrite" {
-		t.Fatalf("startRequest.SandboxPolicy.Type = %q, want workspaceWrite", runtime.startRequest.SandboxPolicy.Type)
+	if runtime.startRequest.SandboxPolicy.Type != "workspace-write" {
+		t.Fatalf("startRequest.SandboxPolicy.Type = %q, want workspace-write", runtime.startRequest.SandboxPolicy.Type)
 	}
 	if !runtime.startRequest.SandboxPolicy.NetworkAccess {
 		t.Fatal("startRequest.SandboxPolicy.NetworkAccess = false, want true")

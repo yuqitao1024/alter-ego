@@ -64,7 +64,7 @@ func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req Start
 		Input:            buildStartInput(req.WorkflowContent, req.UserRequest),
 		ApprovalPolicy:   "never",
 		SandboxPolicy: codexappserver.SandboxPolicy{
-			Type:          "workspaceWrite",
+			Type:          "workspace-write",
 			WritableRoots: []string{repoDir},
 			NetworkAccess: true,
 		},

@@ -86,8 +86,8 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		if threadParams["approvalPolicy"] != "never" {
 			t.Fatalf("thread/start approvalPolicy = %#v, want never", threadParams["approvalPolicy"])
 		}
-		if threadParams["sandbox"] != "workspaceWrite" {
-			t.Fatalf("thread/start sandbox = %#v, want workspaceWrite", threadParams["sandbox"])
+		if threadParams["sandbox"] != "workspace-write" {
+			t.Fatalf("thread/start sandbox = %#v, want workspace-write", threadParams["sandbox"])
 		}
 		turnRequest, ok := requestsByMethod["turn/start"]
 		if !ok {
@@ -113,8 +113,8 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		if !ok {
 			t.Fatalf("turn/start sandboxPolicy = %#v, want object", turnParams["sandboxPolicy"])
 		}
-		if sandboxPolicy["type"] != "workspaceWrite" {
-			t.Fatalf("sandboxPolicy.type = %#v, want workspaceWrite", sandboxPolicy["type"])
+		if sandboxPolicy["type"] != "workspace-write" {
+			t.Fatalf("sandboxPolicy.type = %#v, want workspace-write", sandboxPolicy["type"])
 		}
 		if sandboxPolicy["networkAccess"] != true {
 			t.Fatalf("sandboxPolicy.networkAccess = %#v, want true", sandboxPolicy["networkAccess"])
@@ -156,7 +156,7 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		threadID, err := client.StartThread(ctx, ThreadStartRequest{
 			Cwd:            "/srv/task/repo",
 			ApprovalPolicy: "never",
-			Sandbox:        "workspaceWrite",
+			Sandbox:        "workspace-write",
 		})
 		if err != nil {
 			t.Errorf("StartThread returned error: %v", err)
@@ -171,7 +171,7 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 			Cwd:            "/srv/task/repo",
 			ApprovalPolicy: "never",
 			SandboxPolicy: SandboxPolicy{
-				Type:          "workspaceWrite",
+				Type:          "workspace-write",
 				WritableRoots: []string{"/srv/task/repo"},
 				NetworkAccess: true,
 			},
