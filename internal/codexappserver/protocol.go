@@ -52,6 +52,17 @@ type SandboxPolicy struct {
 	NetworkAccess bool     `json:"networkAccess,omitempty"`
 }
 
+func WorkspaceWriteSandboxPolicy(root string) SandboxPolicy {
+	policy := SandboxPolicy{
+		Type:          "workspaceWrite",
+		NetworkAccess: true,
+	}
+	if strings.TrimSpace(root) != "" {
+		policy.WritableRoots = []string{root}
+	}
+	return policy
+}
+
 type ThreadStartRequest struct {
 	Cwd              string `json:"cwd"`
 	BaseInstructions string `json:"baseInstructions,omitempty"`

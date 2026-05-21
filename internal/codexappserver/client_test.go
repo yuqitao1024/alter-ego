@@ -113,8 +113,8 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		if !ok {
 			t.Fatalf("turn/start sandboxPolicy = %#v, want object", turnParams["sandboxPolicy"])
 		}
-		if sandboxPolicy["type"] != "workspace-write" {
-			t.Fatalf("sandboxPolicy.type = %#v, want workspace-write", sandboxPolicy["type"])
+		if sandboxPolicy["type"] != "workspaceWrite" {
+			t.Fatalf("sandboxPolicy.type = %#v, want workspaceWrite", sandboxPolicy["type"])
 		}
 		if sandboxPolicy["networkAccess"] != true {
 			t.Fatalf("sandboxPolicy.networkAccess = %#v, want true", sandboxPolicy["networkAccess"])
@@ -171,7 +171,7 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 			Cwd:            "/srv/task/repo",
 			ApprovalPolicy: "never",
 			SandboxPolicy: SandboxPolicy{
-				Type:          "workspace-write",
+				Type:          "workspaceWrite",
 				WritableRoots: []string{"/srv/task/repo"},
 				NetworkAccess: true,
 			},

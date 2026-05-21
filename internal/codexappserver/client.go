@@ -79,6 +79,9 @@ func (c *Client) StartTurn(ctx context.Context, req TurnStartRequest) (string, e
 	var result struct {
 		Turn Turn `json:"turn"`
 	}
+	if req.SandboxPolicy.Type == "workspace-write" {
+		req.SandboxPolicy.Type = "workspaceWrite"
+	}
 	if err := c.call(ctx, "turn/start", req, &result); err != nil {
 		return "", err
 	}
@@ -88,6 +91,9 @@ func (c *Client) StartTurn(ctx context.Context, req TurnStartRequest) (string, e
 func (c *Client) SteerTurn(ctx context.Context, req TurnSteerRequest) (string, error) {
 	var result struct {
 		TurnID string `json:"turnId"`
+	}
+	if req.SandboxPolicy.Type == "workspace-write" {
+		req.SandboxPolicy.Type = "workspaceWrite"
 	}
 	if err := c.call(ctx, "turn/steer", req, &result); err != nil {
 		return "", err
