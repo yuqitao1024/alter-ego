@@ -154,13 +154,7 @@ Task list output now uses Lark interactive cards when sent from the Lark channel
 
 To receive card action callbacks, expose a local HTTP listener and point the Lark app's card callback URL at `http://<host>:<port>/lark/card/callback`.
 
-Set:
-
-```sh
-export ALTER_EGO_LARK_CALLBACK_ADDR=":8080"
-```
-
-and configure the Lark app's card callback URL to the externally reachable address that maps to that listener.
+Configure the Lark app's card callback URL to the externally reachable address that maps to `http://<host>:8080/lark/card/callback`.
 
 Task state and operator audit data are stored in SQLite:
 

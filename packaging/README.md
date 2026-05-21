@@ -56,10 +56,7 @@ Remote task execution is configured from the unpacked repository tree under `/op
 
 The packaged example configs already include these fields.
 
-Lark task cards are supported by the main service process. If you want `/task list` buttons to work, set:
-
-- `ALTER_EGO_LARK_CALLBACK_ADDR` to an HTTP listen address such as `:8080`
-- the Lark app card callback URL to `http://<reachable-host>:8080/lark/card/callback`
+Lark task cards are supported by the main service process. Set `ALTER_EGO_LARK_CALLBACK_ADDR` to an HTTP listen address such as `:8080`; the local packaging script writes that value into `/etc/alterego/alterego.env`. Configure the Lark app card callback URL to `http://<reachable-host>:8080/lark/card/callback`.
 
 Without that callback URL, the service can still send task list cards, but button clicks will not reach the process.
 
