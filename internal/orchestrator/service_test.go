@@ -420,6 +420,53 @@ func TestRecoveringTaskReconnectsByThreadID(t *testing.T) {
 	}
 }
 
+func TestRecoveringTaskFailsWhenThreadIsMissing(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	task := sampleTaskRun("task-missing-thread", StatusRecovering)
+	task.UserRequest = "Resume recovering task"
+	task.RemoteWorkdir = "/srv/backend"
+	task.ThreadID = "thread-missing"
+	task.ActiveTurnID = "turn-456"
+	seedTask(t, store, task)
+
+	runner := service.runner.(*fakeServiceRunner)
+	runner.hasSession = false
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusFailed {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusFailed)
+	}
+	if !reflect.DeepEqual(runner.calls, []string{"has-session"}) {
+		t.Fatalf("runner.calls = %v, want [has-session]", runner.calls)
+	}
+
+	events, err := store.ListEvents(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("events = 0, want failure event")
+	}
+	last := events[len(events)-1]
+	if last.EventType != "task_failed" {
+		t.Fatalf("last.EventType = %q, want task_failed", last.EventType)
+	}
+	if last.Message != "codex thread is missing from app-server state; task marked failed for restart" {
+		t.Fatalf("last.Message = %q", last.Message)
+	}
+}
+
 func newTestService(t *testing.T) (*Service, *Store, func()) {
 	t.Helper()
 	return newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{}, &fakeTaskNotifier{})

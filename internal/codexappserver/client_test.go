@@ -198,6 +198,57 @@ func TestStartThreadAcceptsStructuredThreadStatus(t *testing.T) {
 	}
 }
 
+func TestResumeThreadAcceptsHistoryPayload(t *testing.T) {
+	t.Parallel()
+
+	transport := &stubTransport{
+		recvCh: make(chan recvResult, 1),
+	}
+	client := newTestClient(transport)
+	defer client.Close()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		transport.recvCh <- recvResult{payload: mustJSON(t, rpcMessage{
+			ID: "1",
+			Result: mustJSON(t, map[string]any{
+				"thread": map[string]any{
+					"id": "thread-1",
+					"status": map[string]any{
+						"type": "active",
+					},
+					"turns": []map[string]any{
+						{
+							"id":     "turn-1",
+							"status": "completed",
+							"items": []map[string]any{
+								{
+									"id":   "item-plan",
+									"type": "plan",
+									"text": "1. Check logs",
+								},
+								{
+									"id":   "item-msg",
+									"type": "agentMessage",
+									"text": "Applied fix and ran tests.",
+								},
+							},
+						},
+					},
+				},
+			}),
+		})}
+	}()
+
+	thread, err := client.ResumeThread(context.Background(), "thread-1")
+	if err != nil {
+		t.Fatalf("ResumeThread returned error: %v", err)
+	}
+	if thread.ID != "thread-1" {
+		t.Fatalf("thread.ID = %q, want thread-1", thread.ID)
+	}
+}
+
 func TestNewClientSendsInitializedNotificationAfterInitialize(t *testing.T) {
 	t.Parallel()
 

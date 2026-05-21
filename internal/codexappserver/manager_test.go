@@ -170,9 +170,81 @@ func TestManagerResumeTaskThreadResumesThreadOnFirstAttach(t *testing.T) {
 	}
 }
 
+func TestManagerResumeTaskThreadHydratesSnapshotFromResumeHistory(t *testing.T) {
+	t.Parallel()
+
+	client := newFakeClient()
+	client.resumeResult = mustRawJSON(t, map[string]any{
+		"thread": map[string]any{
+			"id": "thread-1",
+			"status": map[string]any{
+				"type": "idle",
+			},
+			"turns": []map[string]any{
+				{
+					"id":     "turn-1",
+					"status": "completed",
+					"items": []map[string]any{
+						{
+							"id":   "item-plan",
+							"type": "plan",
+							"text": "1. Inspect state",
+						},
+						{
+							"id":      "item-cmd",
+							"type":    "commandExecution",
+							"command": "go test ./...",
+						},
+						{
+							"id":   "item-msg",
+							"type": "agentMessage",
+							"text": "Applied parser fix.",
+						},
+					},
+				},
+			},
+		},
+	})
+	manager := NewManager(ManagerOptions{
+		DialClient: func(context.Context, MachineRuntimeConfig) (ClientAPI, error) {
+			return client, nil
+		},
+	})
+
+	machine := MachineRuntimeConfig{MachineID: "machine_a", WebSocketURL: "ws://machine-a:4317"}
+	watcher, err := manager.ResumeTaskThread(context.Background(), machine, "thread-1")
+	if err != nil {
+		t.Fatalf("ResumeTaskThread returned error: %v", err)
+	}
+	if watcher == nil {
+		t.Fatal("watcher is nil")
+	}
+
+	snapshot := watcher.Snapshot()
+	if snapshot.ThreadStatus != "idle" {
+		t.Fatalf("ThreadStatus = %q, want idle", snapshot.ThreadStatus)
+	}
+	if snapshot.ActiveTurnID != "turn-1" {
+		t.Fatalf("ActiveTurnID = %q, want turn-1", snapshot.ActiveTurnID)
+	}
+	if snapshot.ActiveTurnStatus != "completed" {
+		t.Fatalf("ActiveTurnStatus = %q, want completed", snapshot.ActiveTurnStatus)
+	}
+	if snapshot.LatestPlan != "1. Inspect state" {
+		t.Fatalf("LatestPlan = %q", snapshot.LatestPlan)
+	}
+	if snapshot.LatestCommand != "go test ./..." {
+		t.Fatalf("LatestCommand = %q, want go test ./...", snapshot.LatestCommand)
+	}
+	if snapshot.LatestSummary != "Applied parser fix." {
+		t.Fatalf("LatestSummary = %q, want Applied parser fix.", snapshot.LatestSummary)
+	}
+}
+
 type fakeClient struct {
 	notifications chan rpcMessage
 	resumeThreadIDs []string
+	resumeResult json.RawMessage
 }
 
 func newFakeClient() *fakeClient {
@@ -181,9 +253,18 @@ func newFakeClient() *fakeClient {
 
 func (f *fakeClient) Close() error                     { return nil }
 func (f *fakeClient) Notifications() <-chan rpcMessage { return f.notifications }
-func (f *fakeClient) ResumeThread(_ context.Context, threadID string) error {
+func (f *fakeClient) ResumeThread(_ context.Context, threadID string) (Thread, error) {
 	f.resumeThreadIDs = append(f.resumeThreadIDs, threadID)
-	return nil
+	if len(f.resumeResult) == 0 {
+		return Thread{}, nil
+	}
+	var result struct {
+		Thread Thread `json:"thread"`
+	}
+	if err := json.Unmarshal(f.resumeResult, &result); err != nil {
+		return Thread{}, err
+	}
+	return result.Thread, nil
 }
 func (f *fakeClient) RespondToServerRequest(context.Context, string, any) error { return nil }
 func (f *fakeClient) StartThread(context.Context, ThreadStartRequest) (string, error) {

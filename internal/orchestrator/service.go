@@ -328,6 +328,14 @@ func (s *Service) recoverTask(ctx context.Context, task TaskRun) error {
 		if errors.Is(err, ErrRemoteCommandTimeout) {
 			return s.appendEvent(ctx, task.TaskID, "task_reconnect_timeout", "reconnect probe timed out")
 		}
+		if isRemoteSessionMissingError(err) {
+			task.Status = StatusFailed
+			task.UpdatedAt = s.now()
+			if updateErr := s.store.UpdateTask(ctx, task); updateErr != nil {
+				return updateErr
+			}
+			return s.appendEvent(ctx, task.TaskID, "task_failed", "codex thread is missing from app-server state; task marked failed for restart")
+		}
 		return err
 	}
 

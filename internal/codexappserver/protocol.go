@@ -72,17 +72,21 @@ type ThreadResumeRequest struct {
 type Thread struct {
 	ID     string          `json:"id"`
 	Status json.RawMessage `json:"status,omitempty"`
+	Turns  []Turn          `json:"turns,omitempty"`
 }
 
 type Turn struct {
 	ID     string          `json:"id"`
 	Status json.RawMessage `json:"status,omitempty"`
+	Items  []ThreadItem    `json:"items,omitempty"`
 }
 
 type ThreadItem struct {
 	ID      string          `json:"id"`
 	Type    string          `json:"type,omitempty"`
 	Status  string          `json:"status,omitempty"`
+	Text    string          `json:"text,omitempty"`
+	Command string          `json:"command,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 

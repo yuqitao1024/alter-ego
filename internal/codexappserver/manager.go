@@ -26,7 +26,7 @@ type ClientAPI interface {
 	StartTurn(ctx context.Context, req TurnStartRequest) (string, error)
 	SteerTurn(ctx context.Context, req TurnSteerRequest) (string, error)
 	InterruptTurn(ctx context.Context, req TurnInterruptRequest) error
-	ResumeThread(ctx context.Context, threadID string) error
+	ResumeThread(ctx context.Context, threadID string) (Thread, error)
 	RespondToServerRequest(ctx context.Context, requestID string, result any) error
 }
 
@@ -121,10 +121,12 @@ func (m *Manager) watchTaskThread(ctx context.Context, machine MachineRuntimeCon
 		created = true
 	}
 	if created && resume {
-		if err := runtime.client.ResumeThread(ctx, threadID); err != nil {
+		thread, err := runtime.client.ResumeThread(ctx, threadID)
+		if err != nil {
 			delete(runtime.watchers, threadID)
 			return nil, err
 		}
+		watcher.hydrate(thread)
 	}
 	watcher.markConnecting()
 
@@ -255,9 +257,11 @@ func (m *Manager) redialMachine(ctx context.Context, machine MachineRuntimeConfi
 	runtime.machine = machine
 	runtime.client = client
 	for threadID, watcher := range runtime.watchers {
-		if err := runtime.client.ResumeThread(ctx, threadID); err != nil {
+		thread, err := runtime.client.ResumeThread(ctx, threadID)
+		if err != nil {
 			return nil, err
 		}
+		watcher.hydrate(thread)
 		watcher.markConnecting()
 	}
 

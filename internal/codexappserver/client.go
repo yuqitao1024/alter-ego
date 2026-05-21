@@ -99,8 +99,14 @@ func (c *Client) InterruptTurn(ctx context.Context, req TurnInterruptRequest) er
 	return c.call(ctx, "turn/interrupt", req, nil)
 }
 
-func (c *Client) ResumeThread(ctx context.Context, threadID string) error {
-	return c.call(ctx, "thread/resume", ThreadResumeRequest{ThreadID: threadID}, nil)
+func (c *Client) ResumeThread(ctx context.Context, threadID string) (Thread, error) {
+	var result struct {
+		Thread Thread `json:"thread"`
+	}
+	if err := c.call(ctx, "thread/resume", ThreadResumeRequest{ThreadID: threadID}, &result); err != nil {
+		return Thread{}, err
+	}
+	return result.Thread, nil
 }
 
 func (c *Client) RespondToServerRequest(ctx context.Context, requestID string, result any) error {

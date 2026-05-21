@@ -75,6 +75,50 @@ func (w *ThreadWatcher) markError(message string) {
 	w.snapshot.LastActivityAt = time.Now().UTC()
 }
 
+func (w *ThreadWatcher) hydrate(thread Thread) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if strings.TrimSpace(thread.ID) != "" {
+		w.snapshot.ThreadID = thread.ID
+	}
+	if status := decodeStatus(thread.Status); status != "" {
+		w.snapshot.ThreadStatus = status
+	}
+	for _, turn := range thread.Turns {
+		if strings.TrimSpace(turn.ID) != "" {
+			w.snapshot.ActiveTurnID = turn.ID
+		}
+		if status := decodeStatus(turn.Status); status != "" {
+			w.snapshot.ActiveTurnStatus = status
+		}
+		for _, item := range turn.Items {
+			if strings.TrimSpace(item.ID) != "" {
+				w.snapshot.LastItemID = item.ID
+			}
+			switch item.Type {
+			case "agent_message", "agentMessage":
+				text := strings.TrimSpace(item.Text)
+				if text != "" {
+					w.snapshot.LatestAgentMessage = text
+					w.snapshot.LatestSummary = text
+				}
+			case "plan":
+				if text := strings.TrimSpace(item.Text); text != "" {
+					w.snapshot.LatestPlan = text
+				}
+			case "command", "commandExecution":
+				if command := strings.TrimSpace(firstNonEmpty(item.Command, item.Text)); command != "" {
+					w.snapshot.LatestCommand = command
+				}
+			}
+		}
+	}
+	w.snapshot.LastActivityAt = time.Now().UTC()
+	w.snapshot.SubscriptionState = SubscriptionStateActive
+	w.snapshot.LastSubscriptionError = ""
+}
+
 func (w *ThreadWatcher) apply(msg rpcMessage) {
 	params, ok := messageParams(msg)
 	if !ok {
