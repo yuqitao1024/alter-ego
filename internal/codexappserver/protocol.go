@@ -1,6 +1,9 @@
 package codexappserver
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type rpcMessage struct {
 	JSONRPC string          `json:"jsonrpc,omitempty"`
@@ -43,21 +46,34 @@ type InputItem struct {
 	Text string `json:"text,omitempty"`
 }
 
+type SandboxPolicy struct {
+	Type          string   `json:"type"`
+	WritableRoots []string `json:"writableRoots,omitempty"`
+	NetworkAccess bool     `json:"networkAccess,omitempty"`
+}
+
 type ThreadStartRequest struct {
 	Cwd              string `json:"cwd"`
 	BaseInstructions string `json:"baseInstructions,omitempty"`
+	ApprovalPolicy   string `json:"approvalPolicy,omitempty"`
+	Sandbox          string `json:"sandbox,omitempty"`
 }
 
 type TurnStartRequest struct {
-	ThreadID       string      `json:"threadId"`
-	ExpectedTurnID string      `json:"expectedTurnId,omitempty"`
-	Input          []InputItem `json:"input"`
+	ThreadID       string        `json:"threadId"`
+	ExpectedTurnID string        `json:"expectedTurnId,omitempty"`
+	Cwd            string        `json:"cwd,omitempty"`
+	ApprovalPolicy string        `json:"approvalPolicy,omitempty"`
+	SandboxPolicy  SandboxPolicy `json:"sandboxPolicy,omitempty"`
+	Input          []InputItem   `json:"input"`
 }
 
 type TurnSteerRequest struct {
-	ThreadID       string      `json:"threadId"`
-	ExpectedTurnID string      `json:"expectedTurnId,omitempty"`
-	Input          []InputItem `json:"input"`
+	ThreadID       string        `json:"threadId"`
+	ExpectedTurnID string        `json:"expectedTurnId,omitempty"`
+	ApprovalPolicy string        `json:"approvalPolicy,omitempty"`
+	SandboxPolicy  SandboxPolicy `json:"sandboxPolicy,omitempty"`
+	Input          []InputItem   `json:"input"`
 }
 
 type TurnInterruptRequest struct {
@@ -110,9 +126,7 @@ func DecodeServerRequest(msg rpcMessage) (ServerRequest, bool, error) {
 		return ServerRequest{}, false, nil
 	}
 
-	switch msg.Method {
-	case "item/tool/requestUserInput", "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
-	default:
+	if !strings.HasSuffix(msg.Method, "/requestApproval") && !strings.HasSuffix(msg.Method, "/requestUserInput") {
 		return ServerRequest{}, false, nil
 	}
 

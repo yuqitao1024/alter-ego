@@ -79,6 +79,16 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		if !ok {
 			t.Fatal("thread/start request was not received")
 		}
+		var threadParams map[string]any
+		if err := json.Unmarshal(mustJSON(t, threadRequest.Params), &threadParams); err != nil {
+			t.Fatalf("Unmarshal thread params: %v", err)
+		}
+		if threadParams["approvalPolicy"] != "never" {
+			t.Fatalf("thread/start approvalPolicy = %#v, want never", threadParams["approvalPolicy"])
+		}
+		if threadParams["sandbox"] != "workspaceWrite" {
+			t.Fatalf("thread/start sandbox = %#v, want workspaceWrite", threadParams["sandbox"])
+		}
 		turnRequest, ok := requestsByMethod["turn/start"]
 		if !ok {
 			t.Fatal("turn/start request was not received")
@@ -92,6 +102,22 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		}
 		if _, ok := turnParams["input"]; !ok {
 			t.Fatalf("turn/start params = %#v, want input", turnParams)
+		}
+		if turnParams["approvalPolicy"] != "never" {
+			t.Fatalf("turn/start approvalPolicy = %#v, want never", turnParams["approvalPolicy"])
+		}
+		if turnParams["cwd"] != "/srv/task/repo" {
+			t.Fatalf("turn/start cwd = %#v, want /srv/task/repo", turnParams["cwd"])
+		}
+		sandboxPolicy, ok := turnParams["sandboxPolicy"].(map[string]any)
+		if !ok {
+			t.Fatalf("turn/start sandboxPolicy = %#v, want object", turnParams["sandboxPolicy"])
+		}
+		if sandboxPolicy["type"] != "workspaceWrite" {
+			t.Fatalf("sandboxPolicy.type = %#v, want workspaceWrite", sandboxPolicy["type"])
+		}
+		if sandboxPolicy["networkAccess"] != true {
+			t.Fatalf("sandboxPolicy.networkAccess = %#v, want true", sandboxPolicy["networkAccess"])
 		}
 
 		if err := conn.WriteJSON(rpcMessage{ID: turnRequest.ID, Result: mustJSON(t, map[string]any{"turn": map[string]any{"id": "turn-2"}})}); err != nil {
@@ -127,7 +153,11 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		threadID, err := client.StartThread(ctx, ThreadStartRequest{Cwd: "/srv/task/repo"})
+		threadID, err := client.StartThread(ctx, ThreadStartRequest{
+			Cwd:            "/srv/task/repo",
+			ApprovalPolicy: "never",
+			Sandbox:        "workspaceWrite",
+		})
 		if err != nil {
 			t.Errorf("StartThread returned error: %v", err)
 			return
@@ -136,7 +166,17 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		turnID, err := client.StartTurn(ctx, TurnStartRequest{ThreadID: "thread-1", Input: []InputItem{{Type: "text", Text: "continue"}}})
+		turnID, err := client.StartTurn(ctx, TurnStartRequest{
+			ThreadID:       "thread-1",
+			Cwd:            "/srv/task/repo",
+			ApprovalPolicy: "never",
+			SandboxPolicy: SandboxPolicy{
+				Type:          "workspaceWrite",
+				WritableRoots: []string{"/srv/task/repo"},
+				NetworkAccess: true,
+			},
+			Input: []InputItem{{Type: "text", Text: "continue"}},
+		})
 		if err != nil {
 			t.Errorf("StartTurn returned error: %v", err)
 			return

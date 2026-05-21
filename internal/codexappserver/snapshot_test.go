@@ -71,6 +71,36 @@ func TestThreadWatcherPublishesServerRequestAndResolvedEvent(t *testing.T) {
 	}
 }
 
+func TestThreadWatcherPublishesGenericApprovalRequestEvent(t *testing.T) {
+	t.Parallel()
+
+	watcher := newThreadWatcher("thread-1")
+	watcher.apply(rpcMessage{
+		ID:     "srv-2",
+		Method: "turn/network/requestApproval",
+		Params: mustRawJSON(t, map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"prompt":   "Allow network access to GitCode?",
+		}),
+	})
+
+	select {
+	case event := <-watcher.Events():
+		if event.ServerRequest == nil {
+			t.Fatal("ServerRequest = nil")
+		}
+		if event.ServerRequest.Method != "turn/network/requestApproval" {
+			t.Fatalf("Method = %q, want turn/network/requestApproval", event.ServerRequest.Method)
+		}
+		if event.ServerRequest.RequestID != "srv-2" {
+			t.Fatalf("RequestID = %q, want srv-2", event.ServerRequest.RequestID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("generic approval request event was not published")
+	}
+}
+
 func TestThreadWatcherAppliesCurrentProtocolNotifications(t *testing.T) {
 	t.Parallel()
 
@@ -82,7 +112,7 @@ func TestThreadWatcherAppliesCurrentProtocolNotifications(t *testing.T) {
 			"thread": map[string]any{
 				"id": "thread-1",
 				"status": map[string]any{
-					"type": "active",
+					"type":        "active",
 					"activeFlags": []string{"waitingOnUserInput"},
 				},
 			},

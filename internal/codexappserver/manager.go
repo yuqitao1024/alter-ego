@@ -17,6 +17,8 @@ type StartTaskSessionRequest struct {
 	Cwd              string
 	BaseInstructions string
 	Input            string
+	ApprovalPolicy   string
+	SandboxPolicy    SandboxPolicy
 }
 
 type ClientAPI interface {
@@ -76,6 +78,8 @@ func (m *Manager) StartTaskSession(ctx context.Context, machine MachineRuntimeCo
 	threadID, err := runtime.client.StartThread(ctx, ThreadStartRequest{
 		Cwd:              req.Cwd,
 		BaseInstructions: req.BaseInstructions,
+		ApprovalPolicy:   req.ApprovalPolicy,
+		Sandbox:          req.SandboxPolicy.Type,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("start thread: %w", err)
@@ -86,8 +90,11 @@ func (m *Manager) StartTaskSession(ctx context.Context, machine MachineRuntimeCo
 	}
 
 	turnID, err := runtime.client.StartTurn(ctx, TurnStartRequest{
-		ThreadID: threadID,
-		Input:    textInput(req.Input),
+		ThreadID:       threadID,
+		Cwd:            req.Cwd,
+		ApprovalPolicy: req.ApprovalPolicy,
+		SandboxPolicy:  req.SandboxPolicy,
+		Input:          textInput(req.Input),
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("start turn: %w", err)

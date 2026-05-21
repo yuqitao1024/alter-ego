@@ -258,10 +258,10 @@ func (c *Client) readLoop() {
 			return
 		}
 
-		if message.ID != "" && c.routeResponse(message) {
-			continue
-		}
 		if message.ID != "" && strings.TrimSpace(message.Method) == "" {
+			if c.routeResponse(message) {
+				continue
+			}
 			continue
 		}
 

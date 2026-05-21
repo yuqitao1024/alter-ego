@@ -86,6 +86,18 @@ func TestAppServerRunnerStartInteractiveSessionStartsWatcher(t *testing.T) {
 	if runtime.watchThreadID != "thread-1" {
 		t.Fatalf("watchThreadID = %q, want thread-1", runtime.watchThreadID)
 	}
+	if runtime.startRequest.Cwd != "/srv/codex-tasks/task-1/repo" {
+		t.Fatalf("startRequest.Cwd = %q", runtime.startRequest.Cwd)
+	}
+	if runtime.startRequest.ApprovalPolicy != "never" {
+		t.Fatalf("startRequest.ApprovalPolicy = %q, want never", runtime.startRequest.ApprovalPolicy)
+	}
+	if runtime.startRequest.SandboxPolicy.Type != "workspaceWrite" {
+		t.Fatalf("startRequest.SandboxPolicy.Type = %q, want workspaceWrite", runtime.startRequest.SandboxPolicy.Type)
+	}
+	if !runtime.startRequest.SandboxPolicy.NetworkAccess {
+		t.Fatal("startRequest.SandboxPolicy.NetworkAccess = false, want true")
+	}
 }
 
 func TestAppServerRunnerSendInteractiveInputSteersActiveTurn(t *testing.T) {
@@ -185,13 +197,14 @@ func TestAppServerRunnerStopSessionInterruptsActiveTurn(t *testing.T) {
 }
 
 type fakeCodexRuntime struct {
-	startThreadID string
-	startTurnID   string
-	steerTurnID   string
-	watchThreadID string
+	startThreadID       string
+	startTurnID         string
+	startRequest        codexappserver.StartTaskSessionRequest
+	steerTurnID         string
+	watchThreadID       string
 	resumeWatchThreadID string
-	requestID     string
-	requestResult any
+	requestID           string
+	requestResult       any
 
 	interruptThreadID string
 	interruptTurnID   string
@@ -199,7 +212,8 @@ type fakeCodexRuntime struct {
 	snapshots map[string]codexappserver.ThreadSnapshot
 }
 
-func (f *fakeCodexRuntime) StartTaskSession(_ context.Context, _ codexappserver.MachineRuntimeConfig, _ codexappserver.StartTaskSessionRequest) (string, string, error) {
+func (f *fakeCodexRuntime) StartTaskSession(_ context.Context, _ codexappserver.MachineRuntimeConfig, req codexappserver.StartTaskSessionRequest) (string, string, error) {
+	f.startRequest = req
 	return f.startThreadID, f.startTurnID, nil
 }
 

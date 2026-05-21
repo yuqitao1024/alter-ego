@@ -35,9 +35,9 @@ var ErrAppServerStopUnsupported = errors.New("app-server runner does not support
 
 func NewAppServerRunner(manager codexRuntime) *AppServerRunner {
 	return &AppServerRunner{
-		transport: shellSSHTransport{},
-		manager:   manager,
-		events:    make(chan RuntimeEvent, 64),
+		transport:      shellSSHTransport{},
+		manager:        manager,
+		events:         make(chan RuntimeEvent, 64),
 		bridgedThreads: make(map[string]struct{}),
 		machineResolver: func(machineID string) (MachineConfig, error) {
 			return MachineConfig{}, fmt.Errorf("machine resolver is not configured for %q", machineID)
@@ -62,6 +62,12 @@ func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req Start
 		Cwd:              repoDir,
 		BaseInstructions: strings.TrimSpace(req.WorkflowContent),
 		Input:            buildStartInput(req.WorkflowContent, req.UserRequest),
+		ApprovalPolicy:   "never",
+		SandboxPolicy: codexappserver.SandboxPolicy{
+			Type:          "workspaceWrite",
+			WritableRoots: []string{repoDir},
+			NetworkAccess: true,
+		},
 	})
 	if err != nil {
 		return RemoteSession{}, fmt.Errorf("start app-server session: %w", err)
