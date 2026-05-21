@@ -360,6 +360,34 @@ func TestTickProgressPollingOnlyNotifiesUserAndNeverRepliesCodex(t *testing.T) {
 	}
 }
 
+func TestTickSkipsDecisionEvaluationWhenSummaryIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{Summary: "", SessionState: SessionState{ThreadStatus: "running"}},
+	}
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, runner, &fakeDecisionEngine{
+		err: context.DeadlineExceeded,
+	}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-empty-summary", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+	if len(notifier.progressMessages) != 0 {
+		t.Fatalf("progressMessages = %#v, want none", notifier.progressMessages)
+	}
+	if len(runner.sentInputs) != 0 {
+		t.Fatalf("sentInputs = %#v, want none", runner.sentInputs)
+	}
+}
+
 func TestRecoveringTaskReconnectsByThreadID(t *testing.T) {
 	t.Parallel()
 

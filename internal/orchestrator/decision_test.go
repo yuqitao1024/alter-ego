@@ -116,6 +116,20 @@ func TestModelDecisionEngineEvaluatesCompletionSignal(t *testing.T) {
 	}
 }
 
+func TestModelDecisionEngineRejectsEmptyStructuredResponse(t *testing.T) {
+	t.Parallel()
+
+	engine := NewModelDecisionEngine(&fakeDecisionModel{response: ""})
+
+	_, err := engine.EvaluateProgressUpdate(context.Background(), TaskRun{TaskID: "task-progress"}, "Completed migration and passed tests.")
+	if err == nil {
+		t.Fatal("EvaluateProgressUpdate returned nil error, want parse error")
+	}
+	if !strings.Contains(err.Error(), "parse decision JSON") {
+		t.Fatalf("err = %v, want parse decision JSON", err)
+	}
+}
+
 type fakeDecisionModel struct {
 	response string
 	err      error

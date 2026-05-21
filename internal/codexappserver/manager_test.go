@@ -147,6 +147,29 @@ func TestManagerDefaultDialClientIncludesVersionInInitialize(t *testing.T) {
 	}
 }
 
+func TestManagerResumeTaskThreadResumesThreadOnFirstAttach(t *testing.T) {
+	t.Parallel()
+
+	client := newFakeClient()
+	manager := NewManager(ManagerOptions{
+		DialClient: func(context.Context, MachineRuntimeConfig) (ClientAPI, error) {
+			return client, nil
+		},
+	})
+
+	machine := MachineRuntimeConfig{MachineID: "machine_a", WebSocketURL: "ws://machine-a:4317"}
+	watcher, err := manager.ResumeTaskThread(context.Background(), machine, "thread-1")
+	if err != nil {
+		t.Fatalf("ResumeTaskThread returned error: %v", err)
+	}
+	if watcher == nil {
+		t.Fatal("watcher is nil")
+	}
+	if len(client.resumeThreadIDs) != 1 || client.resumeThreadIDs[0] != "thread-1" {
+		t.Fatalf("resumeThreadIDs = %#v, want [thread-1]", client.resumeThreadIDs)
+	}
+}
+
 type fakeClient struct {
 	notifications chan rpcMessage
 	resumeThreadIDs []string

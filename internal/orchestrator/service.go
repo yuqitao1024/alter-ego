@@ -441,6 +441,9 @@ func (s *Service) handleProgressAndCompletionOnly(ctx context.Context, task Task
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return err
 	}
+	if strings.TrimSpace(window.Summary) == "" {
+		return nil
+	}
 
 	updatedTask, handled, err := s.maybeSendCompletionCheck(ctx, task, window.Summary)
 	if err != nil {

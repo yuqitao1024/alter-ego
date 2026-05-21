@@ -124,11 +124,20 @@ func TestAppServerRunnerHasSessionChecksSnapshotPresence(t *testing.T) {
 	t.Parallel()
 
 	runtime := &fakeCodexRuntime{
-		snapshots: map[string]codexappserver.ThreadSnapshot{
-			"machine_a/thread-1": {ThreadID: "thread-1"},
-		},
+		resumeWatchThreadID: "thread-1",
 	}
 	runner := NewAppServerRunner(runtime)
+	runner.machineResolver = func(machineID string) (MachineConfig, error) {
+		return MachineConfig{
+			ID:                   machineID,
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		}, nil
+	}
 
 	ok, err := runner.HasSession(context.Background(), RemoteSession{
 		MachineID: "machine_a",
@@ -139,6 +148,9 @@ func TestAppServerRunnerHasSessionChecksSnapshotPresence(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("HasSession returned false, want true")
+	}
+	if runtime.resumeWatchThreadID != "thread-1" {
+		t.Fatalf("resumeWatchThreadID = %q, want thread-1", runtime.resumeWatchThreadID)
 	}
 }
 
@@ -177,6 +189,7 @@ type fakeCodexRuntime struct {
 	startTurnID   string
 	steerTurnID   string
 	watchThreadID string
+	resumeWatchThreadID string
 	requestID     string
 	requestResult any
 
@@ -192,6 +205,11 @@ func (f *fakeCodexRuntime) StartTaskSession(_ context.Context, _ codexappserver.
 
 func (f *fakeCodexRuntime) WatchTaskThread(_ context.Context, _ codexappserver.MachineRuntimeConfig, threadID string) (*codexappserver.ThreadWatcher, error) {
 	f.watchThreadID = threadID
+	return nil, nil
+}
+
+func (f *fakeCodexRuntime) ResumeTaskThread(_ context.Context, _ codexappserver.MachineRuntimeConfig, threadID string) (*codexappserver.ThreadWatcher, error) {
+	f.resumeWatchThreadID = threadID
 	return nil, nil
 }
 

@@ -119,63 +119,53 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 
 	switch msg.Method {
 	case "thread/started", "thread/completed", "thread/status/changed", "thread/closed":
-		var payload struct {
-			Thread struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
-			} `json:"thread"`
-		}
-		if err := json.Unmarshal(params, &payload); err != nil {
+		threadID, status, ok := decodeThreadNotification(params)
+		if !ok {
 			return
 		}
-		if payload.Thread.ID != "" {
-			w.snapshot.ThreadID = payload.Thread.ID
+		if threadID != "" {
+			w.snapshot.ThreadID = threadID
 		}
-		w.snapshot.ThreadStatus = payload.Thread.Status
+		if status != "" {
+			w.snapshot.ThreadStatus = status
+		}
 	case "turn/started", "turn/completed":
-		var payload struct {
-			Turn struct {
-				ID       string `json:"id"`
-				Status   string `json:"status"`
-				ThreadID string `json:"thread_id"`
-			} `json:"turn"`
-		}
-		if err := json.Unmarshal(params, &payload); err != nil {
+		turnID, status, ok := decodeTurnNotification(params)
+		if !ok {
 			return
 		}
-		w.snapshot.ActiveTurnID = payload.Turn.ID
-		w.snapshot.ActiveTurnStatus = payload.Turn.Status
+		if turnID != "" {
+			w.snapshot.ActiveTurnID = turnID
+		}
+		if status != "" {
+			w.snapshot.ActiveTurnStatus = status
+		}
 	case "item/started", "item/completed", "item/agentMessage/delta":
-		var payload struct {
-			Item struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Text     string `json:"text"`
-				ThreadID string `json:"thread_id"`
-			} `json:"item"`
-			Delta struct {
-				Text string `json:"text"`
-			} `json:"delta"`
-		}
-		if err := json.Unmarshal(params, &payload); err != nil {
-			return
-		}
-		w.snapshot.LastItemID = payload.Item.ID
-		text := strings.TrimSpace(payload.Item.Text)
 		if msg.Method == "item/agentMessage/delta" {
-			text = strings.TrimSpace(payload.Delta.Text)
+			itemID, text, ok := decodeAgentMessageDelta(params)
+			if !ok {
+				return
+			}
+			w.snapshot.LastItemID = itemID
 			w.snapshot.LatestAgentMessage = strings.TrimSpace(w.snapshot.LatestAgentMessage + text)
 			w.snapshot.LatestSummary = w.snapshot.LatestAgentMessage
 			return
 		}
-		switch payload.Item.Type {
-		case "agent_message":
+
+		item, ok := decodeItemNotification(params)
+		if !ok {
+			return
+		}
+		w.snapshot.LastItemID = item.ID
+		switch item.Type {
+		case "agent_message", "agentMessage":
+			text := strings.TrimSpace(item.Text)
 			w.snapshot.LatestAgentMessage = text
 			w.snapshot.LatestSummary = text
 		case "plan":
-			w.snapshot.LatestPlan = text
-		case "command":
-			w.snapshot.LatestCommand = text
+			w.snapshot.LatestPlan = strings.TrimSpace(item.Text)
+		case "command", "commandExecution":
+			w.snapshot.LatestCommand = strings.TrimSpace(firstNonEmpty(item.Command, item.Text))
 		}
 	}
 }
@@ -183,44 +173,149 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 func (w *ThreadWatcher) accepts(method string, params json.RawMessage) bool {
 	switch method {
 	case "thread/started", "thread/completed", "thread/status/changed", "thread/closed":
-		var payload struct {
-			Thread struct {
-				ID string `json:"id"`
-			} `json:"thread"`
-		}
-		if err := json.Unmarshal(params, &payload); err != nil {
-			return false
-		}
-		return payload.Thread.ID == w.threadID
+		threadID, _, ok := decodeThreadNotification(params)
+		return ok && threadID == w.threadID
 	case "turn/started", "turn/completed":
-		var payload struct {
-			Turn struct {
-				ThreadID string `json:"thread_id"`
-			} `json:"turn"`
-		}
-		if err := json.Unmarshal(params, &payload); err != nil {
-			return false
-		}
-		return payload.Turn.ThreadID == w.threadID
+		threadID, _, _, ok := decodeTurnScope(params)
+		return ok && threadID == w.threadID
 	case "item/started", "item/completed", "item/agentMessage/delta":
-		var payload struct {
-			Item struct {
-				ThreadID string `json:"thread_id"`
-			} `json:"item"`
-			Thread struct {
-				ID string `json:"id"`
-			} `json:"thread"`
-		}
-		if err := json.Unmarshal(params, &payload); err != nil {
-			return false
-		}
-		if payload.Item.ThreadID != "" {
-			return payload.Item.ThreadID == w.threadID
-		}
-		return payload.Thread.ID == w.threadID
+		threadID, _, ok := decodeItemScope(params)
+		return ok && threadID == w.threadID
 	default:
 		return false
 	}
+}
+
+type threadNotification struct {
+	Thread struct {
+		ID     string          `json:"id"`
+		Status json.RawMessage `json:"status"`
+	} `json:"thread"`
+	ThreadID string          `json:"threadId"`
+	Status   json.RawMessage `json:"status"`
+}
+
+type turnNotification struct {
+	ThreadID string `json:"threadId"`
+	Turn     struct {
+		ID     string          `json:"id"`
+		Status json.RawMessage `json:"status"`
+	} `json:"turn"`
+}
+
+type itemNotification struct {
+	ThreadID string `json:"threadId"`
+	Item     struct {
+		ID      string `json:"id"`
+		Type    string `json:"type"`
+		Text    string `json:"text"`
+		Command string `json:"command"`
+	} `json:"item"`
+	ItemID string `json:"itemId"`
+	Delta  string `json:"delta"`
+}
+
+type statusEnvelope struct {
+	Type string `json:"type"`
+}
+
+func decodeThreadNotification(params json.RawMessage) (string, string, bool) {
+	var payload threadNotification
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	threadID := firstNonEmpty(payload.Thread.ID, payload.ThreadID)
+	status := decodeStatus(payload.Thread.Status)
+	if status == "" {
+		status = decodeStatus(payload.Status)
+	}
+	return threadID, status, threadID != "" || status != ""
+}
+
+func decodeTurnNotification(params json.RawMessage) (string, string, bool) {
+	var payload turnNotification
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	return payload.Turn.ID, decodeStatus(payload.Turn.Status), payload.Turn.ID != ""
+}
+
+func decodeTurnScope(params json.RawMessage) (string, string, string, bool) {
+	var payload turnNotification
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", "", false
+	}
+	return payload.ThreadID, payload.Turn.ID, decodeStatus(payload.Turn.Status), payload.ThreadID != ""
+}
+
+func decodeItemNotification(params json.RawMessage) (struct {
+	ID      string
+	Type    string
+	Text    string
+	Command string
+}, bool) {
+	var payload itemNotification
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return struct {
+			ID      string
+			Type    string
+			Text    string
+			Command string
+		}{}, false
+	}
+	return struct {
+		ID      string
+		Type    string
+		Text    string
+		Command string
+	}{
+		ID:      payload.Item.ID,
+		Type:    payload.Item.Type,
+		Text:    payload.Item.Text,
+		Command: payload.Item.Command,
+	}, payload.Item.ID != ""
+}
+
+func decodeAgentMessageDelta(params json.RawMessage) (string, string, bool) {
+	var payload itemNotification
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	return payload.ItemID, payload.Delta, payload.ItemID != ""
+}
+
+func decodeItemScope(params json.RawMessage) (string, string, bool) {
+	var payload itemNotification
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	return payload.ThreadID, firstNonEmpty(payload.Item.ID, payload.ItemID), payload.ThreadID != ""
+}
+
+func decodeStatus(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var plain string
+	if err := json.Unmarshal(raw, &plain); err == nil {
+		return strings.TrimSpace(plain)
+	}
+
+	var status statusEnvelope
+	if err := json.Unmarshal(raw, &status); err == nil {
+		return strings.TrimSpace(status.Type)
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func messageParams(msg rpcMessage) (json.RawMessage, bool) {

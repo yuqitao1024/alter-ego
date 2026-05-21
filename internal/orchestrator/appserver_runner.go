@@ -14,6 +14,7 @@ import (
 type codexRuntime interface {
 	StartTaskSession(ctx context.Context, machine codexappserver.MachineRuntimeConfig, req codexappserver.StartTaskSessionRequest) (string, string, error)
 	WatchTaskThread(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID string) (*codexappserver.ThreadWatcher, error)
+	ResumeTaskThread(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID string) (*codexappserver.ThreadWatcher, error)
 	SendTaskInput(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID, input string) (string, error)
 	RespondToServerRequest(ctx context.Context, machine codexappserver.MachineRuntimeConfig, requestID string, result any) error
 	InterruptTask(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID string) error
@@ -131,9 +132,18 @@ func (r *AppServerRunner) RespondToServerRequest(ctx context.Context, session Re
 }
 
 func (r *AppServerRunner) HasSession(ctx context.Context, session RemoteSession) (bool, error) {
-	_ = ctx
-	_, ok := r.manager.Snapshot(session.MachineID, session.ThreadID)
-	return ok, nil
+	machine, err := r.machineResolver(session.MachineID)
+	if err != nil {
+		return false, err
+	}
+	_, err = r.manager.ResumeTaskThread(ctx, machineRuntimeConfig(machine), session.ThreadID)
+	if err != nil {
+		return false, nil
+	}
+	if err := r.bridgeWatcher(ctx, session.MachineID, session.ThreadID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *AppServerRunner) Events() <-chan RuntimeEvent {

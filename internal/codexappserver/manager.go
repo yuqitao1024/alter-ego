@@ -81,7 +81,7 @@ func (m *Manager) StartTaskSession(ctx context.Context, machine MachineRuntimeCo
 		return "", "", fmt.Errorf("start thread: %w", err)
 	}
 
-	if _, err := m.WatchTaskThread(ctx, machine, threadID); err != nil {
+	if _, err := m.watchTaskThread(ctx, machine, threadID, false); err != nil {
 		return "", "", err
 	}
 
@@ -97,6 +97,14 @@ func (m *Manager) StartTaskSession(ctx context.Context, machine MachineRuntimeCo
 }
 
 func (m *Manager) WatchTaskThread(ctx context.Context, machine MachineRuntimeConfig, threadID string) (*ThreadWatcher, error) {
+	return m.watchTaskThread(ctx, machine, threadID, false)
+}
+
+func (m *Manager) ResumeTaskThread(ctx context.Context, machine MachineRuntimeConfig, threadID string) (*ThreadWatcher, error) {
+	return m.watchTaskThread(ctx, machine, threadID, true)
+}
+
+func (m *Manager) watchTaskThread(ctx context.Context, machine MachineRuntimeConfig, threadID string, resume bool) (*ThreadWatcher, error) {
 	runtime, err := m.ensureMachine(ctx, machine)
 	if err != nil {
 		return nil, err
@@ -106,9 +114,17 @@ func (m *Manager) WatchTaskThread(ctx context.Context, machine MachineRuntimeCon
 	defer m.mu.Unlock()
 
 	watcher := runtime.watchers[threadID]
+	created := false
 	if watcher == nil {
 		watcher = newThreadWatcher(threadID)
 		runtime.watchers[threadID] = watcher
+		created = true
+	}
+	if created && resume {
+		if err := runtime.client.ResumeThread(ctx, threadID); err != nil {
+			delete(runtime.watchers, threadID)
+			return nil, err
+		}
 	}
 	watcher.markConnecting()
 
@@ -179,6 +195,9 @@ func (m *Manager) Close() error {
 
 	var firstErr error
 	for _, runtime := range m.machines {
+		if runtime == nil || runtime.client == nil {
+			continue
+		}
 		if err := runtime.client.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
