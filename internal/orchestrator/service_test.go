@@ -508,6 +508,43 @@ func TestDeleteRemovesStoppedTask(t *testing.T) {
 	}
 }
 
+func TestDeleteTerminalTasksDeletesOnlyTerminalTasks(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	tasks := []TaskRun{
+		sampleTaskRun("task-running", StatusRunning),
+		sampleTaskRun("task-completed", StatusCompleted),
+		sampleTaskRun("task-failed", StatusFailed),
+		sampleTaskRun("task-stopped", StatusStopped),
+	}
+	for _, task := range tasks {
+		seedTask(t, store, task)
+	}
+
+	deleted, err := service.DeleteTerminalTasks(context.Background())
+	if err != nil {
+		t.Fatalf("DeleteTerminalTasks returned error: %v", err)
+	}
+	if deleted != 3 {
+		t.Fatalf("deleted = %d, want 3", deleted)
+	}
+	if _, err := store.GetTask(context.Background(), "task-running"); err != nil {
+		t.Fatalf("running task was deleted: %v", err)
+	}
+	for _, taskID := range []string{"task-completed", "task-failed", "task-stopped"} {
+		if _, err := store.GetTask(context.Background(), taskID); err == nil {
+			t.Fatalf("GetTask(%q) returned nil error after delete, want not found", taskID)
+		}
+	}
+	runner := service.runner.(*fakeServiceRunner)
+	if len(runner.deletedWorkspaces) != 3 {
+		t.Fatalf("deletedWorkspaces = %#v, want 3", runner.deletedWorkspaces)
+	}
+}
+
 func newTestService(t *testing.T) (*Service, *Store, func()) {
 	t.Helper()
 	return newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{}, &fakeTaskNotifier{})

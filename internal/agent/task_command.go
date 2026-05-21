@@ -17,6 +17,7 @@ type TaskService interface {
 	Reply(ctx context.Context, taskID, text string) error
 	Stop(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, taskID string) error
+	DeleteTerminalTasks(ctx context.Context) (int, error)
 }
 
 type TaskCommandHandler struct {
@@ -121,7 +122,15 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		reply.Text = fmt.Sprintf("Task %s stopped.", taskID)
 	case "delete":
 		if len(fields) != 3 {
-			reply.Text = "Usage: /task delete <task-id>"
+			reply.Text = "Usage: /task delete <task-id|-a>"
+			return reply, nil
+		}
+		if fields[2] == "-a" {
+			count, err := h.service.DeleteTerminalTasks(ctx)
+			if err != nil {
+				return reply, err
+			}
+			reply.Text = fmt.Sprintf("Deleted %d terminal task(s).", count)
 			return reply, nil
 		}
 		taskID := fields[2]

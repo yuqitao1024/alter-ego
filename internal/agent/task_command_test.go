@@ -94,7 +94,7 @@ func TestTaskCommandStatusFormatsTaskDetails(t *testing.T) {
 			MachineID:         "machine_a",
 			Status:            orchestrator.StatusRunning,
 			LastOutputSummary: "Tests passed",
-			ThreadID: "thread-1",
+			ThreadID:          "thread-1",
 		},
 	})
 
@@ -168,6 +168,25 @@ func TestTaskCommandDeleteDeletesTask(t *testing.T) {
 	}
 }
 
+func TestTaskCommandDeleteAllDeletesTerminalTasks(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeTaskService{deleteTerminalCount: 3}
+	handler := NewTaskCommandHandler(service)
+
+	reply, err := handler.HandleCommand(context.Background(), channel.MessageEvent{Text: "/task delete -a"})
+	if err != nil {
+		t.Fatalf("HandleCommand returned error: %v", err)
+	}
+
+	if !service.deleteTerminalCalled {
+		t.Fatal("DeleteTerminalTasks was not called")
+	}
+	if !strings.Contains(reply.Text, "Deleted 3 terminal task(s).") {
+		t.Fatalf("reply.Text = %q", reply.Text)
+	}
+}
+
 type fakeTaskService struct {
 	startTask       orchestrator.TaskRun
 	statusTask      orchestrator.TaskRun
@@ -180,6 +199,9 @@ type fakeTaskService struct {
 	replyText       string
 	stopTaskID      string
 	deleteTaskID    string
+
+	deleteTerminalCalled bool
+	deleteTerminalCount  int
 }
 
 func (f *fakeTaskService) StartTask(ctx context.Context, templateID, createdBy, userRequest string) (orchestrator.TaskRun, error) {
@@ -221,4 +243,9 @@ func (f *fakeTaskService) Stop(ctx context.Context, taskID string) error {
 func (f *fakeTaskService) Delete(ctx context.Context, taskID string) error {
 	f.deleteTaskID = taskID
 	return nil
+}
+
+func (f *fakeTaskService) DeleteTerminalTasks(ctx context.Context) (int, error) {
+	f.deleteTerminalCalled = true
+	return f.deleteTerminalCount, nil
 }

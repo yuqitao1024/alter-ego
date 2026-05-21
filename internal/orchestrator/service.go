@@ -283,6 +283,25 @@ func (s *Service) Delete(ctx context.Context, taskID string) error {
 	return nil
 }
 
+func (s *Service) DeleteTerminalTasks(ctx context.Context) (int, error) {
+	tasks, err := s.store.ListTasks(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	deleted := 0
+	for _, task := range tasks {
+		if !task.Status.IsDeletable() {
+			continue
+		}
+		if err := s.Delete(ctx, task.TaskID); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
 func (s *Service) deleteTaskWorkspace(ctx context.Context, task TaskRun) error {
 	repository := s.registry.Repositories[task.RepositoryID]
 	if repository == nil {
