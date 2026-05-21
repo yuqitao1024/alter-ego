@@ -20,7 +20,8 @@ Optional environment variables:
 export ALTER_EGO_LARK_DOMAIN="lark"
 export ALTER_EGO_LARK_ALLOW_GROUPS="oc_xxx"
 export ALTER_EGO_LARK_REQUIRE_MENTION="true"
-export ALTER_EGO_LARK_CALLBACK_ADDR=":8080"
+export ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR=":8080"
+export ALTER_EGO_LARK_CALLBACK_PUBLIC_URL="https://callback.example.com"
 ```
 
 To enable real chat replies instead of the stub handler, configure:
@@ -152,9 +153,15 @@ Task list output now uses Lark interactive cards when sent from the Lark channel
 - `stop` for `running` or `waiting_user_input`
 - `delete` for terminal tasks, with a confirm dialog
 
-To receive card action callbacks, expose a local HTTP listener and point the Lark app's card callback URL at `http://<host>:<port>/lark/card/callback`.
+To receive card action callbacks, expose a local HTTP listener on `ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR` and point the Lark app's card callback URL at `ALTER_EGO_LARK_CALLBACK_PUBLIC_URL + /lark/card/callback`.
 
-Configure the Lark app's card callback URL to the externally reachable address that maps to `http://<host>:8080/lark/card/callback`.
+Example:
+
+```text
+listen addr: :8080
+public url:  https://callback.example.com
+callback url: https://callback.example.com/lark/card/callback
+```
 
 Task state and operator audit data are stored in SQLite:
 
