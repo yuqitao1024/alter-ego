@@ -13,6 +13,7 @@ type RemoteRunner interface {
 	RespondToServerRequest(ctx context.Context, session RemoteSession, req TaskServerRequest, response string) error
 	HasSession(ctx context.Context, session RemoteSession) (bool, error)
 	StopSession(ctx context.Context, session RemoteSession) error
+	DeleteTaskWorkspace(ctx context.Context, req DeleteWorkspaceRequest) error
 	Events() <-chan RuntimeEvent
 }
 
@@ -27,6 +28,12 @@ type StartRequest struct {
 	PostCloneBootstrap  []string
 	UserRequest         string
 	WorkflowContent     string
+}
+
+type DeleteWorkspaceRequest struct {
+	Machine             MachineConfig
+	TaskID              string
+	RemoteWorkspaceRoot string
 }
 
 type RemoteSession struct {
@@ -44,7 +51,7 @@ type OutputWindow struct {
 }
 
 type SessionState struct {
-	ThreadStatus   string
+	ThreadStatus string
 }
 
 type RuntimeEvent struct {

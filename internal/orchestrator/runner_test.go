@@ -42,7 +42,7 @@ func TestReconnectFailsWhenThreadMissing(t *testing.T) {
 		TaskID:        "task-2",
 		MachineID:     "machine_a",
 		RemoteWorkdir: "/srv/repo",
-		ThreadID: "thread_456",
+		ThreadID:      "thread_456",
 	}
 
 	_, err := ReconnectInteractiveSession(context.Background(), runner, task)
@@ -92,6 +92,11 @@ func (f *fakeRemoteRunner) HasSession(context.Context, RemoteSession) (bool, err
 
 func (f *fakeRemoteRunner) StopSession(context.Context, RemoteSession) error {
 	f.calls = append(f.calls, "stop")
+	return nil
+}
+
+func (f *fakeRemoteRunner) DeleteTaskWorkspace(context.Context, DeleteWorkspaceRequest) error {
+	f.calls = append(f.calls, "delete-workspace")
 	return nil
 }
 

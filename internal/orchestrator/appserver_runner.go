@@ -172,6 +172,15 @@ func (r *AppServerRunner) StopSession(ctx context.Context, session RemoteSession
 	return nil
 }
 
+func (r *AppServerRunner) DeleteTaskWorkspace(ctx context.Context, req DeleteWorkspaceRequest) error {
+	taskRoot := taskRootDir(req.RemoteWorkspaceRoot, req.TaskID)
+	command := wrapRemoteCommand(req.Machine, fmt.Sprintf("rm -rf -- %s", shellQuote(taskRoot)))
+	if _, err := r.runWorkspaceCommand(ctx, req.Machine, "delete remote workspace", command); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *AppServerRunner) runWorkspaceCommand(ctx context.Context, machine MachineConfig, operation string, command string) (string, error) {
 	output, err := r.transport.Run(ctx, machine, command, "")
 	if err != nil {

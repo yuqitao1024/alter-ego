@@ -496,6 +496,16 @@ func TestDeleteRemovesStoppedTask(t *testing.T) {
 	if _, err := store.GetTask(context.Background(), task.TaskID); err == nil {
 		t.Fatal("GetTask returned nil error after delete, want not found")
 	}
+	runner := service.runner.(*fakeServiceRunner)
+	if len(runner.deletedWorkspaces) != 1 {
+		t.Fatalf("deletedWorkspaces = %#v, want one", runner.deletedWorkspaces)
+	}
+	if runner.deletedWorkspaces[0].TaskID != task.TaskID {
+		t.Fatalf("deleted workspace task = %q, want %q", runner.deletedWorkspaces[0].TaskID, task.TaskID)
+	}
+	if runner.deletedWorkspaces[0].RemoteWorkspaceRoot != "/srv/codex-tasks" {
+		t.Fatalf("RemoteWorkspaceRoot = %q, want /srv/codex-tasks", runner.deletedWorkspaces[0].RemoteWorkspaceRoot)
+	}
 }
 
 func newTestService(t *testing.T) (*Service, *Store, func()) {
@@ -609,6 +619,9 @@ type fakeServiceRunner struct {
 	sendErr       error
 	hasSessionErr error
 	stopErr       error
+	deleteErr     error
+
+	deletedWorkspaces []DeleteWorkspaceRequest
 }
 
 func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartRequest) (RemoteSession, error) {
@@ -658,6 +671,15 @@ func (f *fakeServiceRunner) StopSession(context.Context, RemoteSession) error {
 	return nil
 }
 
+func (f *fakeServiceRunner) DeleteTaskWorkspace(_ context.Context, req DeleteWorkspaceRequest) error {
+	f.calls = append(f.calls, "delete-workspace")
+	f.deletedWorkspaces = append(f.deletedWorkspaces, req)
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	return nil
+}
+
 func (f *fakeServiceRunner) RespondToServerRequest(_ context.Context, _ RemoteSession, _ TaskServerRequest, response string) error {
 	f.calls = append(f.calls, "respond")
 	f.serverReplies = append(f.serverReplies, response)
@@ -691,8 +713,8 @@ func (f *fakeDecisionEngine) EvaluateCompletionSignal(context.Context, TaskRun, 
 }
 
 type fakeTaskNotifier struct {
-	lastTaskID        string
-	progressMessages  []string
+	lastTaskID       string
+	progressMessages []string
 }
 
 func (f *fakeTaskNotifier) NotifyTaskQuestion(_ context.Context, task TaskRun) error {

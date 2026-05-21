@@ -277,7 +277,26 @@ func (s *Service) Delete(ctx context.Context, taskID string) error {
 	if err := s.store.DeleteTask(ctx, taskID); err != nil {
 		return err
 	}
-	return s.appendEvent(ctx, taskID, "task_deleted", "task deleted by operator")
+	if err := s.deleteTaskWorkspace(ctx, task); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) deleteTaskWorkspace(ctx context.Context, task TaskRun) error {
+	repository := s.registry.Repositories[task.RepositoryID]
+	if repository == nil {
+		return fmt.Errorf("unknown repository %q for task %q", task.RepositoryID, task.TaskID)
+	}
+	machine := s.registry.Machines[task.MachineID]
+	if machine == nil {
+		return fmt.Errorf("unknown machine %q for task %q", task.MachineID, task.TaskID)
+	}
+	return s.runner.DeleteTaskWorkspace(ctx, DeleteWorkspaceRequest{
+		Machine:             *machine,
+		TaskID:              task.TaskID,
+		RemoteWorkspaceRoot: repository.RemoteWorkspaceRoot,
+	})
 }
 
 func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {

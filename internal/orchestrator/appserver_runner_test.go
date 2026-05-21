@@ -196,6 +196,35 @@ func TestAppServerRunnerStopSessionInterruptsActiveTurn(t *testing.T) {
 	}
 }
 
+func TestAppServerRunnerDeleteTaskWorkspaceRemovesTaskRoot(t *testing.T) {
+	t.Parallel()
+
+	transport := &fakeSSHTransport{}
+	runner := NewAppServerRunner(&fakeCodexRuntime{})
+	runner.transport = transport
+
+	err := runner.DeleteTaskWorkspace(context.Background(), DeleteWorkspaceRequest{
+		Machine: MachineConfig{
+			ID:        "machine_a",
+			Host:      "machine-a.example.com",
+			User:      "coder",
+			ShellInit: []string{"source /opt/env.sh"},
+		},
+		TaskID:              "task-1",
+		RemoteWorkspaceRoot: "/srv/codex-tasks",
+	})
+	if err != nil {
+		t.Fatalf("DeleteTaskWorkspace returned error: %v", err)
+	}
+	if len(transport.commands) != 1 {
+		t.Fatalf("commands = %#v, want one command", transport.commands)
+	}
+	want := "source /opt/env.sh && rm -rf -- '/srv/codex-tasks/task-1'"
+	if transport.commands[0] != want {
+		t.Fatalf("command = %q, want %q", transport.commands[0], want)
+	}
+}
+
 type fakeCodexRuntime struct {
 	startThreadID       string
 	startTurnID         string
