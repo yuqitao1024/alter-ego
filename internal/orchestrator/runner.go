@@ -13,6 +13,7 @@ type RemoteRunner interface {
 	RespondToServerRequest(ctx context.Context, session RemoteSession, req TaskServerRequest, response string) error
 	HasSession(ctx context.Context, session RemoteSession) (bool, error)
 	StopSession(ctx context.Context, session RemoteSession) error
+	CleanupSession(ctx context.Context, session RemoteSession) error
 	DeleteTaskWorkspace(ctx context.Context, req DeleteWorkspaceRequest) error
 	Events() <-chan RuntimeEvent
 }

@@ -95,6 +95,11 @@ func (f *fakeRemoteRunner) StopSession(context.Context, RemoteSession) error {
 	return nil
 }
 
+func (f *fakeRemoteRunner) CleanupSession(context.Context, RemoteSession) error {
+	f.calls = append(f.calls, "cleanup-session")
+	return nil
+}
+
 func (f *fakeRemoteRunner) DeleteTaskWorkspace(context.Context, DeleteWorkspaceRequest) error {
 	f.calls = append(f.calls, "delete-workspace")
 	return nil

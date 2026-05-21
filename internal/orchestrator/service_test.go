@@ -257,6 +257,39 @@ func TestReplyResumesWaitingTaskAndMarksRequestReplied(t *testing.T) {
 	}
 }
 
+func TestStopRejectsNonStoppableStatus(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
+	defer cleanup()
+
+	task := sampleTaskRun("task-stop", StatusRecovering)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	err := service.Stop(context.Background(), task.TaskID)
+	if err == nil {
+		t.Fatal("Stop returned nil error")
+	}
+	if want := `task "task-stop" is recovering and cannot be stopped`; err.Error() != want {
+		t.Fatalf("Stop error = %q, want %q", err.Error(), want)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRecovering {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRecovering)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner.calls = %#v, want none", runner.calls)
+	}
+}
+
 func TestTickSendsCompletionCheckOnlyOnce(t *testing.T) {
 	t.Parallel()
 
@@ -488,6 +521,8 @@ func TestDeleteRemovesStoppedTask(t *testing.T) {
 	defer cleanup()
 
 	task := sampleTaskRun("task-delete-stopped", StatusStopped)
+	task.ThreadID = "thread-delete"
+	task.MachineID = "machine_a"
 	seedTask(t, store, task)
 
 	if err := service.Delete(context.Background(), task.TaskID); err != nil {
@@ -505,6 +540,12 @@ func TestDeleteRemovesStoppedTask(t *testing.T) {
 	}
 	if runner.deletedWorkspaces[0].RemoteWorkspaceRoot != "/srv/codex-tasks" {
 		t.Fatalf("RemoteWorkspaceRoot = %q, want /srv/codex-tasks", runner.deletedWorkspaces[0].RemoteWorkspaceRoot)
+	}
+	if len(runner.cleanedSessions) != 1 {
+		t.Fatalf("cleanedSessions = %#v, want one", runner.cleanedSessions)
+	}
+	if runner.cleanedSessions[0].ThreadID != "thread-delete" {
+		t.Fatalf("cleaned session thread = %q, want thread-delete", runner.cleanedSessions[0].ThreadID)
 	}
 }
 
@@ -657,8 +698,10 @@ type fakeServiceRunner struct {
 	hasSessionErr error
 	stopErr       error
 	deleteErr     error
+	cleanupErr    error
 
 	deletedWorkspaces []DeleteWorkspaceRequest
+	cleanedSessions   []RemoteSession
 }
 
 func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartRequest) (RemoteSession, error) {
@@ -713,6 +756,15 @@ func (f *fakeServiceRunner) DeleteTaskWorkspace(_ context.Context, req DeleteWor
 	f.deletedWorkspaces = append(f.deletedWorkspaces, req)
 	if f.deleteErr != nil {
 		return f.deleteErr
+	}
+	return nil
+}
+
+func (f *fakeServiceRunner) CleanupSession(_ context.Context, session RemoteSession) error {
+	f.calls = append(f.calls, "cleanup-session")
+	f.cleanedSessions = append(f.cleanedSessions, session)
+	if f.cleanupErr != nil {
+		return f.cleanupErr
 	}
 	return nil
 }

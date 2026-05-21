@@ -237,6 +237,9 @@ func (s *Service) Stop(ctx context.Context, taskID string) error {
 	if err != nil {
 		return err
 	}
+	if !task.Status.IsStoppable() {
+		return fmt.Errorf("task %q is %s and cannot be stopped", taskID, task.Status)
+	}
 
 	if err := s.runner.StopSession(ctx, sessionFromTask(task)); err != nil {
 		return fmt.Errorf("stop task %q: %w", taskID, err)
@@ -247,11 +250,7 @@ func (s *Service) Stop(ctx context.Context, taskID string) error {
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return fmt.Errorf("persist stopped task %q: %w", taskID, err)
 	}
-	if err := s.appendEvent(ctx, task.TaskID, "task_stopped", "task stopped by operator"); err != nil {
-		return err
-	}
-
-	return nil
+	return s.appendEvent(ctx, task.TaskID, "task_stopped", "task stopped by operator")
 }
 
 func (s *Service) List(ctx context.Context) ([]TaskRun, error) {
@@ -273,6 +272,9 @@ func (s *Service) Delete(ctx context.Context, taskID string) error {
 	}
 	if !task.Status.IsDeletable() {
 		return fmt.Errorf("task %q is not deletable in status %q", taskID, task.Status)
+	}
+	if err := s.runner.CleanupSession(ctx, sessionFromTask(task)); err != nil && !errors.Is(err, ErrAppServerStopUnsupported) {
+		return fmt.Errorf("cleanup app-server session for task %q: %w", taskID, err)
 	}
 	if err := s.store.DeleteTask(ctx, taskID); err != nil {
 		return err

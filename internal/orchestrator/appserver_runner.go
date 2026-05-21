@@ -18,6 +18,7 @@ type codexRuntime interface {
 	SendTaskInput(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID, input string) (string, error)
 	RespondToServerRequest(ctx context.Context, machine codexappserver.MachineRuntimeConfig, requestID string, result any) error
 	InterruptTask(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID string) error
+	CleanupTaskThread(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID string) error
 	Snapshot(machineID, threadID string) (codexappserver.ThreadSnapshot, bool)
 }
 
@@ -167,6 +168,9 @@ func (r *AppServerRunner) StopSession(ctx context.Context, session RemoteSession
 	}
 
 	if err := r.manager.InterruptTask(ctx, machineRuntimeConfig(machine), session.ThreadID, session.ActiveTurnID); err != nil {
+		if isIdempotentAppServerCleanupError(err) {
+			return nil
+		}
 		return fmt.Errorf("interrupt app-server turn: %w", err)
 	}
 	return nil
@@ -179,6 +183,47 @@ func (r *AppServerRunner) DeleteTaskWorkspace(ctx context.Context, req DeleteWor
 		return err
 	}
 	return nil
+}
+
+func (r *AppServerRunner) CleanupSession(ctx context.Context, session RemoteSession) error {
+	if strings.TrimSpace(session.ThreadID) == "" {
+		return ErrAppServerStopUnsupported
+	}
+
+	machine, err := r.machineResolver(session.MachineID)
+	if err != nil {
+		return err
+	}
+	if err := r.manager.CleanupTaskThread(ctx, machineRuntimeConfig(machine), session.ThreadID); err != nil {
+		if isIdempotentAppServerCleanupError(err) {
+			return nil
+		}
+		return fmt.Errorf("cleanup app-server thread: %w", err)
+	}
+	return nil
+}
+
+func isIdempotentAppServerCleanupError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "no active turn"):
+		return true
+	case strings.Contains(text, "not found"):
+		return true
+	case strings.Contains(text, "notloaded"):
+		return true
+	case strings.Contains(text, "not loaded"):
+		return true
+	case strings.Contains(text, "not subscribed"):
+		return true
+	case strings.Contains(text, "notsubscribed"):
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *AppServerRunner) runWorkspaceCommand(ctx context.Context, machine MachineConfig, operation string, command string) (string, error) {

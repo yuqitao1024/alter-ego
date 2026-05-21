@@ -103,6 +103,15 @@ func (s TaskStatus) IsDeletable() bool {
 	}
 }
 
+func (s TaskStatus) IsStoppable() bool {
+	switch s {
+	case StatusRunning, StatusWaitingUserInput:
+		return true
+	default:
+		return false
+	}
+}
+
 type TaskQuestion struct {
 	ID             int64
 	TaskID         string

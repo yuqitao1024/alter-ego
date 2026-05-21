@@ -650,6 +650,105 @@ func TestClientRespondToServerRequestSendsJSONRPCResult(t *testing.T) {
 	}
 }
 
+func TestClientRoutesNumericResponseID(t *testing.T) {
+	t.Parallel()
+
+	transport := &stubTransport{
+		recvCh: make(chan recvResult, 1),
+	}
+	client := newTestClient(transport)
+	defer client.Close()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		transport.recvCh <- recvResult{payload: []byte(`{"id":1,"result":{}}`)}
+	}()
+
+	if err := client.InterruptTurn(context.Background(), TurnInterruptRequest{
+		ThreadID: "thread-1",
+		TurnID:   "turn-1",
+	}); err != nil {
+		t.Fatalf("InterruptTurn returned error: %v", err)
+	}
+}
+
+func TestClientUnsubscribesAndArchivesThread(t *testing.T) {
+	t.Parallel()
+
+	transport := &stubTransport{
+		recvCh: make(chan recvResult, 2),
+	}
+	client := newTestClient(transport)
+	defer client.Close()
+
+	unsubscribeCh := make(chan struct{})
+	go func() {
+		deadline := time.After(time.Second)
+		for len(transport.sent) < 1 {
+			select {
+			case <-deadline:
+				t.Errorf("unsubscribe request was not sent")
+				return
+			default:
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+		transport.recvCh <- recvResult{payload: mustJSON(t, rpcMessage{
+			ID:     "1",
+			Result: mustJSON(t, map[string]any{"status": "unsubscribed"}),
+		})}
+		close(unsubscribeCh)
+	}()
+
+	status, err := client.UnsubscribeThread(context.Background(), "thread-1")
+	if err != nil {
+		t.Fatalf("UnsubscribeThread returned error: %v", err)
+	}
+	if status != "unsubscribed" {
+		t.Fatalf("status = %q, want unsubscribed", status)
+	}
+	<-unsubscribeCh
+
+	go func() {
+		deadline := time.After(time.Second)
+		for len(transport.sent) < 2 {
+			select {
+			case <-deadline:
+				t.Errorf("archive request was not sent")
+				return
+			default:
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+		transport.recvCh <- recvResult{payload: mustJSON(t, rpcMessage{
+			ID:     "2",
+			Result: mustJSON(t, map[string]any{}),
+		})}
+	}()
+
+	if err := client.ArchiveThread(context.Background(), "thread-1"); err != nil {
+		t.Fatalf("ArchiveThread returned error: %v", err)
+	}
+
+	if len(transport.sent) != 2 {
+		t.Fatalf("len(sent) = %d, want 2", len(transport.sent))
+	}
+	var unsubscribe rpcMessage
+	if err := json.Unmarshal(transport.sent[0], &unsubscribe); err != nil {
+		t.Fatalf("Unmarshal unsubscribe: %v", err)
+	}
+	if unsubscribe.Method != "thread/unsubscribe" {
+		t.Fatalf("unsubscribe.Method = %q, want thread/unsubscribe", unsubscribe.Method)
+	}
+	var archive rpcMessage
+	if err := json.Unmarshal(transport.sent[1], &archive); err != nil {
+		t.Fatalf("Unmarshal archive: %v", err)
+	}
+	if archive.Method != "thread/archive" {
+		t.Fatalf("archive.Method = %q, want thread/archive", archive.Method)
+	}
+}
+
 func TestClientSteerTurnSendsThreadIdAndExpectedTurnId(t *testing.T) {
 	t.Parallel()
 

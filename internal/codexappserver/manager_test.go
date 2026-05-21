@@ -170,6 +170,48 @@ func TestManagerResumeTaskThreadResumesThreadOnFirstAttach(t *testing.T) {
 	}
 }
 
+func TestManagerCleanupTaskThreadUnsubscribesAndArchives(t *testing.T) {
+	t.Parallel()
+
+	client := newFakeClient()
+	manager := NewManager(ManagerOptions{
+		DialClient: func(context.Context, MachineRuntimeConfig) (ClientAPI, error) {
+			return client, nil
+		},
+	})
+
+	machine := MachineRuntimeConfig{MachineID: "machine_a", WebSocketURL: "ws://machine-a:4317"}
+	if err := manager.CleanupTaskThread(context.Background(), machine, "thread-1"); err != nil {
+		t.Fatalf("CleanupTaskThread returned error: %v", err)
+	}
+	if client.unsubscribedThreadID != "thread-1" {
+		t.Fatalf("unsubscribedThreadID = %q, want thread-1", client.unsubscribedThreadID)
+	}
+	if client.archivedThreadID != "thread-1" {
+		t.Fatalf("archivedThreadID = %q, want thread-1", client.archivedThreadID)
+	}
+}
+
+func TestManagerCleanupTaskThreadArchivesWhenAlreadyUnsubscribed(t *testing.T) {
+	t.Parallel()
+
+	client := newFakeClient()
+	client.unsubscribeStatus = "notSubscribed"
+	manager := NewManager(ManagerOptions{
+		DialClient: func(context.Context, MachineRuntimeConfig) (ClientAPI, error) {
+			return client, nil
+		},
+	})
+
+	machine := MachineRuntimeConfig{MachineID: "machine_a", WebSocketURL: "ws://machine-a:4317"}
+	if err := manager.CleanupTaskThread(context.Background(), machine, "thread-1"); err != nil {
+		t.Fatalf("CleanupTaskThread returned error: %v", err)
+	}
+	if client.archivedThreadID != "thread-1" {
+		t.Fatalf("archivedThreadID = %q, want thread-1", client.archivedThreadID)
+	}
+}
+
 func TestManagerResumeTaskThreadHydratesSnapshotFromResumeHistory(t *testing.T) {
 	t.Parallel()
 
@@ -245,6 +287,9 @@ type fakeClient struct {
 	notifications chan rpcMessage
 	resumeThreadIDs []string
 	resumeResult json.RawMessage
+	unsubscribedThreadID string
+	archivedThreadID string
+	unsubscribeStatus string
 }
 
 func newFakeClient() *fakeClient {
@@ -277,3 +322,14 @@ func (f *fakeClient) SteerTurn(context.Context, TurnSteerRequest) (string, error
 	return "turn-1", nil
 }
 func (f *fakeClient) InterruptTurn(context.Context, TurnInterruptRequest) error { return nil }
+func (f *fakeClient) UnsubscribeThread(_ context.Context, threadID string) (string, error) {
+	f.unsubscribedThreadID = threadID
+	if f.unsubscribeStatus != "" {
+		return f.unsubscribeStatus, nil
+	}
+	return "unsubscribed", nil
+}
+func (f *fakeClient) ArchiveThread(_ context.Context, threadID string) error {
+	f.archivedThreadID = threadID
+	return nil
+}

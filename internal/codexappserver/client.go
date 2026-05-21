@@ -105,6 +105,18 @@ func (c *Client) InterruptTurn(ctx context.Context, req TurnInterruptRequest) er
 	return c.call(ctx, "turn/interrupt", req, nil)
 }
 
+func (c *Client) UnsubscribeThread(ctx context.Context, threadID string) (string, error) {
+	var result ThreadUnsubscribeResult
+	if err := c.call(ctx, "thread/unsubscribe", ThreadUnsubscribeRequest{ThreadID: threadID}, &result); err != nil {
+		return "", err
+	}
+	return result.Status, nil
+}
+
+func (c *Client) ArchiveThread(ctx context.Context, threadID string) error {
+	return c.call(ctx, "thread/archive", ThreadArchiveRequest{ThreadID: threadID}, nil)
+}
+
 func (c *Client) ResumeThread(ctx context.Context, threadID string) (Thread, error) {
 	var result struct {
 		Thread Thread `json:"thread"`
@@ -130,7 +142,7 @@ func (c *Client) RespondToServerRequest(ctx context.Context, requestID string, r
 	}
 
 	responseBytes, err := json.Marshal(rpcMessage{
-		ID:     requestID,
+		ID:     rpcID(requestID),
 		Result: payload,
 	})
 	if err != nil {
@@ -204,7 +216,7 @@ func (c *Client) dispatch(ctx context.Context, method string, params any) (strin
 	c.mu.Unlock()
 
 	requestBytes, err := json.Marshal(rpcMessage{
-		ID:     requestID,
+		ID:     rpcID(requestID),
 		Method: method,
 		Params: params,
 	})
@@ -277,9 +289,9 @@ func (c *Client) readLoop() {
 
 func (c *Client) routeResponse(message rpcMessage) bool {
 	c.mu.Lock()
-	responseCh, ok := c.pending[message.ID]
+	responseCh, ok := c.pending[message.ID.String()]
 	if ok {
-		delete(c.pending, message.ID)
+		delete(c.pending, message.ID.String())
 	}
 	c.mu.Unlock()
 

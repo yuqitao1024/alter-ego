@@ -28,6 +28,8 @@ type ClientAPI interface {
 	StartTurn(ctx context.Context, req TurnStartRequest) (string, error)
 	SteerTurn(ctx context.Context, req TurnSteerRequest) (string, error)
 	InterruptTurn(ctx context.Context, req TurnInterruptRequest) error
+	UnsubscribeThread(ctx context.Context, threadID string) (string, error)
+	ArchiveThread(ctx context.Context, threadID string) error
 	ResumeThread(ctx context.Context, threadID string) (Thread, error)
 	RespondToServerRequest(ctx context.Context, requestID string, result any) error
 }
@@ -188,6 +190,30 @@ func (m *Manager) InterruptTask(ctx context.Context, machine MachineRuntimeConfi
 		ThreadID: threadID,
 		TurnID:   activeTurnID,
 	})
+}
+
+func (m *Manager) CleanupTaskThread(ctx context.Context, machine MachineRuntimeConfig, threadID string) error {
+	if strings.TrimSpace(threadID) == "" {
+		return nil
+	}
+	runtime, err := m.ensureMachine(ctx, machine)
+	if err != nil {
+		return err
+	}
+
+	if _, err := runtime.client.UnsubscribeThread(ctx, threadID); err != nil {
+		return fmt.Errorf("thread/unsubscribe: %w", err)
+	}
+	if err := runtime.client.ArchiveThread(ctx, threadID); err != nil {
+		return fmt.Errorf("thread/archive: %w", err)
+	}
+
+	m.mu.Lock()
+	if current := m.machines[machine.MachineID]; current == runtime {
+		delete(runtime.watchers, threadID)
+	}
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *Manager) RespondToServerRequest(ctx context.Context, machine MachineRuntimeConfig, requestID string, result any) error {

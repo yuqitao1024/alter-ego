@@ -2,12 +2,39 @@ package codexappserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
+type rpcID string
+
+func (id *rpcID) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*id = rpcID(text)
+		return nil
+	}
+
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err == nil {
+		*id = rpcID(number.String())
+		return nil
+	}
+
+	return fmt.Errorf("unsupported JSON-RPC id: %s", string(data))
+}
+
+func (id rpcID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(id))
+}
+
+func (id rpcID) String() string {
+	return string(id)
+}
+
 type rpcMessage struct {
 	JSONRPC string          `json:"jsonrpc,omitempty"`
-	ID      string          `json:"id,omitempty"`
+	ID      rpcID           `json:"id,omitempty"`
 	Method  string          `json:"method,omitempty"`
 	Params  any             `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
@@ -96,6 +123,18 @@ type ThreadResumeRequest struct {
 	ThreadID string `json:"threadId"`
 }
 
+type ThreadUnsubscribeRequest struct {
+	ThreadID string `json:"threadId"`
+}
+
+type ThreadUnsubscribeResult struct {
+	Status string `json:"status"`
+}
+
+type ThreadArchiveRequest struct {
+	ThreadID string `json:"threadId"`
+}
+
 type Thread struct {
 	ID     string          `json:"id"`
 	Status json.RawMessage `json:"status,omitempty"`
@@ -162,7 +201,7 @@ func DecodeServerRequest(msg rpcMessage) (ServerRequest, bool, error) {
 		threadID = payload.Thread.ID
 	}
 	return ServerRequest{
-		RequestID: msg.ID,
+		RequestID: msg.ID.String(),
 		Method:    msg.Method,
 		ThreadID:  threadID,
 		TurnID:    payload.TurnID,

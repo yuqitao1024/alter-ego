@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
@@ -196,6 +197,33 @@ func TestAppServerRunnerStopSessionInterruptsActiveTurn(t *testing.T) {
 	}
 }
 
+func TestAppServerRunnerStopSessionTreatsNoActiveTurnAsStopped(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCodexRuntime{interruptErr: errors.New("turn/interrupt: no active turn to interrupt")}
+	runner := NewAppServerRunner(runtime)
+	runner.machineResolver = func(machineID string) (MachineConfig, error) {
+		return MachineConfig{
+			ID:                   machineID,
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		}, nil
+	}
+
+	err := runner.StopSession(context.Background(), RemoteSession{
+		MachineID:    "machine_a",
+		ThreadID:     "thread-1",
+		ActiveTurnID: "turn-1",
+	})
+	if err != nil {
+		t.Fatalf("StopSession returned error: %v", err)
+	}
+}
+
 func TestAppServerRunnerDeleteTaskWorkspaceRemovesTaskRoot(t *testing.T) {
 	t.Parallel()
 
@@ -225,6 +253,61 @@ func TestAppServerRunnerDeleteTaskWorkspaceRemovesTaskRoot(t *testing.T) {
 	}
 }
 
+func TestAppServerRunnerCleanupSessionCleansAppServerThread(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCodexRuntime{}
+	runner := NewAppServerRunner(runtime)
+	runner.machineResolver = func(machineID string) (MachineConfig, error) {
+		return MachineConfig{
+			ID:                   machineID,
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		}, nil
+	}
+
+	err := runner.CleanupSession(context.Background(), RemoteSession{
+		MachineID: "machine_a",
+		ThreadID:  "thread-1",
+	})
+	if err != nil {
+		t.Fatalf("CleanupSession returned error: %v", err)
+	}
+	if runtime.cleanupThreadID != "thread-1" {
+		t.Fatalf("cleanupThreadID = %q, want thread-1", runtime.cleanupThreadID)
+	}
+}
+
+func TestAppServerRunnerCleanupSessionTreatsMissingThreadAsClean(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCodexRuntime{cleanupErr: errors.New("thread/archive: thread not found")}
+	runner := NewAppServerRunner(runtime)
+	runner.machineResolver = func(machineID string) (MachineConfig, error) {
+		return MachineConfig{
+			ID:                   machineID,
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		}, nil
+	}
+
+	err := runner.CleanupSession(context.Background(), RemoteSession{
+		MachineID: "machine_a",
+		ThreadID:  "thread-1",
+	})
+	if err != nil {
+		t.Fatalf("CleanupSession returned error: %v", err)
+	}
+}
+
 type fakeCodexRuntime struct {
 	startThreadID       string
 	startTurnID         string
@@ -237,6 +320,9 @@ type fakeCodexRuntime struct {
 
 	interruptThreadID string
 	interruptTurnID   string
+	interruptErr      error
+	cleanupThreadID   string
+	cleanupErr        error
 
 	snapshots map[string]codexappserver.ThreadSnapshot
 }
@@ -272,7 +358,12 @@ func (f *fakeCodexRuntime) RespondToServerRequest(_ context.Context, _ codexapps
 func (f *fakeCodexRuntime) InterruptTask(_ context.Context, _ codexappserver.MachineRuntimeConfig, threadID, activeTurnID string) error {
 	f.interruptThreadID = threadID
 	f.interruptTurnID = activeTurnID
-	return nil
+	return f.interruptErr
+}
+
+func (f *fakeCodexRuntime) CleanupTaskThread(_ context.Context, _ codexappserver.MachineRuntimeConfig, threadID string) error {
+	f.cleanupThreadID = threadID
+	return f.cleanupErr
 }
 
 func (f *fakeCodexRuntime) Snapshot(machineID, threadID string) (codexappserver.ThreadSnapshot, bool) {
