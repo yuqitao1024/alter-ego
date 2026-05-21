@@ -184,18 +184,7 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 		if status != "" {
 			w.snapshot.ActiveTurnStatus = status
 		}
-	case "item/started", "item/completed", "item/agentMessage/delta":
-		if msg.Method == "item/agentMessage/delta" {
-			itemID, text, ok := decodeAgentMessageDelta(params)
-			if !ok {
-				return
-			}
-			w.snapshot.LastItemID = itemID
-			w.snapshot.LatestAgentMessage = strings.TrimSpace(w.snapshot.LatestAgentMessage + text)
-			w.snapshot.LatestSummary = w.snapshot.LatestAgentMessage
-			return
-		}
-
+	case "item/started", "item/completed":
 		item, ok := decodeItemNotification(params)
 		if !ok {
 			return
@@ -211,6 +200,53 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 		case "command", "commandExecution":
 			w.snapshot.LatestCommand = strings.TrimSpace(firstNonEmpty(item.Command, item.Text))
 		}
+	case "item/agentMessage/delta", "item/reasoning/summaryTextDelta":
+		itemID, turnID, text, ok := decodeTextDelta(params)
+		if !ok {
+			return
+		}
+		w.snapshot.LastItemID = itemID
+		if turnID != "" {
+			w.snapshot.ActiveTurnID = turnID
+		}
+		w.snapshot.LatestAgentMessage = strings.TrimSpace(w.snapshot.LatestAgentMessage + text)
+		w.snapshot.LatestSummary = w.snapshot.LatestAgentMessage
+	case "item/plan/delta":
+		itemID, turnID, text, ok := decodeTextDelta(params)
+		if !ok {
+			return
+		}
+		w.snapshot.LastItemID = itemID
+		if turnID != "" {
+			w.snapshot.ActiveTurnID = turnID
+		}
+		w.snapshot.LatestPlan = strings.TrimSpace(w.snapshot.LatestPlan + text)
+		if w.snapshot.LatestSummary == "" {
+			w.snapshot.LatestSummary = w.snapshot.LatestPlan
+		}
+	case "item/commandExecution/outputDelta":
+		itemID, turnID, text, ok := decodeTextDelta(params)
+		if !ok {
+			return
+		}
+		w.snapshot.LastItemID = itemID
+		if turnID != "" {
+			w.snapshot.ActiveTurnID = turnID
+		}
+		w.snapshot.LatestCommand = strings.TrimSpace(w.snapshot.LatestCommand + text)
+		w.snapshot.LatestSummary = w.snapshot.LatestCommand
+	case "turn/plan/updated":
+		turnID, text, ok := decodeTurnPlanUpdated(params)
+		if !ok {
+			return
+		}
+		if turnID != "" {
+			w.snapshot.ActiveTurnID = turnID
+		}
+		w.snapshot.LatestPlan = text
+		if w.snapshot.LatestSummary == "" {
+			w.snapshot.LatestSummary = text
+		}
 	}
 }
 
@@ -222,8 +258,11 @@ func (w *ThreadWatcher) accepts(method string, params json.RawMessage) bool {
 	case "turn/started", "turn/completed":
 		threadID, _, _, ok := decodeTurnScope(params)
 		return ok && threadID == w.threadID
-	case "item/started", "item/completed", "item/agentMessage/delta":
+	case "item/started", "item/completed", "item/agentMessage/delta", "item/reasoning/summaryTextDelta", "item/plan/delta", "item/commandExecution/outputDelta":
 		threadID, _, ok := decodeItemScope(params)
+		return ok && threadID == w.threadID
+	case "turn/plan/updated":
+		threadID, _, ok := decodeTurnPlanScope(params)
 		return ok && threadID == w.threadID
 	default:
 		return false
@@ -249,6 +288,7 @@ type turnNotification struct {
 
 type itemNotification struct {
 	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
 	Item     struct {
 		ID      string `json:"id"`
 		Type    string `json:"type"`
@@ -257,6 +297,12 @@ type itemNotification struct {
 	} `json:"item"`
 	ItemID string `json:"itemId"`
 	Delta  string `json:"delta"`
+}
+
+type turnPlanNotification struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+	Plan     string `json:"plan"`
 }
 
 type statusEnvelope struct {
@@ -321,11 +367,16 @@ func decodeItemNotification(params json.RawMessage) (struct {
 }
 
 func decodeAgentMessageDelta(params json.RawMessage) (string, string, bool) {
+	itemID, _, text, ok := decodeTextDelta(params)
+	return itemID, text, ok
+}
+
+func decodeTextDelta(params json.RawMessage) (string, string, string, bool) {
 	var payload itemNotification
 	if err := json.Unmarshal(params, &payload); err != nil {
-		return "", "", false
+		return "", "", "", false
 	}
-	return payload.ItemID, payload.Delta, payload.ItemID != ""
+	return payload.ItemID, payload.TurnID, payload.Delta, payload.ItemID != ""
 }
 
 func decodeItemScope(params json.RawMessage) (string, string, bool) {
@@ -334,6 +385,23 @@ func decodeItemScope(params json.RawMessage) (string, string, bool) {
 		return "", "", false
 	}
 	return payload.ThreadID, firstNonEmpty(payload.Item.ID, payload.ItemID), payload.ThreadID != ""
+}
+
+func decodeTurnPlanUpdated(params json.RawMessage) (string, string, bool) {
+	var payload turnPlanNotification
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	text := strings.TrimSpace(payload.Plan)
+	return payload.TurnID, text, text != ""
+}
+
+func decodeTurnPlanScope(params json.RawMessage) (string, string, bool) {
+	var payload turnPlanNotification
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", "", false
+	}
+	return payload.ThreadID, payload.TurnID, payload.ThreadID != ""
 }
 
 func decodeStatus(raw json.RawMessage) string {

@@ -216,6 +216,65 @@ func TestThreadWatcherAppliesCurrentProtocolNotifications(t *testing.T) {
 	}
 }
 
+func TestThreadWatcherAppliesStreamingProgressNotifications(t *testing.T) {
+	t.Parallel()
+
+	watcher := newThreadWatcher("thread-1")
+
+	watcher.apply(rpcMessage{
+		Method: "turn/plan/updated",
+		Params: mustRawJSON(t, map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"plan":     "1. Read papers\n2. Write report",
+		}),
+	})
+	watcher.apply(rpcMessage{
+		Method: "item/reasoning/summaryTextDelta",
+		Params: mustRawJSON(t, map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"itemId":   "reasoning-1",
+			"delta":    "正在检索论文和 GitHub 资料。",
+		}),
+	})
+	watcher.apply(rpcMessage{
+		Method: "item/commandExecution/outputDelta",
+		Params: mustRawJSON(t, map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"itemId":   "cmd-1",
+			"delta":    "Downloaded 12 references.\n",
+		}),
+	})
+	watcher.apply(rpcMessage{
+		Method: "item/plan/delta",
+		Params: mustRawJSON(t, map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"itemId":   "plan-1",
+			"delta":    "\n3. Generate PPT",
+		}),
+	})
+
+	snapshot := watcher.Snapshot()
+	if snapshot.ActiveTurnID != "turn-1" {
+		t.Fatalf("ActiveTurnID = %q, want turn-1", snapshot.ActiveTurnID)
+	}
+	if snapshot.LatestPlan != "1. Read papers\n2. Write report\n3. Generate PPT" {
+		t.Fatalf("LatestPlan = %q", snapshot.LatestPlan)
+	}
+	if snapshot.LatestAgentMessage != "正在检索论文和 GitHub 资料。" {
+		t.Fatalf("LatestAgentMessage = %q", snapshot.LatestAgentMessage)
+	}
+	if snapshot.LatestCommand != "Downloaded 12 references." {
+		t.Fatalf("LatestCommand = %q", snapshot.LatestCommand)
+	}
+	if snapshot.LatestSummary != "Downloaded 12 references." {
+		t.Fatalf("LatestSummary = %q, want command output summary", snapshot.LatestSummary)
+	}
+}
+
 func mustRawJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 
