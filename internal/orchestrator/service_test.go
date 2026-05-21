@@ -467,6 +467,37 @@ func TestRecoveringTaskFailsWhenThreadIsMissing(t *testing.T) {
 	}
 }
 
+func TestDeleteRejectsActiveTask(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	task := sampleTaskRun("task-delete-active", StatusRunning)
+	seedTask(t, store, task)
+
+	if err := service.Delete(context.Background(), task.TaskID); err == nil {
+		t.Fatal("Delete returned nil error, want rejection")
+	}
+}
+
+func TestDeleteRemovesStoppedTask(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	task := sampleTaskRun("task-delete-stopped", StatusStopped)
+	seedTask(t, store, task)
+
+	if err := service.Delete(context.Background(), task.TaskID); err != nil {
+		t.Fatalf("Delete returned error: %v", err)
+	}
+	if _, err := store.GetTask(context.Background(), task.TaskID); err == nil {
+		t.Fatal("GetTask returned nil error after delete, want not found")
+	}
+}
+
 func newTestService(t *testing.T) (*Service, *Store, func()) {
 	t.Helper()
 	return newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{}, &fakeTaskNotifier{})

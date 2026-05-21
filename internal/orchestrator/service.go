@@ -258,8 +258,26 @@ func (s *Service) List(ctx context.Context) ([]TaskRun, error) {
 	return s.store.ListActiveTasks(ctx)
 }
 
+func (s *Service) ListAll(ctx context.Context) ([]TaskRun, error) {
+	return s.store.ListTasks(ctx)
+}
+
 func (s *Service) Status(ctx context.Context, taskID string) (TaskRun, error) {
 	return s.store.GetTask(ctx, taskID)
+}
+
+func (s *Service) Delete(ctx context.Context, taskID string) error {
+	task, err := s.store.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if !task.Status.IsDeletable() {
+		return fmt.Errorf("task %q is not deletable in status %q", taskID, task.Status)
+	}
+	if err := s.store.DeleteTask(ctx, taskID); err != nil {
+		return err
+	}
+	return s.appendEvent(ctx, taskID, "task_deleted", "task deleted by operator")
 }
 
 func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {

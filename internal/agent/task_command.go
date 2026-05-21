@@ -12,9 +12,11 @@ import (
 type TaskService interface {
 	StartTask(ctx context.Context, templateID, createdBy, userRequest string) (orchestrator.TaskRun, error)
 	List(ctx context.Context) ([]orchestrator.TaskRun, error)
+	ListAll(ctx context.Context) ([]orchestrator.TaskRun, error)
 	Status(ctx context.Context, taskID string) (orchestrator.TaskRun, error)
 	Reply(ctx context.Context, taskID, text string) error
 	Stop(ctx context.Context, taskID string) error
+	Delete(ctx context.Context, taskID string) error
 }
 
 type TaskCommandHandler struct {
@@ -52,7 +54,18 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		}
 		reply.Text = fmt.Sprintf("Started task %s\ntemplate: %s\nrepository: %s\nmachine: %s\nstatus: %s", task.TaskID, task.TemplateID, task.RepositoryID, task.MachineID, task.Status)
 	case "list":
-		tasks, err := h.service.List(ctx)
+		showAll := len(fields) == 3 && fields[2] == "-a"
+		if len(fields) > 3 || (len(fields) == 3 && !showAll) {
+			reply.Text = "Usage: /task list [-a]"
+			return reply, nil
+		}
+		var tasks []orchestrator.TaskRun
+		var err error
+		if showAll {
+			tasks, err = h.service.ListAll(ctx)
+		} else {
+			tasks, err = h.service.List(ctx)
+		}
 		if err != nil {
 			return reply, err
 		}
@@ -106,8 +119,18 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 			return reply, err
 		}
 		reply.Text = fmt.Sprintf("Task %s stopped.", taskID)
+	case "delete":
+		if len(fields) != 3 {
+			reply.Text = "Usage: /task delete <task-id>"
+			return reply, nil
+		}
+		taskID := fields[2]
+		if err := h.service.Delete(ctx, taskID); err != nil {
+			return reply, err
+		}
+		reply.Text = fmt.Sprintf("Task %s deleted.", taskID)
 	default:
-		reply.Text = "Usage: /task <start|list|status|reply|stop> ..."
+		reply.Text = "Usage: /task <start|list|status|reply|stop|delete> ..."
 	}
 
 	return reply, nil

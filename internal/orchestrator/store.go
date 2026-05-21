@@ -194,6 +194,25 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 	return task, nil
 }
 
+func (s *Store) DeleteTask(ctx context.Context, taskID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM tasks WHERE task_id = ?`, taskID)
+	if err != nil {
+		return fmt.Errorf("delete task %q: %w", taskID, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete task %q: rows affected: %w", taskID, err)
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM task_events WHERE task_id = ?`, taskID)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM task_questions WHERE task_id = ?`, taskID)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM task_server_requests WHERE task_id = ?`, taskID)
+	return nil
+}
+
 func (s *Store) GetTaskByThread(ctx context.Context, threadID string) (TaskRun, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
@@ -270,6 +289,52 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list active tasks: %w", err)
+	}
+
+	return tasks, nil
+}
+
+func (s *Store) ListTasks(ctx context.Context) ([]TaskRun, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			task_id,
+			template_id,
+			repository_id,
+			machine_id,
+			status,
+			user_request,
+			created_by,
+			remote_workdir,
+			thread_id,
+			active_turn_id,
+			last_input,
+			last_output_summary,
+			last_decision_action,
+			pending_request_id,
+			completion_check_status,
+			completion_check_sent_at,
+			completion_check_done_at,
+			awaiting_question,
+			created_at,
+			updated_at
+		FROM tasks
+		ORDER BY created_at, task_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []TaskRun
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list tasks: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
 	}
 
 	return tasks, nil

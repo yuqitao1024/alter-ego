@@ -94,6 +94,15 @@ type TaskEvent struct {
 	CreatedAt time.Time
 }
 
+func (s TaskStatus) IsDeletable() bool {
+	switch s {
+	case StatusCompleted, StatusFailed, StatusStopped:
+		return true
+	default:
+		return false
+	}
+}
+
 type TaskQuestion struct {
 	ID             int64
 	TaskID         string

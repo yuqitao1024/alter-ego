@@ -272,6 +272,49 @@ func TestStoreListsActiveTasksForScheduler(t *testing.T) {
 	}
 }
 
+func TestStoreListsAllTasks(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	tasks := []TaskRun{
+		sampleTaskRun("task-pending", StatusPending),
+		sampleTaskRun("task-running", StatusRunning),
+		sampleTaskRun("task-completed", StatusCompleted),
+	}
+	for _, task := range tasks {
+		if err := store.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask(%q) returned error: %v", task.TaskID, err)
+		}
+	}
+
+	got, err := store.ListTasks(ctx)
+	if err != nil {
+		t.Fatalf("ListTasks returned error: %v", err)
+	}
+	if len(got) != len(tasks) {
+		t.Fatalf("len(ListTasks) = %d, want %d", len(got), len(tasks))
+	}
+}
+
+func TestStoreDeletesTask(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	task := sampleTaskRun("task-delete", StatusStopped)
+	if err := store.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask returned error: %v", err)
+	}
+
+	if err := store.DeleteTask(ctx, task.TaskID); err != nil {
+		t.Fatalf("DeleteTask returned error: %v", err)
+	}
+	if _, err := store.GetTask(ctx, task.TaskID); err == nil {
+		t.Fatal("GetTask returned nil error after delete, want not found")
+	}
+}
+
 func TestStoreAppendsAndListsTaskEvents(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
