@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
@@ -130,6 +131,66 @@ func TestAppServerRunnerSendInteractiveInputSteersActiveTurn(t *testing.T) {
 	}
 	if updated.ActiveTurnID != "turn-999" {
 		t.Fatalf("updated.ActiveTurnID = %q, want turn-999", updated.ActiveTurnID)
+	}
+	if runtime.sendRequest.ThreadID != "thread-1" {
+		t.Fatalf("sendRequest.ThreadID = %q, want thread-1", runtime.sendRequest.ThreadID)
+	}
+	if runtime.sendRequest.Cwd != "" {
+		t.Fatalf("sendRequest.Cwd = %q, want empty when steering existing turn", runtime.sendRequest.Cwd)
+	}
+	if runtime.sendRequest.ApprovalPolicy != "never" {
+		t.Fatalf("sendRequest.ApprovalPolicy = %q, want never", runtime.sendRequest.ApprovalPolicy)
+	}
+	if runtime.sendRequest.SandboxPolicy.Type != "workspace-write" {
+		t.Fatalf("sendRequest.SandboxPolicy.Type = %q, want workspace-write", runtime.sendRequest.SandboxPolicy.Type)
+	}
+	if !runtime.sendRequest.SandboxPolicy.NetworkAccess {
+		t.Fatal("sendRequest.SandboxPolicy.NetworkAccess = false, want true")
+	}
+}
+
+func TestAppServerRunnerSendInteractiveInputStartsTurnWithSessionContext(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCodexRuntime{
+		steerErr: errors.New("turn/steer: no active turn to steer"),
+	}
+	runner := NewAppServerRunner(runtime)
+	runner.machineResolver = func(machineID string) (MachineConfig, error) {
+		return MachineConfig{
+			ID:                   machineID,
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		}, nil
+	}
+
+	updated, err := runner.SendInteractiveInput(context.Background(), RemoteSession{
+		MachineID:    "machine_a",
+		ThreadID:     "thread-1",
+		ActiveTurnID: "turn-old",
+		Workdir:      "/srv/backend",
+	}, "continue with the fix")
+	if err != nil {
+		t.Fatalf("SendInteractiveInput returned error: %v", err)
+	}
+	if updated.ActiveTurnID != "turn-new" {
+		t.Fatalf("updated.ActiveTurnID = %q, want turn-new", updated.ActiveTurnID)
+	}
+	if runtime.sendRequest.Cwd != "/srv/backend" {
+		t.Fatalf("sendRequest.Cwd = %q, want /srv/backend", runtime.sendRequest.Cwd)
+	}
+	if runtime.sendRequest.ApprovalPolicy != "never" {
+		t.Fatalf("sendRequest.ApprovalPolicy = %q, want never", runtime.sendRequest.ApprovalPolicy)
+	}
+	if runtime.sendRequest.SandboxPolicy.Type != "workspace-write" {
+		t.Fatalf("sendRequest.SandboxPolicy.Type = %q, want workspace-write", runtime.sendRequest.SandboxPolicy.Type)
+	}
+	if len(runtime.sendRequest.SandboxPolicy.WritableRoots) != 1 || runtime.sendRequest.SandboxPolicy.WritableRoots[0] != "/srv/backend" {
+		t.Fatalf("sendRequest.SandboxPolicy.WritableRoots = %#v, want [/srv/backend]", runtime.sendRequest.SandboxPolicy.WritableRoots)
 	}
 }
 
@@ -313,6 +374,8 @@ type fakeCodexRuntime struct {
 	startTurnID         string
 	startRequest        codexappserver.StartTaskSessionRequest
 	steerTurnID         string
+	steerErr            error
+	sendRequest         codexappserver.SendTaskInputRequest
 	watchThreadID       string
 	resumeWatchThreadID string
 	requestID           string
@@ -342,8 +405,16 @@ func (f *fakeCodexRuntime) ResumeTaskThread(_ context.Context, _ codexappserver.
 	return nil, nil
 }
 
-func (f *fakeCodexRuntime) SendTaskInput(_ context.Context, _ codexappserver.MachineRuntimeConfig, _, activeTurnID, _ string) (string, error) {
-	if activeTurnID != "" {
+func (f *fakeCodexRuntime) SendTaskInput(_ context.Context, _ codexappserver.MachineRuntimeConfig, req codexappserver.SendTaskInputRequest) (string, error) {
+	f.sendRequest = req
+	if req.ActiveTurnID != "" {
+		if f.steerErr != nil {
+			if strings.Contains(strings.ToLower(f.steerErr.Error()), "no active turn") {
+				f.sendRequest.ActiveTurnID = ""
+				return "turn-new", nil
+			}
+			return "", f.steerErr
+		}
 		return f.steerTurnID, nil
 	}
 	return "turn-new", nil

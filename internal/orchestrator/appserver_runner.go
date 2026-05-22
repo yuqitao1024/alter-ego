@@ -15,7 +15,7 @@ type codexRuntime interface {
 	StartTaskSession(ctx context.Context, machine codexappserver.MachineRuntimeConfig, req codexappserver.StartTaskSessionRequest) (string, string, error)
 	WatchTaskThread(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID string) (*codexappserver.ThreadWatcher, error)
 	ResumeTaskThread(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID string) (*codexappserver.ThreadWatcher, error)
-	SendTaskInput(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID, input string) (string, error)
+	SendTaskInput(ctx context.Context, machine codexappserver.MachineRuntimeConfig, req codexappserver.SendTaskInputRequest) (string, error)
 	RespondToServerRequest(ctx context.Context, machine codexappserver.MachineRuntimeConfig, requestID string, result any) error
 	InterruptTask(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID, activeTurnID string) error
 	CleanupTaskThread(ctx context.Context, machine codexappserver.MachineRuntimeConfig, threadID string) error
@@ -113,7 +113,18 @@ func (r *AppServerRunner) SendInteractiveInput(ctx context.Context, session Remo
 		return RemoteSession{}, err
 	}
 
-	turnID, err := r.manager.SendTaskInput(ctx, machineRuntimeConfig(machine), session.ThreadID, session.ActiveTurnID, input)
+	turnID, err := r.manager.SendTaskInput(ctx, machineRuntimeConfig(machine), codexappserver.SendTaskInputRequest{
+		ThreadID:       session.ThreadID,
+		ActiveTurnID:   session.ActiveTurnID,
+		Cwd:            session.Workdir,
+		ApprovalPolicy: "never",
+		SandboxPolicy: codexappserver.SandboxPolicy{
+			Type:          "workspace-write",
+			WritableRoots: []string{session.Workdir},
+			NetworkAccess: true,
+		},
+		Input: input,
+	})
 	if err != nil {
 		return RemoteSession{}, fmt.Errorf("send app-server input: %w", err)
 	}

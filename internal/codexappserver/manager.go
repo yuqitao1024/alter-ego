@@ -21,6 +21,15 @@ type StartTaskSessionRequest struct {
 	SandboxPolicy    SandboxPolicy
 }
 
+type SendTaskInputRequest struct {
+	ThreadID       string
+	ActiveTurnID   string
+	Cwd            string
+	ApprovalPolicy string
+	SandboxPolicy  SandboxPolicy
+	Input          string
+}
+
 type ClientAPI interface {
 	Close() error
 	Notifications() <-chan rpcMessage
@@ -159,17 +168,19 @@ func (m *Manager) Snapshot(machineID, threadID string) (ThreadSnapshot, bool) {
 	return watcher.Snapshot(), true
 }
 
-func (m *Manager) SendTaskInput(ctx context.Context, machine MachineRuntimeConfig, threadID, activeTurnID, input string) (string, error) {
+func (m *Manager) SendTaskInput(ctx context.Context, machine MachineRuntimeConfig, req SendTaskInputRequest) (string, error) {
 	runtime, err := m.ensureMachine(ctx, machine)
 	if err != nil {
 		return "", err
 	}
 
-	if strings.TrimSpace(activeTurnID) != "" {
+	if strings.TrimSpace(req.ActiveTurnID) != "" {
 		turnID, err := runtime.client.SteerTurn(ctx, TurnSteerRequest{
-			ThreadID:       threadID,
-			ExpectedTurnID: activeTurnID,
-			Input:          textInput(input),
+			ThreadID:       req.ThreadID,
+			ExpectedTurnID: req.ActiveTurnID,
+			ApprovalPolicy: req.ApprovalPolicy,
+			SandboxPolicy:  req.SandboxPolicy,
+			Input:          textInput(req.Input),
 		})
 		if err == nil {
 			return turnID, nil
@@ -180,8 +191,11 @@ func (m *Manager) SendTaskInput(ctx context.Context, machine MachineRuntimeConfi
 	}
 
 	return runtime.client.StartTurn(ctx, TurnStartRequest{
-		ThreadID:       threadID,
-		Input:          textInput(input),
+		ThreadID:       req.ThreadID,
+		Cwd:            req.Cwd,
+		ApprovalPolicy: req.ApprovalPolicy,
+		SandboxPolicy:  req.SandboxPolicy,
+		Input:          textInput(req.Input),
 	})
 }
 

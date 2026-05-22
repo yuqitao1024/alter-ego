@@ -354,7 +354,18 @@ func TestManagerSendTaskInputStartsNewTurnWhenActiveTurnIsGone(t *testing.T) {
 	})
 
 	machine := MachineRuntimeConfig{MachineID: "machine_a", WebSocketURL: "ws://machine-a:4317"}
-	turnID, err := manager.SendTaskInput(context.Background(), machine, "thread-1", "turn-old", "continue")
+	turnID, err := manager.SendTaskInput(context.Background(), machine, SendTaskInputRequest{
+		ThreadID:       "thread-1",
+		ActiveTurnID:   "turn-old",
+		Cwd:            "/srv/backend",
+		ApprovalPolicy: "never",
+		SandboxPolicy: SandboxPolicy{
+			Type:          "workspaceWrite",
+			WritableRoots: []string{"/srv/backend"},
+			NetworkAccess: true,
+		},
+		Input: "continue",
+	})
 	if err != nil {
 		t.Fatalf("SendTaskInput returned error: %v", err)
 	}
@@ -373,5 +384,14 @@ func TestManagerSendTaskInputStartsNewTurnWhenActiveTurnIsGone(t *testing.T) {
 	}
 	if client.startTurnRequests[0].ExpectedTurnID != "" {
 		t.Fatalf("fallback ExpectedTurnID = %q, want empty", client.startTurnRequests[0].ExpectedTurnID)
+	}
+	if client.startTurnRequests[0].Cwd != "/srv/backend" {
+		t.Fatalf("fallback Cwd = %q, want /srv/backend", client.startTurnRequests[0].Cwd)
+	}
+	if client.startTurnRequests[0].ApprovalPolicy != "never" {
+		t.Fatalf("fallback ApprovalPolicy = %q, want never", client.startTurnRequests[0].ApprovalPolicy)
+	}
+	if client.startTurnRequests[0].SandboxPolicy.Type != "workspaceWrite" {
+		t.Fatalf("fallback SandboxPolicy.Type = %q, want workspaceWrite", client.startTurnRequests[0].SandboxPolicy.Type)
 	}
 }
