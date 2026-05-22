@@ -55,7 +55,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		if err != nil {
 			return reply, err
 		}
-		reply.Text = fmt.Sprintf("Started task %s\ntemplate: %s\nrepository: %s\nmachine: %s\nstatus: %s", task.TaskID, task.TemplateID, task.RepositoryID, task.MachineID, task.Status)
+		reply.Card = &channel.CardMessage{Payload: buildTaskStartCard(task)}
 	case "list":
 		showAll := len(fields) == 3 && fields[2] == "-a"
 		if len(fields) > 3 || (len(fields) == 3 && !showAll) {
@@ -282,6 +282,27 @@ func buildTaskListCard(tasks []orchestrator.TaskRun, showAll bool) interface{} {
 		Header(larkcard.NewMessageCardHeader().
 			Template(larkcard.TemplateBlue).
 			Title(larkcard.NewMessageCardPlainText().Content(title).Build()).
+			Build()).
+		Elements(elements).
+		Build()
+}
+
+func buildTaskStartCard(task orchestrator.TaskRun) interface{} {
+	elements := []larkcard.MessageCardElement{
+		larkcard.NewMessageCardMarkdown().
+			Content(fmt.Sprintf("Started **%s**", task.TaskID)).
+			Build(),
+		larkcard.NewMessageCardMarkdown().
+			Content(fmt.Sprintf("Template: `%s`\nRepository: `%s`\nMachine: `%s`\nStatus: `%s`", task.TemplateID, task.RepositoryID, task.MachineID, task.Status)).
+			Build(),
+		taskActionRow(task).Build(),
+	}
+
+	return larkcard.NewMessageCard().
+		Config(larkcard.NewMessageCardConfig().WideScreenMode(true).Build()).
+		Header(larkcard.NewMessageCardHeader().
+			Template(larkcard.TemplateGreen).
+			Title(larkcard.NewMessageCardPlainText().Content("Task Started").Build()).
 			Build()).
 		Elements(elements).
 		Build()

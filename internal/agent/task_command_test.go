@@ -19,7 +19,7 @@ func TestTaskCommandStartCreatesTask(t *testing.T) {
 			TaskID:       "task-1",
 			TemplateID:   "feature_dev",
 			MachineID:    "machine_a",
-			Status:       orchestrator.StatusPending,
+			Status:       orchestrator.StatusRunning,
 			UserRequest:  "Implement feature",
 			CreatedBy:    "ou_1",
 			RepositoryID: "repo_backend",
@@ -39,8 +39,16 @@ func TestTaskCommandStartCreatesTask(t *testing.T) {
 	if service.startedTemplate != "feature_dev" || service.startedRequest != "Implement feature" {
 		t.Fatalf("start args = %q %q", service.startedTemplate, service.startedRequest)
 	}
-	if !strings.Contains(reply.Text, "Started task task-1") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	if reply.Text != "" {
+		t.Fatalf("reply.Text = %q, want empty text when card is present", reply.Text)
+	}
+	for _, part := range []string{"task-1", "feature_dev", "repo_backend", "machine_a", "running", "Status", "Stop"} {
+		if !cardContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
+		}
 	}
 }
 
