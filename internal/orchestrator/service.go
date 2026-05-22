@@ -580,6 +580,10 @@ func (s *Service) reconnectTaskSession(ctx context.Context, task TaskRun) (TaskR
 }
 
 func (s *Service) reconcilePersistedRequests(ctx context.Context, task TaskRun) error {
+	if task.Status == StatusWaitingUserInput && task.AwaitingQuestion != nil {
+		return s.renotifyWaitingTask(ctx, task)
+	}
+
 	if task.PendingRequestID != "" {
 		req, err := s.store.GetTaskServerRequest(ctx, task.PendingRequestID)
 		if err == nil {
@@ -604,6 +608,13 @@ func (s *Service) reconcilePersistedRequests(ctx context.Context, task TaskRun) 
 		return err
 	}
 	return s.reconcilePersistedRequest(ctx, task, requests[0])
+}
+
+func (s *Service) renotifyWaitingTask(ctx context.Context, task TaskRun) error {
+	if s.notifier == nil || task.AwaitingQuestion == nil {
+		return nil
+	}
+	return s.notifier.NotifyTaskQuestion(ctx, task)
 }
 
 func (s *Service) reconcilePersistedRequest(ctx context.Context, task TaskRun, req TaskServerRequest) error {

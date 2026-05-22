@@ -554,6 +554,37 @@ func TestResumeActiveTasksRehandlesPersistedPendingRequest(t *testing.T) {
 	}
 }
 
+func TestResumeActiveTasksRenotifiesExistingWaitingQuestion(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-waiting-existing", StatusWaitingUserInput)
+	task.RemoteWorkdir = "/srv/backend"
+	task.ThreadID = "thread-123"
+	task.ActiveTurnID = "turn-456"
+	task.AwaitingQuestion = &AwaitingQuestion{
+		QuestionText:   "Codex reports there is remaining work after the completion check.",
+		ContextExcerpt: "2) remaining work still exists.",
+		QuestionType:   "completion_follow_up",
+		AskedAt:        time.Now().UTC().Add(-time.Minute),
+	}
+	seedTask(t, store, task)
+
+	runner := service.runner.(*fakeServiceRunner)
+	runner.hasSession = true
+
+	if err := service.ResumeActiveTasks(context.Background()); err != nil {
+		t.Fatalf("ResumeActiveTasks returned error: %v", err)
+	}
+
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	}
+}
+
 func TestTickTransitionsRecoveredWaitingThreadToWaitingUserInput(t *testing.T) {
 	t.Parallel()
 
