@@ -198,13 +198,7 @@ func (a *Adapter) handleCardAction(ctx context.Context, input cardActionInput) (
 		event.Conversation.Kind = channel.ConversationGroup
 	}
 
-	if !Allowed(a.cfg, channel.MessageEvent{
-		ID:           event.ID,
-		Conversation: event.Conversation,
-		Sender:       event.Sender,
-		MentionedBot: true,
-		Platform:     platformName,
-	}) {
+	if !AllowedCardAction(a.cfg, event) {
 		return channel.CardActionResponse{ToastText: "You are not allowed to operate this task."}, nil
 	}
 

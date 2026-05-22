@@ -22,3 +22,10 @@ func Allowed(cfg Config, event channel.MessageEvent) bool {
 		return false
 	}
 }
+
+func AllowedCardAction(cfg Config, event channel.CardActionEvent) bool {
+	if event.Sender.ID == "" || !cfg.AllowUsers[event.Sender.ID] {
+		return false
+	}
+	return true
+}

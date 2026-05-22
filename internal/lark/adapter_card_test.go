@@ -115,6 +115,39 @@ func TestAdapterSendsCardActionFollowUpMessage(t *testing.T) {
 	}
 }
 
+func TestAdapterAllowsCardActionForAllowedUserWithoutGroupAllowlist(t *testing.T) {
+	t.Parallel()
+
+	handler := &fakeCardActionHandler{
+		reply: channel.CardActionResponse{ToastText: "Task task-1 stopped."},
+	}
+	adapter := &Adapter{
+		cfg: Config{
+			AllowUsers: map[string]bool{"ou_user": true},
+		},
+		handler: handler,
+		sender:  &fakeAdapterSender{},
+	}
+
+	resp, err := adapter.handleCardAction(context.Background(), cardActionInput{
+		ID:           "evt_1",
+		OpenID:       "ou_user",
+		OpenChatID:   "oc_chat",
+		ActionName:   "stop",
+		ActionValue:  map[string]interface{}{"action": "stop", "task_id": "task-1"},
+		Conversation: channel.Conversation{ID: "oc_chat", Kind: channel.ConversationGroup},
+	})
+	if err != nil {
+		t.Fatalf("handleCardAction returned error: %v", err)
+	}
+	if handler.event.Sender.ID != "ou_user" {
+		t.Fatalf("handler.event.Sender.ID = %q, want ou_user", handler.event.Sender.ID)
+	}
+	if resp.ToastText != "Task task-1 stopped." {
+		t.Fatalf("resp.ToastText = %q", resp.ToastText)
+	}
+}
+
 func TestAdapterRejectsUnauthorizedCardAction(t *testing.T) {
 	t.Parallel()
 
