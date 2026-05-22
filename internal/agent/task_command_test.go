@@ -191,6 +191,61 @@ func TestTaskCommandCardActionSendsStatusMessage(t *testing.T) {
 	}
 }
 
+func TestTaskCommandCardActionRepliesWithSelectedChoice(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeTaskService{}
+	handler := NewTaskCommandHandler(service)
+
+	reply, err := handler.HandleCardAction(context.Background(), channel.CardActionEvent{
+		Conversation: channel.Conversation{ID: "oc_1", Kind: channel.ConversationGroup},
+		Value: map[string]interface{}{
+			"source":  "alterego",
+			"version": float64(1),
+			"kind":    "task_reply_action",
+			"action":  "submit",
+			"task_id": "task-1",
+		},
+		FormValue: map[string]interface{}{
+			"reply_choice": "continue",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleCardAction returned error: %v", err)
+	}
+
+	if service.replyTaskID != "task-1" || service.replyText != "continue" {
+		t.Fatalf("reply args = %q %q", service.replyTaskID, service.replyText)
+	}
+	if reply.ToastText != "Task task-1 resumed." {
+		t.Fatalf("reply.ToastText = %q", reply.ToastText)
+	}
+}
+
+func TestTaskCommandCardActionReturnsReplyCommandToast(t *testing.T) {
+	t.Parallel()
+
+	handler := NewTaskCommandHandler(&fakeTaskService{})
+
+	reply, err := handler.HandleCardAction(context.Background(), channel.CardActionEvent{
+		Conversation: channel.Conversation{ID: "oc_1", Kind: channel.ConversationGroup},
+		Value: map[string]interface{}{
+			"source":  "alterego",
+			"version": float64(1),
+			"kind":    "task_reply_action",
+			"action":  "copy_command",
+			"task_id": "task-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleCardAction returned error: %v", err)
+	}
+
+	if reply.ToastText != "Reply with: /task reply task-1 <content>" {
+		t.Fatalf("reply.ToastText = %q", reply.ToastText)
+	}
+}
+
 func cardContains(payload interface{}, needle string) bool {
 	b, err := json.Marshal(payload)
 	if err != nil {

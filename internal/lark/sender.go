@@ -29,7 +29,7 @@ func (s *Sender) SendMessage(ctx context.Context, message channel.OutgoingMessag
 		return fmt.Errorf("conversation ID is required")
 	}
 	if message.Card != nil {
-		content, err := json.Marshal(message.Card.Payload)
+		content, err := cardMessageContent(message.Card.Payload)
 		if err != nil {
 			return err
 		}
@@ -49,6 +49,17 @@ func (s *Sender) SendDirectMessage(ctx context.Context, openID, text string) err
 		return fmt.Errorf("message text is required")
 	}
 	return s.creator.CreateTextMessage(ctx, larkimv1.ReceiveIdTypeOpenId, openID, text)
+}
+
+func (s *Sender) SendDirectCard(ctx context.Context, openID string, payload interface{}) error {
+	if openID == "" {
+		return fmt.Errorf("open ID is required")
+	}
+	content, err := cardMessageContent(payload)
+	if err != nil {
+		return err
+	}
+	return s.creator.CreateMessage(ctx, larkimv1.ReceiveIdTypeOpenId, openID, "interactive", string(content))
 }
 
 type SDKMessageCreator struct {
@@ -98,4 +109,8 @@ func textMessageContent(text string) (string, error) {
 		return "", err
 	}
 	return string(content), nil
+}
+
+func cardMessageContent(payload interface{}) ([]byte, error) {
+	return json.Marshal(payload)
 }

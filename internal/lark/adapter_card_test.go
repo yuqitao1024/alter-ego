@@ -101,6 +101,7 @@ func TestAdapterSendsCardActionFollowUpMessage(t *testing.T) {
 		OpenChatID:   "oc_chat",
 		ActionName:   "status",
 		ActionValue:  map[string]interface{}{"action": "status", "task_id": "task-1"},
+		FormValue:    map[string]interface{}{"reply_choice": "continue"},
 		Conversation: channel.Conversation{ID: "oc_chat", Kind: channel.ConversationGroup},
 	})
 	if err != nil {
@@ -109,6 +110,9 @@ func TestAdapterSendsCardActionFollowUpMessage(t *testing.T) {
 
 	if !sender.called {
 		t.Fatal("SendMessage was not called")
+	}
+	if handler.event.FormValue["reply_choice"] != "continue" {
+		t.Fatalf("handler.event.FormValue = %#v", handler.event.FormValue)
 	}
 	if sender.message.Text != "task: task-1" {
 		t.Fatalf("sent message text = %q", sender.message.Text)

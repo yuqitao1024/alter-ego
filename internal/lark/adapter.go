@@ -36,6 +36,10 @@ type cardActionInput struct {
 	OpenChatID   string
 	ActionName   string
 	ActionValue  map[string]interface{}
+	FormValue    map[string]interface{}
+	InputValue   string
+	Option       string
+	Options      []string
 	Conversation channel.Conversation
 }
 
@@ -156,6 +160,10 @@ func (a *Adapter) handleP2CardActionTrigger(ctx context.Context, event *callback
 		OpenChatID:  event.Event.Context.OpenChatID,
 		ActionName:  event.Event.Action.Name,
 		ActionValue: event.Event.Action.Value,
+		FormValue:   event.Event.Action.FormValue,
+		InputValue:  event.Event.Action.InputValue,
+		Option:      event.Event.Action.Option,
+		Options:     event.Event.Action.Options,
 		Conversation: channel.Conversation{
 			ID:   event.Event.Context.OpenChatID,
 			Kind: channel.ConversationGroup,
@@ -185,6 +193,10 @@ func (a *Adapter) handleCardAction(ctx context.Context, input cardActionInput) (
 		ID:           input.ID,
 		Action:       input.ActionName,
 		Value:        input.ActionValue,
+		FormValue:    input.FormValue,
+		InputValue:   input.InputValue,
+		Option:       input.Option,
+		Options:      input.Options,
 		Conversation: input.Conversation,
 		Sender: channel.Sender{
 			ID: input.OpenID,

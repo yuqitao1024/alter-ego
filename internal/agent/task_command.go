@@ -135,11 +135,22 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 }
 
 func (h *TaskCommandHandler) HandleCardAction(ctx context.Context, event channel.CardActionEvent) (channel.CardActionResponse, error) {
-	action, taskID, err := parseTaskCardAction(event.Value)
+	request, err := parseTaskCardAction(event.Value)
 	if err != nil {
 		return channel.CardActionResponse{ToastText: err.Error()}, nil
 	}
 
+	switch request.kind {
+	case "task_action":
+		return h.handleTaskActionCard(ctx, event, request.action, request.taskID)
+	case "task_reply_action":
+		return h.handleTaskReplyCard(ctx, event, request)
+	default:
+		return channel.CardActionResponse{ToastText: fmt.Sprintf("Unsupported task action: %s", request.action)}, nil
+	}
+}
+
+func (h *TaskCommandHandler) handleTaskActionCard(ctx context.Context, event channel.CardActionEvent, action, taskID string) (channel.CardActionResponse, error) {
 	switch action {
 	case "status":
 		task, err := h.service.Status(ctx, taskID)
@@ -169,24 +180,79 @@ func (h *TaskCommandHandler) HandleCardAction(ctx context.Context, event channel
 	}
 }
 
-func parseTaskCardAction(value map[string]interface{}) (string, string, error) {
-	if stringValue(value, "source") != "alterego" || stringValue(value, "kind") != "task_action" {
-		return "", "", fmt.Errorf("Invalid task action.")
+func (h *TaskCommandHandler) handleTaskReplyCard(ctx context.Context, event channel.CardActionEvent, request taskCardAction) (channel.CardActionResponse, error) {
+	switch request.action {
+	case "copy_command":
+		command := request.command
+		if command == "" {
+			command = fmt.Sprintf("/task reply %s <content>", request.taskID)
+		}
+		return channel.CardActionResponse{ToastText: fmt.Sprintf("Reply with: %s", command)}, nil
+	case "submit":
+		replyText := firstNonEmpty(
+			formStringValue(event.FormValue, "reply_choice"),
+			strings.TrimSpace(event.Option),
+			firstOption(event.Options),
+			strings.TrimSpace(event.InputValue),
+			stringValue(event.Value, "reply_text"),
+		)
+		if replyText == "" {
+			return channel.CardActionResponse{ToastText: "Select a reply first."}, nil
+		}
+		if err := h.service.Reply(ctx, request.taskID, replyText); err != nil {
+			return channel.CardActionResponse{}, err
+		}
+		return channel.CardActionResponse{ToastText: fmt.Sprintf("Task %s resumed.", request.taskID)}, nil
+	default:
+		return channel.CardActionResponse{ToastText: fmt.Sprintf("Unsupported task reply action: %s", request.action)}, nil
+	}
+}
+
+type taskCardAction struct {
+	kind    string
+	action  string
+	taskID  string
+	command string
+}
+
+func parseTaskCardAction(value map[string]interface{}) (taskCardAction, error) {
+	if stringValue(value, "source") != "alterego" {
+		return taskCardAction{}, fmt.Errorf("Invalid task action.")
+	}
+	kind := stringValue(value, "kind")
+	if kind != "task_action" && kind != "task_reply_action" {
+		return taskCardAction{}, fmt.Errorf("Invalid task action.")
 	}
 	if intValue(value, "version") != 1 {
-		return "", "", fmt.Errorf("Unsupported task action version.")
+		return taskCardAction{}, fmt.Errorf("Unsupported task action version.")
 	}
 
 	action := stringValue(value, "action")
 	taskID := stringValue(value, "task_id")
 	if taskID == "" {
-		return "", "", fmt.Errorf("Task ID is required.")
+		return taskCardAction{}, fmt.Errorf("Task ID is required.")
 	}
-	switch action {
-	case "status", "stop", "delete":
-		return action, taskID, nil
+
+	switch kind {
+	case "task_action":
+		switch action {
+		case "status", "stop", "delete":
+			return taskCardAction{kind: kind, action: action, taskID: taskID}, nil
+		}
+		return taskCardAction{}, fmt.Errorf("Unsupported task action: %s", action)
+	case "task_reply_action":
+		switch action {
+		case "submit", "copy_command":
+			return taskCardAction{
+				kind:    kind,
+				action:  action,
+				taskID:  taskID,
+				command: stringValue(value, "command"),
+			}, nil
+		}
+		return taskCardAction{}, fmt.Errorf("Unsupported task reply action: %s", action)
 	default:
-		return "", "", fmt.Errorf("Unsupported task action: %s", action)
+		return taskCardAction{}, fmt.Errorf("Invalid task action.")
 	}
 }
 
@@ -293,4 +359,39 @@ func intValue(values map[string]interface{}, key string) int {
 	default:
 		return 0
 	}
+}
+
+func formStringValue(values map[string]interface{}, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	raw, ok := values[key]
+	if !ok {
+		return ""
+	}
+	switch value := raw.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case map[string]interface{}:
+		if text, ok := value["value"].(string); ok {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
+}
+
+func firstOption(options []string) string {
+	if len(options) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(options[0])
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

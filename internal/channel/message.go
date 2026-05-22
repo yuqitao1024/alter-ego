@@ -43,6 +43,10 @@ type CardActionEvent struct {
 	ID           string
 	Action       string
 	Value        map[string]interface{}
+	FormValue    map[string]interface{}
+	InputValue   string
+	Option       string
+	Options      []string
 	Conversation Conversation
 	Sender       Sender
 	Platform     string
