@@ -463,14 +463,134 @@ func TestTickCompletesTaskWhenCodexThreadCompletedWithoutNewSummary(t *testing.T
 	if err != nil {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
-	if persisted.Status != StatusCompleted {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
 	}
 	if persisted.LastOutputSummary != "先按研究工作流梳理" {
 		t.Fatalf("persisted.LastOutputSummary = %q", persisted.LastOutputSummary)
 	}
 	if len(runner.sentInputs) != 0 {
 		t.Fatalf("sentInputs = %#v, want none", runner.sentInputs)
+	}
+}
+
+func TestResumeActiveTasksReconnectsRunningTaskImmediately(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	task := sampleTaskRun("task-resume-running", StatusRunning)
+	task.RemoteWorkdir = "/srv/backend"
+	task.ThreadID = "thread-123"
+	task.ActiveTurnID = "turn-456"
+	seedTask(t, store, task)
+
+	runner := service.runner.(*fakeServiceRunner)
+	runner.hasSession = true
+
+	if err := service.ResumeActiveTasks(context.Background()); err != nil {
+		t.Fatalf("ResumeActiveTasks returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if !reflect.DeepEqual(runner.calls, []string{"has-session"}) {
+		t.Fatalf("runner.calls = %v, want [has-session]", runner.calls)
+	}
+}
+
+func TestResumeActiveTasksRehandlesPersistedPendingRequest(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification:   ClassificationExecutionApproval,
+			ShouldReplyCodex: true,
+			ReplyPolicy:      ReplyPolicyAutoContinue,
+			CodexReply:       "continue",
+		},
+	})
+	defer cleanup()
+
+	task := sampleTaskRun("task-persisted-request", StatusRunning)
+	task.RemoteWorkdir = "/srv/backend"
+	task.ThreadID = "thread-123"
+	task.ActiveTurnID = "turn-456"
+	task.PendingRequestID = "req-1"
+	seedTask(t, store, task)
+	mustUpsertRequest(t, store, TaskServerRequest{
+		RequestID:      "req-1",
+		TaskID:         task.TaskID,
+		ThreadID:       "thread-123",
+		TurnID:         "turn-456",
+		RequestType:    ServerRequestTypeUserInput,
+		RequestPayload: `{"prompt":"Continue?"}`,
+		Status:         ServerRequestStatusPending,
+		CreatedAt:      time.Now().UTC().Add(-time.Minute),
+	})
+
+	runner.hasSession = true
+
+	if err := service.ResumeActiveTasks(context.Background()); err != nil {
+		t.Fatalf("ResumeActiveTasks returned error: %v", err)
+	}
+
+	req, err := store.GetTaskServerRequest(context.Background(), "req-1")
+	if err != nil {
+		t.Fatalf("GetTaskServerRequest returned error: %v", err)
+	}
+	if req.Status != ServerRequestStatusReplied {
+		t.Fatalf("req.Status = %q, want %q", req.Status, ServerRequestStatusReplied)
+	}
+	if len(runner.serverReplies) != 1 || runner.serverReplies[0] != "continue" {
+		t.Fatalf("serverReplies = %#v, want [continue]", runner.serverReplies)
+	}
+}
+
+func TestTickTransitionsRecoveredWaitingThreadToWaitingUserInput(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{}
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{
+			Summary: "Need one more input to continue.",
+			SessionState: SessionState{
+				ThreadStatus:      "active",
+				ThreadActiveFlags: []string{"waitingOnUserInput"},
+			},
+		},
+	}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, runner, &fakeDecisionEngine{}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-waiting-flags", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.AwaitingQuestion == nil {
+		t.Fatal("persisted.AwaitingQuestion = nil, want question")
+	}
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
 	}
 }
 
@@ -762,7 +882,7 @@ func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartReques
 	if f.startErr != nil {
 		return RemoteSession{}, f.startErr
 	}
-	if f.startSession == (RemoteSession{}) {
+	if f.startSession.MachineID == "" && f.startSession.Workdir == "" && f.startSession.ThreadID == "" && f.startSession.ActiveTurnID == "" {
 		return RemoteSession{}, nil
 	}
 	return f.startSession, nil
@@ -774,7 +894,7 @@ func (f *fakeServiceRunner) SendInteractiveInput(_ context.Context, session Remo
 	if f.sendErr != nil {
 		return RemoteSession{}, f.sendErr
 	}
-	if f.sendSession == (RemoteSession{}) {
+	if f.sendSession.MachineID == "" && f.sendSession.Workdir == "" && f.sendSession.ThreadID == "" && f.sendSession.ActiveTurnID == "" {
 		return session, nil
 	}
 	return f.sendSession, nil

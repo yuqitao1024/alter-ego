@@ -52,7 +52,8 @@ type OutputWindow struct {
 }
 
 type SessionState struct {
-	ThreadStatus string
+	ThreadStatus      string
+	ThreadActiveFlags []string
 }
 
 type RuntimeEvent struct {
@@ -82,6 +83,16 @@ func (s SessionState) CodexCompleted() bool {
 	default:
 		return false
 	}
+}
+
+func (s SessionState) WaitingOnExternalInput() bool {
+	for _, flag := range s.ThreadActiveFlags {
+		switch strings.ToLower(strings.TrimSpace(flag)) {
+		case "waitingonuserinput", "waitingonapproval":
+			return true
+		}
+	}
+	return false
 }
 
 func ReconnectInteractiveSession(ctx context.Context, runner RemoteRunner, task TaskRun) (RemoteSession, error) {

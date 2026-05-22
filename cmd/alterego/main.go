@@ -178,6 +178,10 @@ func (s *taskSubsystem) Run(ctx context.Context) {
 		return
 	}
 
+	if err := s.Service.ResumeActiveTasks(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Printf("task subsystem startup resume failed: %v", err)
+	}
+
 	ticker := time.NewTicker(taskTickInterval)
 	defer ticker.Stop()
 	eventCh := s.Runner.Events()

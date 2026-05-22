@@ -115,6 +115,31 @@ func (s *Service) TickOnce(ctx context.Context) error {
 	return nil
 }
 
+func (s *Service) ResumeActiveTasks(ctx context.Context) error {
+	tasks, err := s.store.ListActiveTasks(ctx)
+	if err != nil {
+		return fmt.Errorf("list active tasks: %w", err)
+	}
+
+	var firstErr error
+	for _, task := range tasks {
+		refreshed, err := s.resumeActiveTask(ctx, task)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err := s.reconcilePersistedRequests(ctx, refreshed); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+
+	return firstErr
+}
+
 func (s *Service) HandleRuntimeEvent(ctx context.Context, event RuntimeEvent) error {
 	if strings.TrimSpace(event.ThreadID) == "" {
 		return nil
@@ -386,7 +411,7 @@ func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {
 }
 
 func (s *Service) recoverTask(ctx context.Context, task TaskRun) error {
-	session, err := ReconnectInteractiveSession(ctx, s.runner, task)
+	task, err := s.reconnectTaskSession(ctx, task)
 	if err != nil {
 		if errors.Is(err, ErrRemoteCommandTimeout) {
 			return s.appendEvent(ctx, task.TaskID, "task_reconnect_timeout", "reconnect probe timed out")
@@ -399,15 +424,6 @@ func (s *Service) recoverTask(ctx context.Context, task TaskRun) error {
 			}
 			return s.appendEvent(ctx, task.TaskID, "task_failed", "codex thread is missing from app-server state; task marked failed for restart")
 		}
-		return err
-	}
-
-	task.Status = StatusRunning
-	task.RemoteWorkdir = coalesceString(session.Workdir, task.RemoteWorkdir)
-	task.ThreadID = coalesceString(session.ThreadID, task.ThreadID)
-	task.ActiveTurnID = coalesceString(session.ActiveTurnID, task.ActiveTurnID)
-	task.UpdatedAt = s.now()
-	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return err
 	}
 	return s.appendEvent(ctx, task.TaskID, "task_reconnected", fmt.Sprintf("reconnected to app-server thread %s", task.ThreadID))
@@ -495,7 +511,6 @@ func (s *Service) handlePendingRequest(ctx context.Context, taskID, requestID st
 }
 
 func (s *Service) handleProgressAndCompletionOnly(ctx context.Context, task TaskRun) error {
-	previousSummary := strings.TrimSpace(task.LastOutputSummary)
 	window, err := s.runner.CaptureOutput(ctx, sessionFromTask(task))
 	if err != nil {
 		if errors.Is(err, ErrRemoteCommandTimeout) {
@@ -514,14 +529,8 @@ func (s *Service) handleProgressAndCompletionOnly(ctx context.Context, task Task
 		return err
 	}
 
-	currentSummary := strings.TrimSpace(window.Summary)
-	if task.PendingRequestID == "" && window.SessionState.CodexCompleted() && (currentSummary == "" || currentSummary == previousSummary) {
-		task.Status = StatusCompleted
-		task.UpdatedAt = s.now()
-		if err := s.store.UpdateTask(ctx, task); err != nil {
-			return err
-		}
-		return s.appendEvent(ctx, task.TaskID, "task_completed", "codex app-server thread completed")
+	if task.PendingRequestID == "" && task.Status != StatusWaitingUserInput && window.SessionState.WaitingOnExternalInput() {
+		return s.transitionTaskToRecoveredWaitingState(ctx, task, window)
 	}
 
 	if strings.TrimSpace(window.Summary) == "" {
@@ -537,6 +546,132 @@ func (s *Service) handleProgressAndCompletionOnly(ctx context.Context, task Task
 	}
 
 	return s.maybeNotifyProgress(ctx, task, window.Summary)
+}
+
+func (s *Service) resumeActiveTask(ctx context.Context, task TaskRun) (TaskRun, error) {
+	switch task.Status {
+	case StatusRunning, StatusRecovering, StatusWaitingUserInput:
+		if strings.TrimSpace(task.ThreadID) == "" || strings.TrimSpace(task.RemoteWorkdir) == "" {
+			return task, nil
+		}
+		return s.reconnectTaskSession(ctx, task)
+	default:
+		return task, nil
+	}
+}
+
+func (s *Service) reconnectTaskSession(ctx context.Context, task TaskRun) (TaskRun, error) {
+	session, err := ReconnectInteractiveSession(ctx, s.runner, task)
+	if err != nil {
+		return task, err
+	}
+
+	if task.Status == StatusRecovering {
+		task.Status = StatusRunning
+	}
+	task.RemoteWorkdir = coalesceString(session.Workdir, task.RemoteWorkdir)
+	task.ThreadID = coalesceString(session.ThreadID, task.ThreadID)
+	task.ActiveTurnID = coalesceString(session.ActiveTurnID, task.ActiveTurnID)
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return task, err
+	}
+	return task, nil
+}
+
+func (s *Service) reconcilePersistedRequests(ctx context.Context, task TaskRun) error {
+	if task.PendingRequestID != "" {
+		req, err := s.store.GetTaskServerRequest(ctx, task.PendingRequestID)
+		if err == nil {
+			return s.reconcilePersistedRequest(ctx, task, req)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+
+	requests, err := s.store.ListOpenTaskServerRequests(ctx, task.TaskID)
+	if err != nil {
+		return err
+	}
+	if len(requests) == 0 {
+		return nil
+	}
+
+	task.PendingRequestID = requests[0].RequestID
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return err
+	}
+	return s.reconcilePersistedRequest(ctx, task, requests[0])
+}
+
+func (s *Service) reconcilePersistedRequest(ctx context.Context, task TaskRun, req TaskServerRequest) error {
+	if task.Status == StatusWaitingUserInput && task.AwaitingQuestion != nil {
+		return nil
+	}
+
+	switch req.Status {
+	case ServerRequestStatusPending:
+		return s.handlePendingRequest(ctx, task.TaskID, req.RequestID)
+	case ServerRequestStatusReplying:
+		now := s.now()
+		task.Status = StatusWaitingUserInput
+		task.AwaitingQuestion = &AwaitingQuestion{
+			QuestionText:   "Task recovery found an in-flight Codex request that was interrupted during restart. Review the context and reply to continue recovery.",
+			OptionsSummary: "",
+			ContextExcerpt: firstNonEmpty(task.LastOutputSummary, req.RequestPayload),
+			QuestionType:   "recovery_interrupted_request",
+			AskedAt:        now,
+		}
+		task.UpdatedAt = now
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return err
+		}
+		if err := s.appendQuestion(ctx, task); err != nil {
+			return err
+		}
+		if s.notifier != nil {
+			if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
+				return err
+			}
+		}
+		return s.appendEvent(ctx, task.TaskID, "waiting_user_input", "waiting for recovery of interrupted Codex request")
+	default:
+		return nil
+	}
+}
+
+func (s *Service) transitionTaskToRecoveredWaitingState(ctx context.Context, task TaskRun, window OutputWindow) error {
+	now := s.now()
+	questionText := "Codex is waiting for further input after recovery. The original waiting event was not available, so reply here to continue the task."
+	for _, flag := range window.SessionState.ThreadActiveFlags {
+		if strings.EqualFold(strings.TrimSpace(flag), "waitingOnApproval") {
+			questionText = "Codex is waiting for an approval decision after recovery. The original approval event was not available, so decide whether to continue and reply here to attempt recovery."
+			break
+		}
+	}
+	task.Status = StatusWaitingUserInput
+	task.AwaitingQuestion = &AwaitingQuestion{
+		QuestionText:   questionText,
+		OptionsSummary: "",
+		ContextExcerpt: firstNonEmpty(window.Summary, task.LastOutputSummary),
+		QuestionType:   "recovered_waiting_input",
+		AskedAt:        now,
+	}
+	task.UpdatedAt = now
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return err
+	}
+	if err := s.appendQuestion(ctx, task); err != nil {
+		return err
+	}
+	if s.notifier != nil {
+		if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
+			return err
+		}
+	}
+	return s.appendEvent(ctx, task.TaskID, "waiting_user_input", "codex thread is waiting for input after recovery")
 }
 
 func (s *Service) maybeSendCompletionCheck(ctx context.Context, task TaskRun, summary string) (TaskRun, bool, error) {

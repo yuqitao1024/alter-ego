@@ -190,6 +190,9 @@ func TestThreadWatcherAppliesCurrentProtocolNotifications(t *testing.T) {
 	if snapshot.ThreadStatus != "idle" {
 		t.Fatalf("ThreadStatus = %q, want idle", snapshot.ThreadStatus)
 	}
+	if len(snapshot.ThreadActiveFlags) != 0 {
+		t.Fatalf("ThreadActiveFlags = %#v, want none after idle", snapshot.ThreadActiveFlags)
+	}
 	if snapshot.ActiveTurnID != "turn-1" {
 		t.Fatalf("ActiveTurnID = %q, want turn-1", snapshot.ActiveTurnID)
 	}
@@ -213,6 +216,27 @@ func TestThreadWatcherAppliesCurrentProtocolNotifications(t *testing.T) {
 	}
 	if snapshot.SubscriptionState != SubscriptionStateActive {
 		t.Fatalf("SubscriptionState = %q, want %q", snapshot.SubscriptionState, SubscriptionStateActive)
+	}
+}
+
+func TestThreadWatcherHydratesActiveFlagsFromResumeHistory(t *testing.T) {
+	t.Parallel()
+
+	watcher := newThreadWatcher("thread-1")
+	watcher.hydrate(Thread{
+		ID: "thread-1",
+		Status: mustRawJSON(t, map[string]any{
+			"type":        "active",
+			"activeFlags": []string{"waitingOnApproval"},
+		}),
+	})
+
+	snapshot := watcher.Snapshot()
+	if snapshot.ThreadStatus != "active" {
+		t.Fatalf("ThreadStatus = %q, want active", snapshot.ThreadStatus)
+	}
+	if len(snapshot.ThreadActiveFlags) != 1 || snapshot.ThreadActiveFlags[0] != "waitingOnApproval" {
+		t.Fatalf("ThreadActiveFlags = %#v, want [waitingOnApproval]", snapshot.ThreadActiveFlags)
 	}
 }
 

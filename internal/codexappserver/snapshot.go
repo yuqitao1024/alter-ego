@@ -18,6 +18,7 @@ const (
 type ThreadSnapshot struct {
 	ThreadID              string
 	ThreadStatus          string
+	ThreadActiveFlags     []string
 	ActiveTurnID          string
 	ActiveTurnStatus      string
 	LastItemID            string
@@ -82,8 +83,9 @@ func (w *ThreadWatcher) hydrate(thread Thread) {
 	if strings.TrimSpace(thread.ID) != "" {
 		w.snapshot.ThreadID = thread.ID
 	}
-	if status := decodeStatus(thread.Status); status != "" {
+	if status, flags := decodeStatusDetails(thread.Status); status != "" || len(flags) > 0 {
 		w.snapshot.ThreadStatus = status
+		w.snapshot.ThreadActiveFlags = append([]string(nil), flags...)
 	}
 	for _, turn := range thread.Turns {
 		if strings.TrimSpace(turn.ID) != "" {
@@ -163,7 +165,7 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 
 	switch msg.Method {
 	case "thread/started", "thread/completed", "thread/status/changed", "thread/closed":
-		threadID, status, ok := decodeThreadNotification(params)
+		threadID, status, flags, ok := decodeThreadNotification(params)
 		if !ok {
 			return
 		}
@@ -173,6 +175,7 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 		if status != "" {
 			w.snapshot.ThreadStatus = status
 		}
+		w.snapshot.ThreadActiveFlags = append([]string(nil), flags...)
 	case "turn/started", "turn/completed":
 		turnID, status, ok := decodeTurnNotification(params)
 		if !ok {
@@ -253,7 +256,7 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 func (w *ThreadWatcher) accepts(method string, params json.RawMessage) bool {
 	switch method {
 	case "thread/started", "thread/completed", "thread/status/changed", "thread/closed":
-		threadID, _, ok := decodeThreadNotification(params)
+		threadID, _, _, ok := decodeThreadNotification(params)
 		return ok && threadID == w.threadID
 	case "turn/started", "turn/completed":
 		threadID, _, _, ok := decodeTurnScope(params)
@@ -306,20 +309,21 @@ type turnPlanNotification struct {
 }
 
 type statusEnvelope struct {
-	Type string `json:"type"`
+	Type        string   `json:"type"`
+	ActiveFlags []string `json:"activeFlags"`
 }
 
-func decodeThreadNotification(params json.RawMessage) (string, string, bool) {
+func decodeThreadNotification(params json.RawMessage) (string, string, []string, bool) {
 	var payload threadNotification
 	if err := json.Unmarshal(params, &payload); err != nil {
-		return "", "", false
+		return "", "", nil, false
 	}
 	threadID := firstNonEmpty(payload.Thread.ID, payload.ThreadID)
-	status := decodeStatus(payload.Thread.Status)
+	status, flags := decodeStatusDetails(payload.Thread.Status)
 	if status == "" {
-		status = decodeStatus(payload.Status)
+		status, flags = decodeStatusDetails(payload.Status)
 	}
-	return threadID, status, threadID != "" || status != ""
+	return threadID, status, flags, threadID != "" || status != ""
 }
 
 func decodeTurnNotification(params json.RawMessage) (string, string, bool) {
@@ -405,20 +409,25 @@ func decodeTurnPlanScope(params json.RawMessage) (string, string, bool) {
 }
 
 func decodeStatus(raw json.RawMessage) string {
+	status, _ := decodeStatusDetails(raw)
+	return status
+}
+
+func decodeStatusDetails(raw json.RawMessage) (string, []string) {
 	if len(raw) == 0 {
-		return ""
+		return "", nil
 	}
 
 	var plain string
 	if err := json.Unmarshal(raw, &plain); err == nil {
-		return strings.TrimSpace(plain)
+		return strings.TrimSpace(plain), nil
 	}
 
 	var status statusEnvelope
 	if err := json.Unmarshal(raw, &status); err == nil {
-		return strings.TrimSpace(status.Type)
+		return strings.TrimSpace(status.Type), append([]string(nil), status.ActiveFlags...)
 	}
-	return ""
+	return "", nil
 }
 
 func firstNonEmpty(values ...string) string {

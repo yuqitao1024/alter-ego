@@ -101,7 +101,8 @@ func (r *AppServerRunner) CaptureOutput(ctx context.Context, session RemoteSessi
 		RawOutput: summary,
 		Summary:   summary,
 		SessionState: SessionState{
-			ThreadStatus: snapshot.ThreadStatus,
+			ThreadStatus:      snapshot.ThreadStatus,
+			ThreadActiveFlags: append([]string(nil), snapshot.ThreadActiveFlags...),
 		},
 	}, nil
 }
