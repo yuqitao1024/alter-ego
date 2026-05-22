@@ -166,18 +166,30 @@ func (m *Manager) SendTaskInput(ctx context.Context, machine MachineRuntimeConfi
 	}
 
 	if strings.TrimSpace(activeTurnID) != "" {
-		return runtime.client.SteerTurn(ctx, TurnSteerRequest{
+		turnID, err := runtime.client.SteerTurn(ctx, TurnSteerRequest{
 			ThreadID:       threadID,
 			ExpectedTurnID: activeTurnID,
 			Input:          textInput(input),
 		})
+		if err == nil {
+			return turnID, nil
+		}
+		if !isNoActiveTurnError(err) {
+			return "", err
+		}
 	}
 
 	return runtime.client.StartTurn(ctx, TurnStartRequest{
 		ThreadID:       threadID,
-		ExpectedTurnID: activeTurnID,
 		Input:          textInput(input),
 	})
+}
+
+func isNoActiveTurnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no active turn")
 }
 
 func (m *Manager) InterruptTask(ctx context.Context, machine MachineRuntimeConfig, threadID, activeTurnID string) error {

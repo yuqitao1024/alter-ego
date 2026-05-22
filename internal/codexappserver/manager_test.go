@@ -285,11 +285,14 @@ func TestManagerResumeTaskThreadHydratesSnapshotFromResumeHistory(t *testing.T) 
 
 type fakeClient struct {
 	notifications chan rpcMessage
-	resumeThreadIDs []string
-	resumeResult json.RawMessage
+	resumeThreadIDs      []string
+	resumeResult         json.RawMessage
+	startTurnRequests    []TurnStartRequest
+	steerTurnRequests    []TurnSteerRequest
+	steerTurnErr         error
 	unsubscribedThreadID string
-	archivedThreadID string
-	unsubscribeStatus string
+	archivedThreadID     string
+	unsubscribeStatus    string
 }
 
 func newFakeClient() *fakeClient {
@@ -315,10 +318,15 @@ func (f *fakeClient) RespondToServerRequest(context.Context, string, any) error 
 func (f *fakeClient) StartThread(context.Context, ThreadStartRequest) (string, error) {
 	return "thread-1", nil
 }
-func (f *fakeClient) StartTurn(context.Context, TurnStartRequest) (string, error) {
+func (f *fakeClient) StartTurn(_ context.Context, req TurnStartRequest) (string, error) {
+	f.startTurnRequests = append(f.startTurnRequests, req)
 	return "turn-1", nil
 }
-func (f *fakeClient) SteerTurn(context.Context, TurnSteerRequest) (string, error) {
+func (f *fakeClient) SteerTurn(_ context.Context, req TurnSteerRequest) (string, error) {
+	f.steerTurnRequests = append(f.steerTurnRequests, req)
+	if f.steerTurnErr != nil {
+		return "", f.steerTurnErr
+	}
 	return "turn-1", nil
 }
 func (f *fakeClient) InterruptTurn(context.Context, TurnInterruptRequest) error { return nil }
@@ -332,4 +340,38 @@ func (f *fakeClient) UnsubscribeThread(_ context.Context, threadID string) (stri
 func (f *fakeClient) ArchiveThread(_ context.Context, threadID string) error {
 	f.archivedThreadID = threadID
 	return nil
+}
+
+func TestManagerSendTaskInputStartsNewTurnWhenActiveTurnIsGone(t *testing.T) {
+	t.Parallel()
+
+	client := newFakeClient()
+	client.steerTurnErr = errors.New("turn/steer: no active turn to steer")
+	manager := NewManager(ManagerOptions{
+		DialClient: func(context.Context, MachineRuntimeConfig) (ClientAPI, error) {
+			return client, nil
+		},
+	})
+
+	machine := MachineRuntimeConfig{MachineID: "machine_a", WebSocketURL: "ws://machine-a:4317"}
+	turnID, err := manager.SendTaskInput(context.Background(), machine, "thread-1", "turn-old", "continue")
+	if err != nil {
+		t.Fatalf("SendTaskInput returned error: %v", err)
+	}
+
+	if turnID != "turn-1" {
+		t.Fatalf("turnID = %q, want turn-1", turnID)
+	}
+	if len(client.steerTurnRequests) != 1 {
+		t.Fatalf("steerTurnRequests = %#v, want one request", client.steerTurnRequests)
+	}
+	if len(client.startTurnRequests) != 1 {
+		t.Fatalf("startTurnRequests = %#v, want one fallback request", client.startTurnRequests)
+	}
+	if client.startTurnRequests[0].ThreadID != "thread-1" {
+		t.Fatalf("fallback ThreadID = %q, want thread-1", client.startTurnRequests[0].ThreadID)
+	}
+	if client.startTurnRequests[0].ExpectedTurnID != "" {
+		t.Fatalf("fallback ExpectedTurnID = %q, want empty", client.startTurnRequests[0].ExpectedTurnID)
+	}
 }
