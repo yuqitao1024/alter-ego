@@ -107,47 +107,6 @@ func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 				},
 			},
 		})
-		elements = append(elements, map[string]interface{}{
-			"tag": "action",
-			"actions": []interface{}{
-				map[string]interface{}{
-					"tag": "button",
-					"text": map[string]interface{}{
-						"tag":     "plain_text",
-						"content": "复制命令",
-					},
-					"value": map[string]interface{}{
-						"source":  "alterego",
-						"version": 1,
-						"kind":    "task_reply_action",
-						"action":  "copy_command",
-						"task_id": task.TaskID,
-						"command": command,
-					},
-				},
-			},
-		})
-	} else {
-		elements = append(elements, map[string]interface{}{
-			"tag": "action",
-			"actions": []interface{}{
-				map[string]interface{}{
-					"tag": "button",
-					"text": map[string]interface{}{
-						"tag":     "plain_text",
-						"content": "复制命令",
-					},
-					"value": map[string]interface{}{
-						"source":  "alterego",
-						"version": 1,
-						"kind":    "task_reply_action",
-						"action":  "copy_command",
-						"task_id": task.TaskID,
-						"command": command,
-					},
-				},
-			},
-		})
 	}
 
 	elements = append(elements, map[string]interface{}{

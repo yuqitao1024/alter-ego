@@ -44,7 +44,7 @@ func TestTaskNotifierSendsApprovalCard(t *testing.T) {
 	if !strings.Contains(fake.content, "task-1") {
 		t.Fatalf("content missing task ID: %s", fake.content)
 	}
-	for _, want := range []string{"同意", "拒绝", "提交回复", "复制命令", "/task reply task-1"} {
+	for _, want := range []string{"同意", "拒绝", "提交回复", "/task reply task-1"} {
 		if !strings.Contains(fake.content, want) {
 			t.Fatalf("content missing %q: %s", want, fake.content)
 		}
@@ -144,6 +144,39 @@ func TestTaskNotifierQuestionCardFormIncludesSubmitButton(t *testing.T) {
 	}
 	if !foundSubmit {
 		t.Fatal("form missing submit button")
+	}
+}
+
+func TestTaskNotifierQuestionCardDoesNotUseActionTag(t *testing.T) {
+	t.Parallel()
+
+	card := buildTaskQuestionCard(orchestrator.TaskRun{
+		TaskID:    "task-5",
+		CreatedBy: "ou_user",
+		AwaitingQuestion: &orchestrator.AwaitingQuestion{
+			QuestionType: "execution_approval",
+			QuestionText: "Continue?",
+			AskedAt:      time.Now().UTC(),
+		},
+	})
+
+	body, ok := card["body"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("body = %#v", card["body"])
+	}
+	elements, ok := body["elements"].([]interface{})
+	if !ok {
+		t.Fatalf("elements = %#v", body["elements"])
+	}
+
+	for _, element := range elements {
+		node, ok := element.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if node["tag"] == "action" {
+			t.Fatalf("card contains unsupported action tag: %#v", node)
+		}
 	}
 }
 
