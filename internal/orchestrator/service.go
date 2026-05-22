@@ -720,7 +720,7 @@ func (s *Service) maybeSendCompletionCheck(ctx context.Context, task TaskRun, su
 		}
 		return task, true, nil
 
-	case CompletionCheckStatusSent:
+	case CompletionCheckStatusSent, CompletionCheckStatusReportedPending:
 		now := s.now()
 		switch decision.CompletionDisposition {
 		case CompletionDispositionConfirmedDone:

@@ -379,6 +379,47 @@ func TestTickCompletesTaskAfterCompletionCheckConfirmation(t *testing.T) {
 	}
 }
 
+func TestTickCompletesTaskAfterReportedRemainingWhenCodexLaterConfirmsDone(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{Summary: "all requested work is complete — MR #19 ready to merge", SessionState: SessionState{ThreadStatus: "completed"}},
+	}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
+		completionDecision: SupervisorDecision{
+			Classification:        ClassificationCompletionSignal,
+			CompletionDisposition: CompletionDispositionConfirmedDone,
+		},
+	})
+	defer cleanup()
+
+	task := sampleTaskRun("task-done-after-remaining", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	now := time.Now().UTC().Add(-time.Minute)
+	task.CompletionCheckStatus = CompletionCheckStatusReportedPending
+	task.CompletionCheckSentAt = &now
+	task.CompletionCheckDoneAt = &now
+	task.LastInput = "continue"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusCompleted {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
+	}
+	if persisted.CompletionCheckStatus != CompletionCheckStatusConfirmedDone {
+		t.Fatalf("persisted.CompletionCheckStatus = %q, want %q", persisted.CompletionCheckStatus, CompletionCheckStatusConfirmedDone)
+	}
+}
+
 func TestTickProgressPollingOnlyNotifiesUserAndNeverRepliesCodex(t *testing.T) {
 	t.Parallel()
 
