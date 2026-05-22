@@ -51,6 +51,49 @@ func TestTaskNotifierSendsApprovalCard(t *testing.T) {
 	}
 }
 
+func TestTaskNotifierQuestionCardDoesNotNestActionInsideForm(t *testing.T) {
+	t.Parallel()
+
+	card := buildTaskQuestionCard(orchestrator.TaskRun{
+		TaskID:    "task-3",
+		CreatedBy: "ou_user",
+		AwaitingQuestion: &orchestrator.AwaitingQuestion{
+			QuestionType: "execution_approval",
+			QuestionText: "Continue?",
+			AskedAt:      time.Now().UTC(),
+		},
+	})
+
+	body, ok := card["body"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("body = %#v", card["body"])
+	}
+	elements, ok := body["elements"].([]interface{})
+	if !ok {
+		t.Fatalf("elements = %#v", body["elements"])
+	}
+
+	for _, element := range elements {
+		node, ok := element.(map[string]interface{})
+		if !ok || node["tag"] != "form" {
+			continue
+		}
+		formElements, ok := node["elements"].([]interface{})
+		if !ok {
+			t.Fatalf("form.elements = %#v", node["elements"])
+		}
+		for _, formElement := range formElements {
+			child, ok := formElement.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if child["tag"] == "action" {
+				t.Fatalf("form contains nested action element: %#v", child)
+			}
+		}
+	}
+}
+
 func TestTaskNotifierUsesPlanOptionsWhenAvailable(t *testing.T) {
 	t.Parallel()
 
