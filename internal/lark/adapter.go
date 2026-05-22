@@ -119,7 +119,7 @@ func (a *Adapter) handleP2Message(ctx context.Context, event *larkim.P2MessageRe
 		ChatType:         value(message.ChatType),
 		SenderOpenID:     senderOpenID,
 		Text:             text,
-		TextWithoutAtBot: text,
+		TextWithoutAtBot: textWithoutLeadingMentions(text, message.Mentions),
 		IsMention:        len(message.Mentions) > 0,
 	}
 
@@ -234,6 +234,35 @@ func textFromContent(raw string) string {
 		return strings.TrimSpace(raw)
 	}
 	return strings.TrimSpace(payload.Text)
+}
+
+func textWithoutLeadingMentions(text string, mentions []*larkim.MentionEvent) string {
+	cleaned := strings.TrimSpace(text)
+	if len(mentions) == 0 || cleaned == "" {
+		return cleaned
+	}
+
+	for {
+		switch {
+		case strings.HasPrefix(cleaned, "<at "):
+			end := strings.Index(cleaned, "</at>")
+			if end < 0 {
+				return cleaned
+			}
+			cleaned = strings.TrimSpace(cleaned[end+len("</at>"):])
+		case strings.HasPrefix(cleaned, "@"):
+			parts := strings.Fields(cleaned)
+			if len(parts) <= 1 {
+				return ""
+			}
+			cleaned = strings.TrimSpace(strings.TrimPrefix(cleaned, parts[0]))
+		default:
+			return cleaned
+		}
+		if cleaned == "" {
+			return ""
+		}
+	}
 }
 
 func value(ptr *string) string {
