@@ -88,16 +88,13 @@ func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 					},
 					"options": optionItems,
 				},
-			},
-		})
-		elements = append(elements, map[string]interface{}{
-			"tag": "action",
-			"actions": []interface{}{
 				map[string]interface{}{
-					"tag":  "button",
-					"type": "primary",
+					"tag":         "button",
+					"name":        "task_reply_submit",
+					"type":        "primary",
+					"action_type": "form_submit",
 					"text": map[string]interface{}{
-						"tag":     "plain_text",
+						"tag":     "lark_md",
 						"content": "提交回复",
 					},
 					"value": map[string]interface{}{
@@ -108,6 +105,11 @@ func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 						"task_id": task.TaskID,
 					},
 				},
+			},
+		})
+		elements = append(elements, map[string]interface{}{
+			"tag": "action",
+			"actions": []interface{}{
 				map[string]interface{}{
 					"tag": "button",
 					"text": map[string]interface{}{

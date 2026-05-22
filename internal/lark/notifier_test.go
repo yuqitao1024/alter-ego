@@ -94,6 +94,59 @@ func TestTaskNotifierQuestionCardDoesNotNestActionInsideForm(t *testing.T) {
 	}
 }
 
+func TestTaskNotifierQuestionCardFormIncludesSubmitButton(t *testing.T) {
+	t.Parallel()
+
+	card := buildTaskQuestionCard(orchestrator.TaskRun{
+		TaskID:    "task-4",
+		CreatedBy: "ou_user",
+		AwaitingQuestion: &orchestrator.AwaitingQuestion{
+			QuestionType: "execution_approval",
+			QuestionText: "Continue?",
+			AskedAt:      time.Now().UTC(),
+		},
+	})
+
+	body, ok := card["body"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("body = %#v", card["body"])
+	}
+	elements, ok := body["elements"].([]interface{})
+	if !ok {
+		t.Fatalf("elements = %#v", body["elements"])
+	}
+
+	foundForm := false
+	foundSubmit := false
+	for _, element := range elements {
+		node, ok := element.(map[string]interface{})
+		if !ok || node["tag"] != "form" {
+			continue
+		}
+		foundForm = true
+		formElements, ok := node["elements"].([]interface{})
+		if !ok {
+			t.Fatalf("form.elements = %#v", node["elements"])
+		}
+		for _, formElement := range formElements {
+			child, ok := formElement.(map[string]interface{})
+			if !ok || child["tag"] != "button" {
+				continue
+			}
+			if child["action_type"] == "form_submit" {
+				foundSubmit = true
+			}
+		}
+	}
+
+	if !foundForm {
+		t.Fatal("card missing form element")
+	}
+	if !foundSubmit {
+		t.Fatal("form missing submit button")
+	}
+}
+
 func TestTaskNotifierUsesPlanOptionsWhenAvailable(t *testing.T) {
 	t.Parallel()
 
