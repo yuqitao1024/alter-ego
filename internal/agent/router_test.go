@@ -27,6 +27,19 @@ func (f *fakeTaskExecutor) HandleCommand(ctx context.Context, event channel.Mess
 	return f.reply, nil
 }
 
+type fakeTaskCardExecutor struct {
+	fakeTaskExecutor
+	cardCalled bool
+	cardEvent  channel.CardActionEvent
+	cardReply  channel.CardActionResponse
+}
+
+func (f *fakeTaskCardExecutor) HandleCardAction(ctx context.Context, event channel.CardActionEvent) (channel.CardActionResponse, error) {
+	f.cardCalled = true
+	f.cardEvent = event
+	return f.cardReply, nil
+}
+
 type fakeMessageHandler struct {
 	called bool
 	reply  channel.OutgoingMessage
@@ -140,5 +153,31 @@ func TestRouterRoutesTaskCommandToTaskHandler(t *testing.T) {
 	}
 	if reply.Text != "task" {
 		t.Fatalf("reply.Text = %q", reply.Text)
+	}
+}
+
+func TestRouterRoutesCardActionToTaskHandler(t *testing.T) {
+	task := &fakeTaskCardExecutor{
+		cardReply: channel.CardActionResponse{ToastText: "Task task-1 stopped."},
+	}
+	router := NewRouter(&fakeCommandExecutor{}, task, &fakeMessageHandler{})
+
+	reply, err := router.HandleCardAction(context.Background(), channel.CardActionEvent{
+		Action: "stop",
+		Value: map[string]interface{}{
+			"task_id": "task-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleCardAction returned error: %v", err)
+	}
+	if !task.cardCalled {
+		t.Fatal("task card action handler was not called")
+	}
+	if task.cardEvent.Action != "stop" {
+		t.Fatalf("cardEvent.Action = %q, want stop", task.cardEvent.Action)
+	}
+	if reply.ToastText != "Task task-1 stopped." {
+		t.Fatalf("reply.ToastText = %q", reply.ToastText)
 	}
 }
