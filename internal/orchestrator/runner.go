@@ -72,6 +72,18 @@ func (s SessionState) CodexActive() bool {
 	return false
 }
 
+func (s SessionState) CodexCompleted() bool {
+	if strings.TrimSpace(s.ThreadStatus) == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(s.ThreadStatus)) {
+	case "completed", "complete", "done", "succeeded", "success":
+		return true
+	default:
+		return false
+	}
+}
+
 func ReconnectInteractiveSession(ctx context.Context, runner RemoteRunner, task TaskRun) (RemoteSession, error) {
 	session := RemoteSession{
 		MachineID:    task.MachineID,

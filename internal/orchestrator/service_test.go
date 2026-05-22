@@ -439,6 +439,41 @@ func TestTickSkipsDecisionEvaluationWhenSummaryIsEmpty(t *testing.T) {
 	}
 }
 
+func TestTickCompletesTaskWhenCodexThreadCompletedWithoutNewSummary(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{Summary: "", SessionState: SessionState{ThreadStatus: "completed"}},
+	}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
+	defer cleanup()
+
+	task := sampleTaskRun("task-thread-complete", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	task.LastOutputSummary = "先按研究工作流梳理"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusCompleted {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
+	}
+	if persisted.LastOutputSummary != "先按研究工作流梳理" {
+		t.Fatalf("persisted.LastOutputSummary = %q", persisted.LastOutputSummary)
+	}
+	if len(runner.sentInputs) != 0 {
+		t.Fatalf("sentInputs = %#v, want none", runner.sentInputs)
+	}
+}
+
 func TestRecoveringTaskReconnectsByThreadID(t *testing.T) {
 	t.Parallel()
 

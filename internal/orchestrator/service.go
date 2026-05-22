@@ -495,6 +495,7 @@ func (s *Service) handlePendingRequest(ctx context.Context, taskID, requestID st
 }
 
 func (s *Service) handleProgressAndCompletionOnly(ctx context.Context, task TaskRun) error {
+	previousSummary := strings.TrimSpace(task.LastOutputSummary)
 	window, err := s.runner.CaptureOutput(ctx, sessionFromTask(task))
 	if err != nil {
 		if errors.Is(err, ErrRemoteCommandTimeout) {
@@ -512,6 +513,17 @@ func (s *Service) handleProgressAndCompletionOnly(ctx context.Context, task Task
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return err
 	}
+
+	currentSummary := strings.TrimSpace(window.Summary)
+	if task.PendingRequestID == "" && window.SessionState.CodexCompleted() && (currentSummary == "" || currentSummary == previousSummary) {
+		task.Status = StatusCompleted
+		task.UpdatedAt = s.now()
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, task.TaskID, "task_completed", "codex app-server thread completed")
+	}
+
 	if strings.TrimSpace(window.Summary) == "" {
 		return nil
 	}
