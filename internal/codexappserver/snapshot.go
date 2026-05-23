@@ -39,6 +39,14 @@ type ThreadWatcher struct {
 	requests map[string]struct{}
 }
 
+type TurnCompletedEvent struct {
+	ThreadID          string
+	TurnID            string
+	Summary           string
+	ThreadStatus      string
+	ThreadActiveFlags []string
+}
+
 func newThreadWatcher(threadID string) *ThreadWatcher {
 	return &ThreadWatcher{
 		threadID: threadID,
@@ -186,6 +194,18 @@ func (w *ThreadWatcher) apply(msg rpcMessage) {
 		}
 		if status != "" {
 			w.snapshot.ActiveTurnStatus = status
+		}
+		if msg.Method == "turn/completed" {
+			w.events <- ThreadEvent{
+				Message: msg,
+				TurnCompleted: &TurnCompletedEvent{
+					ThreadID:          w.snapshot.ThreadID,
+					TurnID:            w.snapshot.ActiveTurnID,
+					Summary:           strings.TrimSpace(w.snapshot.LatestSummary),
+					ThreadStatus:      w.snapshot.ThreadStatus,
+					ThreadActiveFlags: append([]string(nil), w.snapshot.ThreadActiveFlags...),
+				},
+			}
 		}
 	case "item/started", "item/completed":
 		item, ok := decodeItemNotification(params)

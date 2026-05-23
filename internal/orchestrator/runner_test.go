@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
 )
 
 func TestReconnectUsesThreadWhenPresent(t *testing.T) {
@@ -103,6 +105,10 @@ func (f *fakeRemoteRunner) CleanupSession(context.Context, RemoteSession) error 
 func (f *fakeRemoteRunner) DeleteTaskWorkspace(context.Context, DeleteWorkspaceRequest) error {
 	f.calls = append(f.calls, "delete-workspace")
 	return nil
+}
+
+func (f *fakeRemoteRunner) Snapshot(string, string) (codexappserver.ThreadSnapshot, bool) {
+	return codexappserver.ThreadSnapshot{}, false
 }
 
 func (f *fakeRemoteRunner) Events() <-chan RuntimeEvent {

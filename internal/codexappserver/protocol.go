@@ -168,6 +168,7 @@ type ServerRequest struct {
 type ThreadEvent struct {
 	Message           rpcMessage
 	ServerRequest     *ServerRequest
+	TurnCompleted     *TurnCompletedEvent
 	ResolvedRequestID string
 }
 

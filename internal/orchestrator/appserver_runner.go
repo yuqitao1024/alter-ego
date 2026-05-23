@@ -107,6 +107,10 @@ func (r *AppServerRunner) CaptureOutput(ctx context.Context, session RemoteSessi
 	}, nil
 }
 
+func (r *AppServerRunner) Snapshot(machineID, threadID string) (codexappserver.ThreadSnapshot, bool) {
+	return r.manager.Snapshot(machineID, threadID)
+}
+
 func (r *AppServerRunner) SendInteractiveInput(ctx context.Context, session RemoteSession, input string) (RemoteSession, error) {
 	machine, err := r.machineResolver(session.MachineID)
 	if err != nil {
@@ -282,6 +286,7 @@ func (r *AppServerRunner) bridgeWatcher(ctx context.Context, machineID, threadID
 				MachineID:         machineID,
 				ThreadID:          threadID,
 				ServerRequest:     convertServerRequest(event.ServerRequest),
+				TurnCompleted:     convertTurnCompleted(event.TurnCompleted),
 				ResolvedRequestID: event.ResolvedRequestID,
 			}
 		}
@@ -304,6 +309,19 @@ func convertServerRequest(req *codexappserver.ServerRequest) *TaskServerRequest 
 		TurnID:         req.TurnID,
 		RequestType:    mapServerRequestType(req.Method),
 		RequestPayload: payload,
+	}
+}
+
+func convertTurnCompleted(ev *codexappserver.TurnCompletedEvent) *TurnCompletedEvent {
+	if ev == nil {
+		return nil
+	}
+	return &TurnCompletedEvent{
+		ThreadID:          ev.ThreadID,
+		TurnID:            ev.TurnID,
+		Summary:           ev.Summary,
+		ThreadStatus:      ev.ThreadStatus,
+		ThreadActiveFlags: append([]string(nil), ev.ThreadActiveFlags...),
 	}
 }
 

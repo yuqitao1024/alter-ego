@@ -55,6 +55,7 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			remote_workdir,
 			thread_id,
 			active_turn_id,
+			last_completed_turn_id,
 			last_input,
 			last_output_summary,
 			last_decision_action,
@@ -65,7 +66,7 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			awaiting_question,
 			created_at,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
@@ -77,6 +78,7 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		task.RemoteWorkdir,
 		task.ThreadID,
 		task.ActiveTurnID,
+		task.LastCompletedTurnID,
 		task.LastInput,
 		task.LastOutputSummary,
 		task.LastDecisionAction,
@@ -112,6 +114,7 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			remote_workdir = ?,
 			thread_id = ?,
 			active_turn_id = ?,
+			last_completed_turn_id = ?,
 			last_input = ?,
 			last_output_summary = ?,
 			last_decision_action = ?,
@@ -133,6 +136,7 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		task.RemoteWorkdir,
 		task.ThreadID,
 		task.ActiveTurnID,
+		task.LastCompletedTurnID,
 		task.LastInput,
 		task.LastOutputSummary,
 		task.LastDecisionAction,
@@ -173,6 +177,7 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			remote_workdir,
 			thread_id,
 			active_turn_id,
+			last_completed_turn_id,
 			last_input,
 			last_output_summary,
 			last_decision_action,
@@ -226,6 +231,7 @@ func (s *Store) GetTaskByThread(ctx context.Context, threadID string) (TaskRun, 
 			remote_workdir,
 			thread_id,
 			active_turn_id,
+			last_completed_turn_id,
 			last_input,
 			last_output_summary,
 			last_decision_action,
@@ -260,6 +266,7 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			remote_workdir,
 			thread_id,
 			active_turn_id,
+			last_completed_turn_id,
 			last_input,
 			last_output_summary,
 			last_decision_action,
@@ -307,6 +314,7 @@ func (s *Store) ListTasks(ctx context.Context) ([]TaskRun, error) {
 			remote_workdir,
 			thread_id,
 			active_turn_id,
+			last_completed_turn_id,
 			last_input,
 			last_output_summary,
 			last_decision_action,
@@ -655,6 +663,7 @@ func (s *Store) init(ctx context.Context) error {
 			remote_workdir TEXT NOT NULL,
 			thread_id TEXT NOT NULL DEFAULT '',
 			active_turn_id TEXT NOT NULL DEFAULT '',
+			last_completed_turn_id TEXT NOT NULL DEFAULT '',
 			last_input TEXT NOT NULL,
 			last_output_summary TEXT NOT NULL,
 			last_decision_action TEXT NOT NULL DEFAULT '',
@@ -710,7 +719,40 @@ func (s *Store) init(ctx context.Context) error {
 			return fmt.Errorf("initialize sqlite store: %w", err)
 		}
 	}
+	if err := s.ensureTaskColumn(ctx, "last_completed_turn_id", `ALTER TABLE tasks ADD COLUMN last_completed_turn_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func (s *Store) ensureTaskColumn(ctx context.Context, columnName, alter string) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(tasks)`)
+	if err != nil {
+		return fmt.Errorf("inspect tasks schema: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &defaultValue, &pk); err != nil {
+			return fmt.Errorf("inspect tasks schema: %w", err)
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect tasks schema: %w", err)
+	}
+
+	if _, err := s.db.ExecContext(ctx, alter); err != nil {
+		return fmt.Errorf("apply tasks schema update for %s: %w", columnName, err)
+	}
 	return nil
 }
 
@@ -739,6 +781,7 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&task.RemoteWorkdir,
 		&task.ThreadID,
 		&task.ActiveTurnID,
+		&task.LastCompletedTurnID,
 		&task.LastInput,
 		&task.LastOutputSummary,
 		&task.LastDecisionAction,

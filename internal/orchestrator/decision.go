@@ -10,11 +10,15 @@ import (
 
 const supervisorRequestRules = `You are Alter Ego's Codex supervisor.
 - Alter Ego is a supervisor, not a co-worker.
-- If Codex did not issue an explicit app-server server request, Alter Ego must not send Codex any reply.
-- Classify the current explicit server request as either plan_decision, execution_approval, or ignore.
-- Prefer plan_decision when the request asks for scope, architecture, prioritization, or other product/solution choices.
-- Prefer execution_approval when the request is a routine continue/resume/approval that does not change scope.
-- Set reply_policy to auto_continue only when the request is safe to answer automatically.
+- Handle two event types: server_request and turn_completed.
+- Classify the event as one of: plan_decision, execution_approval, completion_signal, progress_update, or ignore.
+- For server_request events, prefer plan_decision when the request asks for scope, architecture, prioritization, or other product/solution choices.
+- For server_request events, prefer execution_approval when the request is a routine continue/resume/approval that does not change scope.
+- For turn_completed events, use completion_signal only when the completed turn clearly claims the task is done enough to trigger the one fixed completion-check prompt.
+- For turn_completed events, prefer plan_decision when the summary is clearly asking the user to choose scope, architecture, priorities, or options.
+- For turn_completed events, prefer execution_approval only when a routine continue/resume reply is clearly appropriate.
+- For turn_completed events, do not invent a reply unless the summary clearly asks for the next instruction or approval.
+- Set reply_policy to auto_continue only when it is safe to answer automatically.
 - Set reply_policy to ask_user when the user should decide in Feishu.
 - Return strict JSON only.`
 
@@ -32,9 +36,11 @@ const completionSignalRules = `You are Alter Ego's Codex supervisor.
 - Return strict JSON only.`
 
 type SupervisorContext struct {
-	Task    TaskRun
-	Request TaskServerRequest
-	Summary string
+	Task          TaskRun
+	Request       TaskServerRequest
+	TurnCompleted *TurnCompletedEvent
+	EventType     string
+	Summary       string
 }
 
 type DecisionEngine interface {
@@ -118,17 +124,41 @@ func buildSupervisorRequestPrompt(in SupervisorContext) string {
 	builder.WriteString("[Task]\n")
 	builder.WriteString("task_id: ")
 	builder.WriteString(in.Task.TaskID)
+	builder.WriteString("\nevent_type: ")
+	builder.WriteString(firstNonEmpty(in.EventType, "server_request"))
 	builder.WriteString("\nuser_request: ")
 	builder.WriteString(in.Task.UserRequest)
 	builder.WriteString("\ncompletion_check_status: ")
 	builder.WriteString(string(in.Task.CompletionCheckStatus))
-	builder.WriteString("\n\n[Server Request]\n")
-	builder.WriteString("request_id: ")
-	builder.WriteString(in.Request.RequestID)
-	builder.WriteString("\nrequest_type: ")
-	builder.WriteString(string(in.Request.RequestType))
-	builder.WriteString("\nrequest_payload: ")
-	builder.WriteString(in.Request.RequestPayload)
+	if in.TurnCompleted != nil {
+		builder.WriteString("\nturn_id: ")
+		builder.WriteString(in.TurnCompleted.TurnID)
+		builder.WriteString("\nturn_status: ")
+		builder.WriteString(in.TurnCompleted.ThreadStatus)
+		builder.WriteString("\nturn_summary: ")
+		builder.WriteString(strings.TrimSpace(in.TurnCompleted.Summary))
+		builder.WriteString("\nthread_active_flags: ")
+		builder.WriteString(strings.Join(in.TurnCompleted.ThreadActiveFlags, ","))
+	}
+	if strings.EqualFold(strings.TrimSpace(in.EventType), "turn_completed") {
+		builder.WriteString("\n\n[Turn Completed]\n")
+		builder.WriteString("turn_id: ")
+		builder.WriteString(in.TurnCompleted.TurnID)
+		builder.WriteString("\nturn_summary: ")
+		builder.WriteString(strings.TrimSpace(in.Summary))
+		builder.WriteString("\nturn_status: ")
+		builder.WriteString(in.TurnCompleted.ThreadStatus)
+		builder.WriteString("\nthread_active_flags: ")
+		builder.WriteString(strings.Join(in.TurnCompleted.ThreadActiveFlags, ","))
+	} else {
+		builder.WriteString("\n\n[Server Request]\n")
+		builder.WriteString("request_id: ")
+		builder.WriteString(in.Request.RequestID)
+		builder.WriteString("\nrequest_type: ")
+		builder.WriteString(string(in.Request.RequestType))
+		builder.WriteString("\nrequest_payload: ")
+		builder.WriteString(in.Request.RequestPayload)
+	}
 	builder.WriteString("\n\n[Latest Summary]\n")
 	builder.WriteString(strings.TrimSpace(in.Summary))
 	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, should_reply_codex, should_notify_user, reply_policy, reason, user_update, user_question, codex_reply.")

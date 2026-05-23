@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
 )
 
 func TestStartTaskSelectsMachineAndStartsSession(t *testing.T) {
@@ -308,16 +310,13 @@ func TestStopRejectsNonStoppableStatus(t *testing.T) {
 	}
 }
 
-func TestTickSendsCompletionCheckOnlyOnce(t *testing.T) {
+func TestHandleRuntimeEventSendsCompletionCheckOnlyOnceForCompletedTurn(t *testing.T) {
 	t.Parallel()
 
-	runner := &fakeServiceRunner{
-		outputWindow: OutputWindow{Summary: "Task complete.", SessionState: SessionState{ThreadStatus: "completed"}},
-	}
+	runner := &fakeServiceRunner{}
 	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
-		completionDecision: SupervisorDecision{
-			Classification:        ClassificationCompletionSignal,
-			CompletionDisposition: CompletionDispositionSignalComplete,
+		supervisorDecision: SupervisorDecision{
+			Classification: ClassificationCompletionSignal,
 		},
 	})
 	defer cleanup()
@@ -328,27 +327,39 @@ func TestTickSendsCompletionCheckOnlyOnce(t *testing.T) {
 	task.RemoteWorkdir = "/srv/backend"
 	seedTask(t, store, task)
 
-	if err := service.TickOnce(context.Background()); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
+	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-1",
+		TurnCompleted: &TurnCompletedEvent{
+			TurnID:   "turn-1",
+			Summary:  "Task complete.",
+			ThreadID: "thread-1",
+		},
+	}); err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
 	}
 	if len(runner.sentInputs) != 1 {
 		t.Fatalf("sentInputs = %#v, want one completion check", runner.sentInputs)
 	}
 
-	if err := service.TickOnce(context.Background()); err != nil {
-		t.Fatalf("second TickOnce returned error: %v", err)
+	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-1",
+		TurnCompleted: &TurnCompletedEvent{
+			TurnID:   "turn-1",
+			Summary:  "Task complete.",
+			ThreadID: "thread-1",
+		},
+	}); err != nil {
+		t.Fatalf("second HandleRuntimeEvent returned error: %v", err)
 	}
 	if len(runner.sentInputs) != 1 {
-		t.Fatalf("sentInputs after second tick = %#v, want still one completion check", runner.sentInputs)
+		t.Fatalf("sentInputs after second event = %#v, want still one completion check", runner.sentInputs)
 	}
 }
 
-func TestTickCompletesTaskAfterCompletionCheckConfirmation(t *testing.T) {
+func TestHandleRuntimeEventCompletesTaskAfterCompletionCheckConfirmation(t *testing.T) {
 	t.Parallel()
 
-	runner := &fakeServiceRunner{
-		outputWindow: OutputWindow{Summary: "All requested work is complete.", SessionState: SessionState{ThreadStatus: "completed"}},
-	}
+	runner := &fakeServiceRunner{}
 	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
 		completionDecision: SupervisorDecision{
 			Classification:        ClassificationCompletionSignal,
@@ -366,8 +377,15 @@ func TestTickCompletesTaskAfterCompletionCheckConfirmation(t *testing.T) {
 	task.CompletionCheckSentAt = &now
 	seedTask(t, store, task)
 
-	if err := service.TickOnce(context.Background()); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
+	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-1",
+		TurnCompleted: &TurnCompletedEvent{
+			TurnID:   "turn-1",
+			Summary:  "All requested work is complete.",
+			ThreadID: "thread-1",
+		},
+	}); err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
 	}
 
 	persisted, err := store.GetTask(context.Background(), task.TaskID)
@@ -379,16 +397,14 @@ func TestTickCompletesTaskAfterCompletionCheckConfirmation(t *testing.T) {
 	}
 }
 
-func TestTickCompletesTaskAfterReportedRemainingWhenCodexLaterConfirmsDone(t *testing.T) {
+func TestHandleRuntimeEventMovesTaskToWaitingAfterReportedRemaining(t *testing.T) {
 	t.Parallel()
 
-	runner := &fakeServiceRunner{
-		outputWindow: OutputWindow{Summary: "all requested work is complete — MR #19 ready to merge", SessionState: SessionState{ThreadStatus: "completed"}},
-	}
+	runner := &fakeServiceRunner{}
 	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
 		completionDecision: SupervisorDecision{
 			Classification:        ClassificationCompletionSignal,
-			CompletionDisposition: CompletionDispositionConfirmedDone,
+			CompletionDisposition: CompletionDispositionReportedRemaining,
 		},
 	})
 	defer cleanup()
@@ -404,19 +420,71 @@ func TestTickCompletesTaskAfterReportedRemainingWhenCodexLaterConfirmsDone(t *te
 	task.LastInput = "continue"
 	seedTask(t, store, task)
 
-	if err := service.TickOnce(context.Background()); err != nil {
-		t.Fatalf("TickOnce returned error: %v", err)
+	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-1",
+		TurnCompleted: &TurnCompletedEvent{
+			TurnID:   "turn-1",
+			Summary:  "remaining work still exists",
+			ThreadID: "thread-1",
+		},
+	}); err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
 	}
 
 	persisted, err := store.GetTask(context.Background(), task.TaskID)
 	if err != nil {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
-	if persisted.Status != StatusCompleted {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
 	}
-	if persisted.CompletionCheckStatus != CompletionCheckStatusConfirmedDone {
-		t.Fatalf("persisted.CompletionCheckStatus = %q, want %q", persisted.CompletionCheckStatus, CompletionCheckStatusConfirmedDone)
+	if persisted.CompletionCheckStatus != CompletionCheckStatusReportedPending {
+		t.Fatalf("persisted.CompletionCheckStatus = %q, want %q", persisted.CompletionCheckStatus, CompletionCheckStatusReportedPending)
+	}
+}
+
+func TestHandleRuntimeEventEscalatesPlanDecisionOnCompletedTurnToUser(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification: ClassificationPlanDecision,
+			ReplyPolicy:    ReplyPolicyAskUser,
+			UserQuestion:   "Choose A or B",
+		},
+	}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-turn-plan", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-1",
+		TurnCompleted: &TurnCompletedEvent{
+			TurnID:   "turn-1",
+			Summary:  "先确认范围：A 还是 B？",
+			ThreadID: "thread-1",
+		},
+	}); err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.AwaitingQuestion == nil {
+		t.Fatal("persisted.AwaitingQuestion = nil, want question")
+	}
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
 	}
 }
 
@@ -543,6 +611,42 @@ func TestResumeActiveTasksReconnectsRunningTaskImmediately(t *testing.T) {
 	}
 	if !reflect.DeepEqual(runner.calls, []string{"has-session"}) {
 		t.Fatalf("runner.calls = %v, want [has-session]", runner.calls)
+	}
+}
+
+func TestResumeActiveTasksRestoresUnprocessedCompletedTurn(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		snapshot: codexappserver.ThreadSnapshot{
+			ThreadID:          "thread-restore",
+			ActiveTurnID:      "turn-restore",
+			ActiveTurnStatus:  "completed",
+			LatestSummary:     "Task complete.",
+			ThreadStatus:      "active",
+			SubscriptionState: codexappserver.SubscriptionStateActive,
+		},
+	}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification: ClassificationCompletionSignal,
+		},
+	})
+	defer cleanup()
+
+	task := sampleTaskRun("task-restore-completed", StatusRunning)
+	task.ThreadID = "thread-restore"
+	task.ActiveTurnID = "turn-restore"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	runner.hasSession = true
+
+	if err := service.ResumeActiveTasks(context.Background()); err != nil {
+		t.Fatalf("ResumeActiveTasks returned error: %v", err)
+	}
+	if len(runner.sentInputs) != 1 {
+		t.Fatalf("sentInputs = %#v, want one completion check", runner.sentInputs)
 	}
 }
 
@@ -932,6 +1036,7 @@ type fakeServiceRunner struct {
 	startSession RemoteSession
 	sendSession  RemoteSession
 	outputWindow OutputWindow
+	snapshot     codexappserver.ThreadSnapshot
 	hasSession   bool
 	eventCh      chan RuntimeEvent
 
@@ -978,6 +1083,13 @@ func (f *fakeServiceRunner) CaptureOutput(context.Context, RemoteSession) (Outpu
 		return OutputWindow{}, f.captureErr
 	}
 	return f.outputWindow, nil
+}
+
+func (f *fakeServiceRunner) Snapshot(string, string) (codexappserver.ThreadSnapshot, bool) {
+	if f.snapshot.ThreadID == "" {
+		return codexappserver.ThreadSnapshot{}, false
+	}
+	return f.snapshot, true
 }
 
 func (f *fakeServiceRunner) HasSession(context.Context, RemoteSession) (bool, error) {

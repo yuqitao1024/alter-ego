@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
 )
 
 type RemoteRunner interface {
@@ -15,6 +17,7 @@ type RemoteRunner interface {
 	StopSession(ctx context.Context, session RemoteSession) error
 	CleanupSession(ctx context.Context, session RemoteSession) error
 	DeleteTaskWorkspace(ctx context.Context, req DeleteWorkspaceRequest) error
+	Snapshot(machineID, threadID string) (codexappserver.ThreadSnapshot, bool)
 	Events() <-chan RuntimeEvent
 }
 
@@ -60,7 +63,16 @@ type RuntimeEvent struct {
 	MachineID         string
 	ThreadID          string
 	ServerRequest     *TaskServerRequest
+	TurnCompleted     *TurnCompletedEvent
 	ResolvedRequestID string
+}
+
+type TurnCompletedEvent struct {
+	ThreadID          string
+	TurnID            string
+	Summary           string
+	ThreadStatus      string
+	ThreadActiveFlags []string
 }
 
 func (s SessionState) CodexActive() bool {

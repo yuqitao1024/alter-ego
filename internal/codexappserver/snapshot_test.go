@@ -101,6 +101,49 @@ func TestThreadWatcherPublishesGenericApprovalRequestEvent(t *testing.T) {
 	}
 }
 
+func TestThreadWatcherPublishesCompletedTurnEvent(t *testing.T) {
+	t.Parallel()
+
+	watcher := newThreadWatcher("thread-1")
+	watcher.apply(rpcMessage{
+		Method: "item/completed",
+		Params: mustRawJSON(t, map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id":   "item-msg",
+				"type": "agent_message",
+				"text": "Choose A or B",
+			},
+		}),
+	})
+	watcher.apply(rpcMessage{
+		Method: "turn/completed",
+		Params: mustRawJSON(t, map[string]any{
+			"threadId": "thread-1",
+			"turn": map[string]any{
+				"id":     "turn-1",
+				"status": "completed",
+			},
+		}),
+	})
+
+	select {
+	case event := <-watcher.Events():
+		if event.TurnCompleted == nil {
+			t.Fatal("TurnCompleted = nil")
+		}
+		if event.TurnCompleted.TurnID != "turn-1" {
+			t.Fatalf("TurnCompleted.TurnID = %q, want turn-1", event.TurnCompleted.TurnID)
+		}
+		if event.TurnCompleted.Summary != "Choose A or B" {
+			t.Fatalf("TurnCompleted.Summary = %q, want %q", event.TurnCompleted.Summary, "Choose A or B")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("turn completed event was not published")
+	}
+}
+
 func TestThreadWatcherAppliesCurrentProtocolNotifications(t *testing.T) {
 	t.Parallel()
 

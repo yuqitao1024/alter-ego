@@ -50,6 +50,7 @@ type TaskRun struct {
 	RemoteWorkdir         string
 	ThreadID              string
 	ActiveTurnID          string
+	LastCompletedTurnID   string
 	LastInput             string
 	LastOutputSummary     string
 	LastDecisionAction    string

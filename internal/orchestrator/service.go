@@ -172,6 +172,10 @@ func (s *Service) HandleRuntimeEvent(ctx context.Context, event RuntimeEvent) er
 	}
 
 	if event.ServerRequest == nil {
+		if event.TurnCompleted != nil {
+			_, err := s.handleTurnCompleted(ctx, task, *event.TurnCompleted)
+			return err
+		}
 		return nil
 	}
 
@@ -536,15 +540,6 @@ func (s *Service) handleProgressAndCompletionOnly(ctx context.Context, task Task
 	if strings.TrimSpace(window.Summary) == "" {
 		return nil
 	}
-
-	updatedTask, handled, err := s.maybeSendCompletionCheck(ctx, task, window.Summary)
-	if err != nil {
-		return err
-	}
-	if handled {
-		task = updatedTask
-	}
-
 	return s.maybeNotifyProgress(ctx, task, window.Summary)
 }
 
@@ -599,7 +594,7 @@ func (s *Service) reconcilePersistedRequests(ctx context.Context, task TaskRun) 
 		return err
 	}
 	if len(requests) == 0 {
-		return nil
+		return s.reconcileCompletedTurnAfterResume(ctx, task)
 	}
 
 	task.PendingRequestID = requests[0].RequestID
@@ -685,90 +680,236 @@ func (s *Service) transitionTaskToRecoveredWaitingState(ctx context.Context, tas
 	return s.appendEvent(ctx, task.TaskID, "waiting_user_input", "codex thread is waiting for input after recovery")
 }
 
-func (s *Service) maybeSendCompletionCheck(ctx context.Context, task TaskRun, summary string) (TaskRun, bool, error) {
+func (s *Service) handleTurnCompleted(ctx context.Context, task TaskRun, turn TurnCompletedEvent) (TaskRun, error) {
+	turnID := strings.TrimSpace(turn.TurnID)
+	if turnID == "" || task.LastCompletedTurnID == turnID || task.PendingRequestID != "" {
+		return task, nil
+	}
+	task.ActiveTurnID = turnID
+
+	summary := strings.TrimSpace(turn.Summary)
+	if summary != "" {
+		task.LastOutputSummary = summary
+	}
+
+	if task.CompletionCheckStatus == CompletionCheckStatusSent || task.CompletionCheckStatus == CompletionCheckStatusReportedPending {
+		updatedTask, handled, err := s.handleCompletionCheckFollowUp(ctx, task, turnID, summary)
+		if err != nil {
+			return task, err
+		}
+		if handled {
+			return updatedTask, nil
+		}
+		task.LastCompletedTurnID = turnID
+		task.UpdatedAt = s.now()
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return task, err
+		}
+		return task, nil
+	}
+
+	decision, err := s.decider.ClassifySupervisorEvent(ctx, SupervisorContext{
+		Task:          task,
+		TurnCompleted: &turn,
+		EventType:     "turn_completed",
+		Summary:       summary,
+	})
+	if err != nil {
+		return task, fmt.Errorf("classify completed turn for task %q: %w", task.TaskID, err)
+	}
+
+	switch decision.Classification {
+	case ClassificationCompletionSignal:
+		return s.sendCompletionCheckForTurn(ctx, task, turnID)
+	case ClassificationPlanDecision, ClassificationExecutionApproval:
+		return s.applyTurnDecision(ctx, task, turnID, summary, decision)
+	case ClassificationProgressUpdate:
+		if s.notifier != nil && decision.ShouldNotifyUser && strings.TrimSpace(decision.UserUpdate) != "" {
+			if err := s.notifier.NotifyTaskProgress(ctx, task, decision.UserUpdate); err != nil {
+				return task, err
+			}
+		}
+	default:
+	}
+
+	task.LastCompletedTurnID = turnID
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return task, err
+	}
+	return task, nil
+}
+
+func (s *Service) sendCompletionCheckForTurn(ctx context.Context, task TaskRun, turnID string) (TaskRun, error) {
+	if task.CompletionCheckStatus != CompletionCheckStatusNotStarted {
+		return task, nil
+	}
+
+	now := s.now()
+	task.CompletionCheckStatus = CompletionCheckStatusSent
+	task.CompletionCheckSentAt = &now
+	task.LastInput = completionCheckPrompt
+	task.LastCompletedTurnID = turnID
+	task.UpdatedAt = now
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return task, err
+	}
+
+	session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), completionCheckPrompt)
+	if err != nil {
+		return task, fmt.Errorf("send completion check for task %q: %w", task.TaskID, err)
+	}
+	applySessionToTask(&task, session)
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return task, err
+	}
+	if err := s.appendEvent(ctx, task.TaskID, "completion_check_sent", "sent one-time completion verification prompt"); err != nil {
+		return task, err
+	}
+	return task, nil
+}
+
+func (s *Service) handleCompletionCheckFollowUp(ctx context.Context, task TaskRun, turnID string, summary string) (TaskRun, bool, error) {
 	decision, err := s.decider.EvaluateCompletionSignal(ctx, task, summary)
 	if err != nil {
 		return task, false, err
 	}
 
-	switch task.CompletionCheckStatus {
-	case CompletionCheckStatusNotStarted:
-		if decision.CompletionDisposition != CompletionDispositionSignalComplete {
-			return task, false, nil
-		}
-
-		now := s.now()
-		task.CompletionCheckStatus = CompletionCheckStatusSent
-		task.CompletionCheckSentAt = &now
-		task.LastInput = completionCheckPrompt
+	now := s.now()
+	switch decision.CompletionDisposition {
+	case CompletionDispositionConfirmedDone:
+		task.CompletionCheckStatus = CompletionCheckStatusConfirmedDone
+		task.CompletionCheckDoneAt = &now
+		task.Status = StatusCompleted
+		task.LastCompletedTurnID = turnID
 		task.UpdatedAt = now
 		if err := s.store.UpdateTask(ctx, task); err != nil {
 			return task, false, err
 		}
-
-		session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), completionCheckPrompt)
-		if err != nil {
-			return task, false, fmt.Errorf("send completion check for task %q: %w", task.TaskID, err)
-		}
-		applySessionToTask(&task, session)
-		task.UpdatedAt = s.now()
-		if err := s.store.UpdateTask(ctx, task); err != nil {
+		if err := s.runner.StopSession(ctx, sessionFromTask(task)); err != nil && !errors.Is(err, ErrAppServerStopUnsupported) {
 			return task, false, err
 		}
-		if err := s.appendEvent(ctx, task.TaskID, "completion_check_sent", "sent one-time completion verification prompt"); err != nil {
+		if err := s.appendEvent(ctx, task.TaskID, "task_completed", "codex confirmed the full task scope is complete"); err != nil {
 			return task, false, err
 		}
 		return task, true, nil
-
-	case CompletionCheckStatusSent, CompletionCheckStatusReportedPending:
-		now := s.now()
-		switch decision.CompletionDisposition {
-		case CompletionDispositionConfirmedDone:
-			task.CompletionCheckStatus = CompletionCheckStatusConfirmedDone
-			task.CompletionCheckDoneAt = &now
-			task.Status = StatusCompleted
-			task.UpdatedAt = now
-			if err := s.store.UpdateTask(ctx, task); err != nil {
-				return task, false, err
-			}
-			if err := s.runner.StopSession(ctx, sessionFromTask(task)); err != nil && !errors.Is(err, ErrAppServerStopUnsupported) {
-				return task, false, err
-			}
-			if err := s.appendEvent(ctx, task.TaskID, "task_completed", "codex confirmed the full task scope is complete"); err != nil {
-				return task, false, err
-			}
-			return task, true, nil
-		case CompletionDispositionReportedRemaining:
-			task.CompletionCheckStatus = CompletionCheckStatusReportedPending
-			task.CompletionCheckDoneAt = &now
-			task.Status = StatusWaitingUserInput
-			task.AwaitingQuestion = &AwaitingQuestion{
-				QuestionText:   "Codex reports there is remaining work after the completion check. Reply with whether to continue the remaining work.",
-				OptionsSummary: "",
-				ContextExcerpt: summary,
-				QuestionType:   "completion_follow_up",
-				AskedAt:        now,
-			}
-			task.UpdatedAt = now
-			if err := s.store.UpdateTask(ctx, task); err != nil {
-				return task, false, err
-			}
-			if err := s.appendQuestion(ctx, task); err != nil {
-				return task, false, err
-			}
-			if s.notifier != nil {
-				if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
-					return task, false, err
-				}
-			}
-			if err := s.appendEvent(ctx, task.TaskID, "completion_check_reported_remaining", "codex reported remaining work after completion check"); err != nil {
-				return task, false, err
-			}
-			return task, true, nil
+	case CompletionDispositionReportedRemaining:
+		task.CompletionCheckStatus = CompletionCheckStatusReportedPending
+		task.CompletionCheckDoneAt = &now
+		task.Status = StatusWaitingUserInput
+		task.LastCompletedTurnID = turnID
+		task.AwaitingQuestion = &AwaitingQuestion{
+			QuestionText:   "Codex reports there is remaining work after the completion check. Reply with whether to continue the remaining work.",
+			OptionsSummary: "",
+			ContextExcerpt: summary,
+			QuestionType:   "completion_follow_up",
+			AskedAt:        now,
 		}
+		task.UpdatedAt = now
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return task, false, err
+		}
+		if err := s.appendQuestion(ctx, task); err != nil {
+			return task, false, err
+		}
+		if s.notifier != nil {
+			if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
+				return task, false, err
+			}
+		}
+		if err := s.appendEvent(ctx, task.TaskID, "completion_check_reported_remaining", "codex reported remaining work after completion check"); err != nil {
+			return task, false, err
+		}
+		return task, true, nil
+	default:
+		return task, false, nil
+	}
+}
+
+func (s *Service) applyTurnDecision(ctx context.Context, task TaskRun, turnID string, summary string, decision SupervisorDecision) (TaskRun, error) {
+	if decision.ShouldReplyCodex && decision.ReplyPolicy == ReplyPolicyAutoContinue {
+		reply := strings.TrimSpace(decision.CodexReply)
+		if reply == "" {
+			reply = "continue"
+		}
+		session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), reply)
+		if err != nil {
+			return task, fmt.Errorf("send completed-turn reply for task %q: %w", task.TaskID, err)
+		}
+		task.Status = StatusRunning
+		task.LastInput = reply
+		task.LastCompletedTurnID = turnID
+		applySessionToTask(&task, session)
+		task.UpdatedAt = s.now()
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return task, err
+		}
+		if err := s.appendEvent(ctx, task.TaskID, "turn_completed_replied", reply); err != nil {
+			return task, err
+		}
+		return task, nil
 	}
 
-	return task, false, nil
+	if decision.ReplyPolicy == ReplyPolicyAskUser {
+		task.Status = StatusWaitingUserInput
+		task.AwaitingQuestion = &AwaitingQuestion{
+			QuestionText:   firstNonEmpty(decision.UserQuestion, summary),
+			OptionsSummary: "",
+			ContextExcerpt: summary,
+			QuestionType:   string(decision.Classification),
+			AskedAt:        s.now(),
+		}
+		task.LastCompletedTurnID = turnID
+		task.UpdatedAt = s.now()
+		if err := s.store.UpdateTask(ctx, task); err != nil {
+			return task, err
+		}
+		if err := s.appendQuestion(ctx, task); err != nil {
+			return task, err
+		}
+		if err := s.appendEvent(ctx, task.TaskID, "waiting_user_input", fmt.Sprintf("waiting for %s", task.AwaitingQuestion.QuestionType)); err != nil {
+			return task, err
+		}
+		if s.notifier != nil {
+			if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
+				return task, err
+			}
+		}
+		return task, nil
+	}
+
+	task.LastCompletedTurnID = turnID
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return task, err
+	}
+	return task, nil
+}
+
+func (s *Service) reconcileCompletedTurnAfterResume(ctx context.Context, task TaskRun) error {
+	snapshot, ok := s.runner.Snapshot(task.MachineID, task.ThreadID)
+	if !ok {
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(snapshot.ActiveTurnStatus), "completed") {
+		return nil
+	}
+	if strings.TrimSpace(snapshot.ActiveTurnID) == "" || task.LastCompletedTurnID == snapshot.ActiveTurnID {
+		return nil
+	}
+	if task.PendingRequestID != "" || task.Status == StatusWaitingUserInput {
+		return nil
+	}
+
+	_, err := s.handleTurnCompleted(ctx, task, TurnCompletedEvent{
+		ThreadID:          task.ThreadID,
+		TurnID:            snapshot.ActiveTurnID,
+		Summary:           snapshot.LatestSummary,
+		ThreadStatus:      snapshot.ThreadStatus,
+		ThreadActiveFlags: append([]string(nil), snapshot.ThreadActiveFlags...),
+	})
+	return err
 }
 
 func (s *Service) maybeNotifyProgress(ctx context.Context, task TaskRun, summary string) error {

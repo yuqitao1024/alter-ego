@@ -440,6 +440,9 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	if got.ActiveTurnID != want.ActiveTurnID {
 		t.Fatalf("ActiveTurnID = %q, want %q", got.ActiveTurnID, want.ActiveTurnID)
 	}
+	if got.LastCompletedTurnID != want.LastCompletedTurnID {
+		t.Fatalf("LastCompletedTurnID = %q, want %q", got.LastCompletedTurnID, want.LastCompletedTurnID)
+	}
 	if got.UserRequest != want.UserRequest {
 		t.Fatalf("UserRequest = %q, want %q", got.UserRequest, want.UserRequest)
 	}
