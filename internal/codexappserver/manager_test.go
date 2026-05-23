@@ -284,7 +284,7 @@ func TestManagerResumeTaskThreadHydratesSnapshotFromResumeHistory(t *testing.T) 
 }
 
 type fakeClient struct {
-	notifications chan rpcMessage
+	notifications        chan rpcMessage
 	resumeThreadIDs      []string
 	resumeResult         json.RawMessage
 	startTurnRequests    []TurnStartRequest
@@ -360,8 +360,7 @@ func TestManagerSendTaskInputStartsNewTurnWhenActiveTurnIsGone(t *testing.T) {
 		Cwd:            "/srv/backend",
 		ApprovalPolicy: "never",
 		SandboxPolicy: SandboxPolicy{
-			Type:          "workspaceWrite",
-			WritableRoots: []string{"/srv/backend"},
+			Type:          "dangerFullAccess",
 			NetworkAccess: true,
 		},
 		Input: "continue",
@@ -391,7 +390,7 @@ func TestManagerSendTaskInputStartsNewTurnWhenActiveTurnIsGone(t *testing.T) {
 	if client.startTurnRequests[0].ApprovalPolicy != "never" {
 		t.Fatalf("fallback ApprovalPolicy = %q, want never", client.startTurnRequests[0].ApprovalPolicy)
 	}
-	if client.startTurnRequests[0].SandboxPolicy.Type != "workspaceWrite" {
-		t.Fatalf("fallback SandboxPolicy.Type = %q, want workspaceWrite", client.startTurnRequests[0].SandboxPolicy.Type)
+	if client.startTurnRequests[0].SandboxPolicy.Type != "dangerFullAccess" {
+		t.Fatalf("fallback SandboxPolicy.Type = %q, want dangerFullAccess", client.startTurnRequests[0].SandboxPolicy.Type)
 	}
 }

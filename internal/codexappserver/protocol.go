@@ -90,6 +90,13 @@ func WorkspaceWriteSandboxPolicy(root string) SandboxPolicy {
 	return policy
 }
 
+func DangerFullAccessSandboxPolicy() SandboxPolicy {
+	return SandboxPolicy{
+		Type:          "dangerFullAccess",
+		NetworkAccess: true,
+	}
+}
+
 type ThreadStartRequest struct {
 	Cwd              string `json:"cwd"`
 	BaseInstructions string `json:"baseInstructions,omitempty"`

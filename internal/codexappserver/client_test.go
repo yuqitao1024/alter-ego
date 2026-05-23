@@ -86,8 +86,8 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		if threadParams["approvalPolicy"] != "never" {
 			t.Fatalf("thread/start approvalPolicy = %#v, want never", threadParams["approvalPolicy"])
 		}
-		if threadParams["sandbox"] != "workspace-write" {
-			t.Fatalf("thread/start sandbox = %#v, want workspace-write", threadParams["sandbox"])
+		if threadParams["sandbox"] != "dangerFullAccess" {
+			t.Fatalf("thread/start sandbox = %#v, want dangerFullAccess", threadParams["sandbox"])
 		}
 		turnRequest, ok := requestsByMethod["turn/start"]
 		if !ok {
@@ -113,11 +113,14 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		if !ok {
 			t.Fatalf("turn/start sandboxPolicy = %#v, want object", turnParams["sandboxPolicy"])
 		}
-		if sandboxPolicy["type"] != "workspaceWrite" {
-			t.Fatalf("sandboxPolicy.type = %#v, want workspaceWrite", sandboxPolicy["type"])
+		if sandboxPolicy["type"] != "dangerFullAccess" {
+			t.Fatalf("sandboxPolicy.type = %#v, want dangerFullAccess", sandboxPolicy["type"])
 		}
 		if sandboxPolicy["networkAccess"] != true {
 			t.Fatalf("sandboxPolicy.networkAccess = %#v, want true", sandboxPolicy["networkAccess"])
+		}
+		if _, ok := sandboxPolicy["writableRoots"]; ok {
+			t.Fatalf("sandboxPolicy.writableRoots = %#v, want omitted", sandboxPolicy["writableRoots"])
 		}
 
 		if err := conn.WriteJSON(rpcMessage{ID: turnRequest.ID, Result: mustJSON(t, map[string]any{"turn": map[string]any{"id": "turn-2"}})}); err != nil {
@@ -156,7 +159,7 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		threadID, err := client.StartThread(ctx, ThreadStartRequest{
 			Cwd:            "/srv/task/repo",
 			ApprovalPolicy: "never",
-			Sandbox:        "workspace-write",
+			Sandbox:        "dangerFullAccess",
 		})
 		if err != nil {
 			t.Errorf("StartThread returned error: %v", err)
@@ -171,8 +174,7 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 			Cwd:            "/srv/task/repo",
 			ApprovalPolicy: "never",
 			SandboxPolicy: SandboxPolicy{
-				Type:          "workspaceWrite",
-				WritableRoots: []string{"/srv/task/repo"},
+				Type:          "dangerFullAccess",
 				NetworkAccess: true,
 			},
 			Input: []InputItem{{Type: "text", Text: "continue"}},

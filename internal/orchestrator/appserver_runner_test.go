@@ -94,11 +94,14 @@ func TestAppServerRunnerStartInteractiveSessionStartsWatcher(t *testing.T) {
 	if runtime.startRequest.ApprovalPolicy != "never" {
 		t.Fatalf("startRequest.ApprovalPolicy = %q, want never", runtime.startRequest.ApprovalPolicy)
 	}
-	if runtime.startRequest.SandboxPolicy.Type != "workspace-write" {
-		t.Fatalf("startRequest.SandboxPolicy.Type = %q, want workspace-write", runtime.startRequest.SandboxPolicy.Type)
+	if runtime.startRequest.SandboxPolicy.Type != "dangerFullAccess" {
+		t.Fatalf("startRequest.SandboxPolicy.Type = %q, want dangerFullAccess", runtime.startRequest.SandboxPolicy.Type)
 	}
 	if !runtime.startRequest.SandboxPolicy.NetworkAccess {
 		t.Fatal("startRequest.SandboxPolicy.NetworkAccess = false, want true")
+	}
+	if len(runtime.startRequest.SandboxPolicy.WritableRoots) != 0 {
+		t.Fatalf("startRequest.SandboxPolicy.WritableRoots = %#v, want empty", runtime.startRequest.SandboxPolicy.WritableRoots)
 	}
 }
 
@@ -141,11 +144,14 @@ func TestAppServerRunnerSendInteractiveInputSteersActiveTurn(t *testing.T) {
 	if runtime.sendRequest.ApprovalPolicy != "never" {
 		t.Fatalf("sendRequest.ApprovalPolicy = %q, want never", runtime.sendRequest.ApprovalPolicy)
 	}
-	if runtime.sendRequest.SandboxPolicy.Type != "workspace-write" {
-		t.Fatalf("sendRequest.SandboxPolicy.Type = %q, want workspace-write", runtime.sendRequest.SandboxPolicy.Type)
+	if runtime.sendRequest.SandboxPolicy.Type != "dangerFullAccess" {
+		t.Fatalf("sendRequest.SandboxPolicy.Type = %q, want dangerFullAccess", runtime.sendRequest.SandboxPolicy.Type)
 	}
 	if !runtime.sendRequest.SandboxPolicy.NetworkAccess {
 		t.Fatal("sendRequest.SandboxPolicy.NetworkAccess = false, want true")
+	}
+	if len(runtime.sendRequest.SandboxPolicy.WritableRoots) != 0 {
+		t.Fatalf("sendRequest.SandboxPolicy.WritableRoots = %#v, want empty", runtime.sendRequest.SandboxPolicy.WritableRoots)
 	}
 }
 
@@ -186,11 +192,11 @@ func TestAppServerRunnerSendInteractiveInputStartsTurnWithSessionContext(t *test
 	if runtime.sendRequest.ApprovalPolicy != "never" {
 		t.Fatalf("sendRequest.ApprovalPolicy = %q, want never", runtime.sendRequest.ApprovalPolicy)
 	}
-	if runtime.sendRequest.SandboxPolicy.Type != "workspace-write" {
-		t.Fatalf("sendRequest.SandboxPolicy.Type = %q, want workspace-write", runtime.sendRequest.SandboxPolicy.Type)
+	if runtime.sendRequest.SandboxPolicy.Type != "dangerFullAccess" {
+		t.Fatalf("sendRequest.SandboxPolicy.Type = %q, want dangerFullAccess", runtime.sendRequest.SandboxPolicy.Type)
 	}
-	if len(runtime.sendRequest.SandboxPolicy.WritableRoots) != 1 || runtime.sendRequest.SandboxPolicy.WritableRoots[0] != "/srv/backend" {
-		t.Fatalf("sendRequest.SandboxPolicy.WritableRoots = %#v, want [/srv/backend]", runtime.sendRequest.SandboxPolicy.WritableRoots)
+	if len(runtime.sendRequest.SandboxPolicy.WritableRoots) != 0 {
+		t.Fatalf("sendRequest.SandboxPolicy.WritableRoots = %#v, want empty", runtime.sendRequest.SandboxPolicy.WritableRoots)
 	}
 }
 

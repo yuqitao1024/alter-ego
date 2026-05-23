@@ -65,8 +65,7 @@ func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req Start
 		Input:            buildStartInput(req.WorkflowContent, req.UserRequest),
 		ApprovalPolicy:   "never",
 		SandboxPolicy: codexappserver.SandboxPolicy{
-			Type:          "workspace-write",
-			WritableRoots: []string{repoDir},
+			Type:          codexappserver.DangerFullAccessSandboxPolicy().Type,
 			NetworkAccess: true,
 		},
 	})
@@ -122,12 +121,8 @@ func (r *AppServerRunner) SendInteractiveInput(ctx context.Context, session Remo
 		ActiveTurnID:   session.ActiveTurnID,
 		Cwd:            session.Workdir,
 		ApprovalPolicy: "never",
-		SandboxPolicy: codexappserver.SandboxPolicy{
-			Type:          "workspace-write",
-			WritableRoots: []string{session.Workdir},
-			NetworkAccess: true,
-		},
-		Input: input,
+		SandboxPolicy:  codexappserver.DangerFullAccessSandboxPolicy(),
+		Input:          input,
 	})
 	if err != nil {
 		return RemoteSession{}, fmt.Errorf("send app-server input: %w", err)
