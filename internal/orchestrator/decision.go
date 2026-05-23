@@ -8,23 +8,25 @@ import (
 	"strings"
 )
 
+const decisionModelMaxAttempts = 3
+
 const supervisorRequestRules = `You are Alter Ego's Codex supervisor.
 - Alter Ego is a supervisor, not a co-worker.
 - Handle two event types: server_request and turn_completed.
-- Classify the event as one of: plan_decision, execution_approval, completion_signal, progress_update, or ignore.
+- Classify the event as one of: plan_decision, execution_approval, completion_signal, or ignore.
 - For server_request events, prefer plan_decision when the request asks for scope, architecture, prioritization, or other product/solution choices.
 - For server_request events, prefer execution_approval when the request is a routine continue/resume/approval that does not change scope.
 - For turn_completed events, use completion_signal only when the completed turn clearly claims the task is done enough to trigger the one fixed completion-check prompt.
 - For turn_completed events, prefer plan_decision when the summary is clearly asking the user to choose scope, architecture, priorities, or options.
 - For turn_completed events, prefer execution_approval only when a routine continue/resume reply is clearly appropriate.
 - For turn_completed events, do not invent a reply unless the summary clearly asks for the next instruction or approval.
-- Set reply_policy to auto_continue only when it is safe to answer automatically.
-- Set reply_policy to ask_user when the user should decide in Feishu.
 - Return strict JSON only.`
 
 const progressUpdateRules = `You are Alter Ego's Codex supervisor.
 - Evaluate whether the latest summary represents material progress worth reporting to the user.
-- Never suggest sending input to Codex.
+- classification must be one of: progress_update, ignore.
+- progress_update means the user should receive a short update now.
+- ignore means no user update is needed.
 - Return strict JSON only.`
 
 const completionSignalRules = `You are Alter Ego's Codex supervisor.
@@ -86,9 +88,18 @@ func (e *ModelDecisionEngine) EvaluateCompletionSignal(ctx context.Context, task
 }
 
 func (e *ModelDecisionEngine) completeStructured(ctx context.Context, systemPrompt, userPrompt string) (SupervisorDecision, error) {
-	raw, err := e.model.Complete(ctx, systemPrompt, userPrompt)
-	if err != nil {
-		return SupervisorDecision{}, err
+	var (
+		raw string
+		err error
+	)
+	for attempt := 1; attempt <= decisionModelMaxAttempts; attempt++ {
+		raw, err = e.model.Complete(ctx, systemPrompt, userPrompt)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil || !isRetryableDecisionModelError(err) || attempt == decisionModelMaxAttempts {
+			return SupervisorDecision{}, err
+		}
 	}
 
 	raw = extractJSONPayload(raw)
@@ -101,6 +112,14 @@ func (e *ModelDecisionEngine) completeStructured(ctx context.Context, systemProm
 	return normalizeSupervisorDecision(decision), nil
 }
 
+func isRetryableDecisionModelError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "empty output_text")
+}
+
 func normalizeSupervisorDecision(decision SupervisorDecision) SupervisorDecision {
 	decision.Classification = SupervisorClassification(strings.ToLower(strings.TrimSpace(string(decision.Classification))))
 	decision.ReplyPolicy = ReplyPolicy(strings.ToLower(strings.TrimSpace(string(decision.ReplyPolicy))))
@@ -109,6 +128,21 @@ func normalizeSupervisorDecision(decision SupervisorDecision) SupervisorDecision
 	decision.UserUpdate = strings.TrimSpace(decision.UserUpdate)
 	decision.UserQuestion = strings.TrimSpace(decision.UserQuestion)
 	decision.CodexReply = strings.TrimSpace(decision.CodexReply)
+	if decision.Classification == ClassificationExecutionApproval {
+		if decision.ReplyPolicy == "" {
+			decision.ReplyPolicy = ReplyPolicyAutoContinue
+		}
+		if decision.CodexReply == "" {
+			decision.CodexReply = "continue"
+		}
+		decision.ShouldReplyCodex = true
+	}
+	if decision.Classification == ClassificationPlanDecision && decision.ReplyPolicy == "" {
+		decision.ReplyPolicy = ReplyPolicyAskUser
+	}
+	if decision.Classification == ClassificationProgressUpdate && decision.UserUpdate != "" {
+		decision.ShouldNotifyUser = true
+	}
 	return decision
 }
 
@@ -158,7 +192,7 @@ func buildSupervisorRequestPrompt(in SupervisorContext) string {
 	}
 	builder.WriteString("\n\n[Latest Summary]\n")
 	builder.WriteString(promptSnippet(in.Summary, 4000))
-	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, should_reply_codex, should_notify_user, reply_policy, reason, user_update, user_question, codex_reply.")
+	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, reason, user_question, codex_reply.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
 	return builder.String()
@@ -175,7 +209,7 @@ func buildProgressPrompt(task TaskRun, summary string) string {
 	builder.WriteString(promptSnippet(task.LastOutputSummary, 4000))
 	builder.WriteString("\n\n[Latest Summary]\n")
 	builder.WriteString(promptSnippet(summary, 4000))
-	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, should_notify_user, user_update, reason.")
+	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, user_update, reason.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
 	return builder.String()

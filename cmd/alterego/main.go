@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,10 +37,11 @@ func run() error {
 
 	sessions := agent.NewSessionStore(12)
 	taskSubsystem, err := buildTaskSubsystem(ctx, taskSubsystemConfig{
-		RegistryRoot: taskRegistryRoot(),
-		DBPath:       taskDBPath(),
-		Notifier:     lark.NewTaskNotifier(larkCfg),
-		LLMConfig:    agentCfg,
+		RegistryRoot:            taskRegistryRoot(),
+		DBPath:                  taskDBPath(),
+		Notifier:                lark.NewTaskNotifier(larkCfg),
+		LLMConfig:               agentCfg,
+		ProgressReportsEnabled:  taskProgressReportsEnabled(),
 	})
 	if err != nil {
 		return err
@@ -71,10 +73,11 @@ func run() error {
 }
 
 type taskSubsystemConfig struct {
-	RegistryRoot string
-	DBPath       string
-	Notifier     orchestrator.TaskNotifier
-	LLMConfig    agent.Config
+	RegistryRoot           string
+	DBPath                 string
+	Notifier               orchestrator.TaskNotifier
+	LLMConfig              agent.Config
+	ProgressReportsEnabled bool
 }
 
 type taskSubsystem struct {
@@ -148,6 +151,7 @@ func buildTaskSubsystem(ctx context.Context, cfg taskSubsystemConfig) (*taskSubs
 		decider,
 	)
 	service.SetNotifier(cfg.Notifier)
+	service.SetProgressReportsEnabled(cfg.ProgressReportsEnabled)
 
 	return &taskSubsystem{
 		Registry:         registry,
@@ -214,6 +218,15 @@ func taskDBPath() string {
 		return path
 	}
 	return ".alterego/tasks.db"
+}
+
+func taskProgressReportsEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ALTER_EGO_TASK_PROGRESS_REPORTS_ENABLED"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 type decisionModelAdapter struct {

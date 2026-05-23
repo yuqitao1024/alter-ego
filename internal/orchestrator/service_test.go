@@ -488,7 +488,7 @@ func TestHandleRuntimeEventEscalatesPlanDecisionOnCompletedTurnToUser(t *testing
 	}
 }
 
-func TestTickProgressPollingOnlyNotifiesUserAndNeverRepliesCodex(t *testing.T) {
+func TestTickProgressPollingSkipsUserNotifyByDefault(t *testing.T) {
 	t.Parallel()
 
 	runner := &fakeServiceRunner{
@@ -505,6 +505,39 @@ func TestTickProgressPollingOnlyNotifiesUserAndNeverRepliesCodex(t *testing.T) {
 	defer cleanup()
 
 	task := sampleTaskRun("task-progress", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+	if len(runner.sentInputs) != 0 {
+		t.Fatalf("sentInputs = %#v, want none", runner.sentInputs)
+	}
+	if len(notifier.progressMessages) != 0 {
+		t.Fatalf("progressMessages = %#v, want none by default", notifier.progressMessages)
+	}
+}
+
+func TestTickProgressPollingNotifiesUserWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{Summary: "Completed migration and all tests passed.", SessionState: SessionState{ThreadStatus: "running"}},
+	}
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, runner, &fakeDecisionEngine{
+		progressDecision: SupervisorDecision{
+			Classification:   ClassificationProgressUpdate,
+			ShouldNotifyUser: true,
+			UserUpdate:       "Codex completed migration and passed tests.",
+		},
+	}, notifier)
+	defer cleanup()
+	service.SetProgressReportsEnabled(true)
+
+	task := sampleTaskRun("task-progress-enabled", StatusRunning)
 	task.ThreadID = "thread-1"
 	task.RemoteWorkdir = "/srv/backend"
 	seedTask(t, store, task)
@@ -545,6 +578,41 @@ func TestTickSkipsDecisionEvaluationWhenSummaryIsEmpty(t *testing.T) {
 	}
 	if len(runner.sentInputs) != 0 {
 		t.Fatalf("sentInputs = %#v, want none", runner.sentInputs)
+	}
+}
+
+func TestHandleRuntimeEventTurnCompletedSkipsProgressNotifyByDefault(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification:   ClassificationProgressUpdate,
+			ShouldNotifyUser: true,
+			UserUpdate:       "made progress",
+		},
+	}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-turn-progress", StatusRunning)
+	task.ThreadID = "thread-progress"
+	task.ActiveTurnID = "turn-old"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-progress",
+		TurnCompleted: &TurnCompletedEvent{
+			ThreadID: "thread-progress",
+			TurnID:   "turn-new",
+			Summary:  "Completed another chunk of work.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	}
+	if len(notifier.progressMessages) != 0 {
+		t.Fatalf("progressMessages = %#v, want none by default", notifier.progressMessages)
 	}
 }
 

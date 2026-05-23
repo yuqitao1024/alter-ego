@@ -13,12 +13,13 @@ import (
 const completionCheckPrompt = "Please verify once, against the confirmed task scope only, whether all requested work is complete. Reply with either: 1) all requested work is complete, or 2) remaining work still exists."
 
 type Service struct {
-	store     *Store
-	registry  *Registry
-	scheduler *Scheduler
-	runner    RemoteRunner
-	decider   DecisionEngine
-	notifier  TaskNotifier
+	store                  *Store
+	registry               *Registry
+	scheduler              *Scheduler
+	runner                 RemoteRunner
+	decider                DecisionEngine
+	notifier               TaskNotifier
+	progressReportsEnabled bool
 
 	now func() time.Time
 }
@@ -41,6 +42,10 @@ func NewService(store *Store, registry *Registry, scheduler *Scheduler, runner R
 
 func (s *Service) SetNotifier(notifier TaskNotifier) {
 	s.notifier = notifier
+}
+
+func (s *Service) SetProgressReportsEnabled(enabled bool) {
+	s.progressReportsEnabled = enabled
 }
 
 func (s *Service) StartTask(ctx context.Context, templateID, createdBy, userRequest string) (TaskRun, error) {
@@ -724,7 +729,7 @@ func (s *Service) handleTurnCompleted(ctx context.Context, task TaskRun, turn Tu
 	case ClassificationPlanDecision, ClassificationExecutionApproval:
 		return s.applyTurnDecision(ctx, task, turnID, summary, decision)
 	case ClassificationProgressUpdate:
-		if s.notifier != nil && decision.ShouldNotifyUser && strings.TrimSpace(decision.UserUpdate) != "" {
+		if s.progressReportsEnabled && s.notifier != nil && decision.ShouldNotifyUser && strings.TrimSpace(decision.UserUpdate) != "" {
 			if err := s.notifier.NotifyTaskProgress(ctx, task, decision.UserUpdate); err != nil {
 				return task, err
 			}
@@ -913,7 +918,7 @@ func (s *Service) reconcileCompletedTurnAfterResume(ctx context.Context, task Ta
 }
 
 func (s *Service) maybeNotifyProgress(ctx context.Context, task TaskRun, summary string) error {
-	if strings.TrimSpace(summary) == "" || s.notifier == nil {
+	if !s.progressReportsEnabled || strings.TrimSpace(summary) == "" || s.notifier == nil {
 		return nil
 	}
 	decision, err := s.decider.EvaluateProgressUpdate(ctx, task, summary)

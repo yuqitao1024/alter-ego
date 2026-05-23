@@ -44,6 +44,7 @@ The service expects:
 - config root: `/opt/alterego/config`
 - environment file: `/etc/alterego/alterego.env`
 - SQLite state: `/var/lib/alterego/tasks.db`
+- progress reports: disabled by default unless `ALTER_EGO_TASK_PROGRESS_REPORTS_ENABLED=true`
 
 Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`; machine YAML now carries the app-server socket and bootstrap command list for each remote host.
 Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`; machine YAML must include the Codex app-server fields:

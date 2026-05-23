@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,11 +188,63 @@ func TestModelDecisionEngineIncludesRawPreviewInParseError(t *testing.T) {
 	}
 }
 
+func TestModelDecisionEngineRetriesEmptyProviderOutput(t *testing.T) {
+	t.Parallel()
+
+	model := &fakeDecisionModel{
+		errs: []error{
+			errEmptyProviderOutput(),
+			nil,
+		},
+		responses: []string{
+			"",
+			`{"classification":"progress_update","user_update":"made progress","reason":"material progress"}`,
+		},
+	}
+	engine := NewModelDecisionEngine(model)
+
+	result, err := engine.EvaluateProgressUpdate(context.Background(), TaskRun{TaskID: "task-progress"}, "Completed migration and passed tests.")
+	if err != nil {
+		t.Fatalf("EvaluateProgressUpdate returned error: %v", err)
+	}
+	if !result.ShouldNotifyUser {
+		t.Fatal("ShouldNotifyUser = false, want true")
+	}
+	if model.calls != 2 {
+		t.Fatalf("calls = %d, want 2", model.calls)
+	}
+}
+
+func errEmptyProviderOutput() error {
+	return fmt.Errorf("openai response contained empty output_text status=200 response_status=%q output_items=0 first_output=%q body=%q", "completed", "", "{}")
+}
+
 type fakeDecisionModel struct {
-	response string
-	err      error
+	response  string
+	err       error
+	responses []string
+	errs      []error
+	calls     int
 }
 
 func (f *fakeDecisionModel) Complete(context.Context, string, string) (string, error) {
+	if len(f.responses) > 0 || len(f.errs) > 0 {
+		idx := f.calls
+		f.calls++
+		var response string
+		var err error
+		if idx < len(f.responses) {
+			response = f.responses[idx]
+		} else {
+			response = f.response
+		}
+		if idx < len(f.errs) {
+			err = f.errs[idx]
+		} else {
+			err = f.err
+		}
+		return response, err
+	}
+	f.calls++
 	return f.response, f.err
 }
