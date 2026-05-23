@@ -92,10 +92,11 @@ func (e *ModelDecisionEngine) completeStructured(ctx context.Context, systemProm
 	}
 
 	raw = extractJSONPayload(raw)
+	trimmed := strings.TrimSpace(raw)
 
 	var decision SupervisorDecision
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decision); err != nil {
-		return SupervisorDecision{}, fmt.Errorf("parse decision JSON: %w", err)
+	if err := json.Unmarshal([]byte(trimmed), &decision); err != nil {
+		return SupervisorDecision{}, fmt.Errorf("parse decision JSON: %w (raw_len=%d raw_preview=%q)", err, len(trimmed), diagnosticDecisionSnippet(trimmed, 240))
 	}
 	return normalizeSupervisorDecision(decision), nil
 }
@@ -135,8 +136,6 @@ func buildSupervisorRequestPrompt(in SupervisorContext) string {
 		builder.WriteString(in.TurnCompleted.TurnID)
 		builder.WriteString("\nturn_status: ")
 		builder.WriteString(in.TurnCompleted.ThreadStatus)
-		builder.WriteString("\nturn_summary: ")
-		builder.WriteString(strings.TrimSpace(in.TurnCompleted.Summary))
 		builder.WriteString("\nthread_active_flags: ")
 		builder.WriteString(strings.Join(in.TurnCompleted.ThreadActiveFlags, ","))
 	}
@@ -144,8 +143,6 @@ func buildSupervisorRequestPrompt(in SupervisorContext) string {
 		builder.WriteString("\n\n[Turn Completed]\n")
 		builder.WriteString("turn_id: ")
 		builder.WriteString(in.TurnCompleted.TurnID)
-		builder.WriteString("\nturn_summary: ")
-		builder.WriteString(strings.TrimSpace(in.Summary))
 		builder.WriteString("\nturn_status: ")
 		builder.WriteString(in.TurnCompleted.ThreadStatus)
 		builder.WriteString("\nthread_active_flags: ")
@@ -160,7 +157,7 @@ func buildSupervisorRequestPrompt(in SupervisorContext) string {
 		builder.WriteString(in.Request.RequestPayload)
 	}
 	builder.WriteString("\n\n[Latest Summary]\n")
-	builder.WriteString(strings.TrimSpace(in.Summary))
+	builder.WriteString(promptSnippet(in.Summary, 4000))
 	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, should_reply_codex, should_notify_user, reply_policy, reason, user_update, user_question, codex_reply.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
@@ -175,9 +172,9 @@ func buildProgressPrompt(task TaskRun, summary string) string {
 	builder.WriteString("\nuser_request: ")
 	builder.WriteString(task.UserRequest)
 	builder.WriteString("\nlast_output_summary: ")
-	builder.WriteString(task.LastOutputSummary)
+	builder.WriteString(promptSnippet(task.LastOutputSummary, 4000))
 	builder.WriteString("\n\n[Latest Summary]\n")
-	builder.WriteString(strings.TrimSpace(summary))
+	builder.WriteString(promptSnippet(summary, 4000))
 	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, should_notify_user, user_update, reason.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
@@ -194,7 +191,7 @@ func buildCompletionPrompt(task TaskRun, summary string) string {
 	builder.WriteString("\nuser_request: ")
 	builder.WriteString(task.UserRequest)
 	builder.WriteString("\n\n[Latest Summary]\n")
-	builder.WriteString(strings.TrimSpace(summary))
+	builder.WriteString(promptSnippet(summary, 4000))
 	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, completion_disposition, should_notify_user, user_update, reason.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
@@ -218,4 +215,20 @@ func extractJSONPayload(raw string) string {
 		return trimmed
 	}
 	return strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+}
+
+func diagnosticDecisionSnippet(raw string, limit int) string {
+	trimmed := strings.TrimSpace(raw)
+	if limit <= 0 || len(trimmed) <= limit {
+		return trimmed
+	}
+	return trimmed[:limit] + "...(truncated)"
+}
+
+func promptSnippet(raw string, limit int) string {
+	trimmed := strings.TrimSpace(raw)
+	if limit <= 0 || len(trimmed) <= limit {
+		return trimmed
+	}
+	return trimmed[:limit] + "...(truncated)"
 }

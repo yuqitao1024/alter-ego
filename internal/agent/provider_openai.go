@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -31,7 +32,16 @@ func (p *OpenAIProvider) CreateResponse(ctx context.Context, req ChatRequest) (s
 		Model: req.Model,
 		Input: make([]openAIInputMessage, 0, len(req.Messages)),
 	}
-	for _, message := range req.Messages {
+	messages := req.Messages
+	if len(messages) > 0 {
+		leading := messages[0]
+		role := strings.ToLower(strings.TrimSpace(leading.Role))
+		if (role == "developer" || role == "system") && strings.TrimSpace(leading.Content) != "" {
+			body.Instructions = leading.Content
+			messages = messages[1:]
+		}
+	}
+	for _, message := range messages {
 		body.Input = append(body.Input, openAIInputMessage{
 			Type:    "message",
 			Role:    message.Role,
@@ -57,17 +67,48 @@ func (p *OpenAIProvider) CreateResponse(ctx context.Context, req ChatRequest) (s
 	}
 	defer resp.Body.Close()
 
-	var decoded openAIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return "", err
+	}
+	bodyPreview := diagnosticSnippet(string(rawBody), 400)
+
+	var decoded openAIResponse
+	if err := json.Unmarshal(rawBody, &decoded); err != nil {
+		return "", fmt.Errorf("decode openai response status=%d body=%q: %w", resp.StatusCode, bodyPreview, err)
 	}
 	if resp.StatusCode >= 400 {
 		if decoded.Error != nil && decoded.Error.Message != "" {
-			return "", fmt.Errorf(decoded.Error.Message)
+			return "", fmt.Errorf("openai request failed status=%d message=%q body=%q", resp.StatusCode, decoded.Error.Message, bodyPreview)
 		}
-		return "", fmt.Errorf("openai request failed with status %d", resp.StatusCode)
+		return "", fmt.Errorf("openai request failed status=%d body=%q", resp.StatusCode, bodyPreview)
 	}
-	return decoded.OutputText, nil
+	output := strings.TrimSpace(decoded.OutputText)
+	if output == "" {
+		output = strings.TrimSpace(extractOpenAIOutputText(decoded.Output))
+	}
+	if output == "" {
+		firstOutputRaw := ""
+		var envelope struct {
+			Status string            `json:"status"`
+			Output []json.RawMessage `json:"output"`
+		}
+		if err := json.Unmarshal(rawBody, &envelope); err == nil && len(envelope.Output) > 0 {
+			firstOutputRaw = diagnosticSnippet(string(envelope.Output[0]), 1200)
+			if decoded.Status == "" {
+				decoded.Status = envelope.Status
+			}
+		}
+		return "", fmt.Errorf(
+			"openai response contained empty output_text status=%d response_status=%q output_items=%d first_output=%q body=%q",
+			resp.StatusCode,
+			decoded.Status,
+			len(decoded.Output),
+			firstOutputRaw,
+			bodyPreview,
+		)
+	}
+	return output, nil
 }
 
 func (p *OpenAIProvider) SystemRole() string {
@@ -75,8 +116,9 @@ func (p *OpenAIProvider) SystemRole() string {
 }
 
 type openAIResponseRequest struct {
-	Model string               `json:"model"`
-	Input []openAIInputMessage `json:"input"`
+	Model        string               `json:"model"`
+	Instructions string               `json:"instructions,omitempty"`
+	Input        []openAIInputMessage `json:"input"`
 }
 
 type openAIInputMessage struct {
@@ -87,7 +129,34 @@ type openAIInputMessage struct {
 
 type openAIResponse struct {
 	OutputText string `json:"output_text"`
+	Status     string `json:"status"`
+	Output     []openAIOutputItem `json:"output"`
 	Error      *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+type openAIOutputItem struct {
+	Type    string                    `json:"type"`
+	Role    string                    `json:"role"`
+	Content []openAIOutputContentItem `json:"content"`
+}
+
+type openAIOutputContentItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func extractOpenAIOutputText(items []openAIOutputItem) string {
+	for _, item := range items {
+		for _, content := range item.Content {
+			if strings.EqualFold(strings.TrimSpace(content.Type), "output_text") {
+				text := strings.TrimSpace(content.Text)
+				if text != "" {
+					return text
+				}
+			}
+		}
+	}
+	return ""
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -56,20 +57,46 @@ func (p *DashScopeProvider) CreateResponse(ctx context.Context, req ChatRequest)
 	}
 	defer resp.Body.Close()
 
-	var decoded dashScopeChatCompletionsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return "", err
+	}
+	bodyPreview := diagnosticSnippet(string(rawBody), 400)
+
+	var decoded dashScopeChatCompletionsResponse
+	if err := json.Unmarshal(rawBody, &decoded); err != nil {
+		return "", fmt.Errorf("decode dashscope response status=%d body=%q: %w", resp.StatusCode, bodyPreview, err)
 	}
 	if resp.StatusCode >= 400 {
 		if decoded.Error != nil && decoded.Error.Message != "" {
-			return "", fmt.Errorf(decoded.Error.Message)
+			return "", fmt.Errorf("dashscope request failed status=%d message=%q body=%q", resp.StatusCode, decoded.Error.Message, bodyPreview)
 		}
-		return "", fmt.Errorf("dashscope request failed with status %d", resp.StatusCode)
+		return "", fmt.Errorf("dashscope request failed status=%d body=%q", resp.StatusCode, bodyPreview)
 	}
 	if len(decoded.Choices) == 0 {
-		return "", nil
+		return "", fmt.Errorf("dashscope response contained no choices status=%d body=%q", resp.StatusCode, bodyPreview)
 	}
-	return decoded.Choices[0].Message.Content, nil
+	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
+	if content == "" {
+		firstMessageRaw := ""
+		var envelope struct {
+			Choices []struct {
+				Message json.RawMessage `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(rawBody, &envelope); err == nil && len(envelope.Choices) > 0 {
+			firstMessageRaw = diagnosticSnippet(string(envelope.Choices[0].Message), 1200)
+		}
+		return "", fmt.Errorf(
+			"dashscope response contained empty choice content status=%d choices=%d finish_reason=%q first_message=%q body=%q",
+			resp.StatusCode,
+			len(decoded.Choices),
+			decoded.Choices[0].FinishReason,
+			firstMessageRaw,
+			bodyPreview,
+		)
+	}
+	return content, nil
 }
 
 func (p *DashScopeProvider) SystemRole() string {
@@ -88,6 +115,7 @@ type dashScopeChatMessage struct {
 
 type dashScopeChatCompletionsResponse struct {
 	Choices []struct {
+		FinishReason string `json:"finish_reason"`
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`

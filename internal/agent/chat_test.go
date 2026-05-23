@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -193,6 +194,46 @@ func TestOpenAIProviderParsesOutputText(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderSendsLeadingDeveloperMessageAsInstructions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if got := payload["instructions"]; got != "system prompt" {
+			t.Fatalf("instructions = %#v", got)
+		}
+		input, ok := payload["input"].([]any)
+		if !ok {
+			t.Fatalf("input type = %T", payload["input"])
+		}
+		if len(input) != 2 {
+			t.Fatalf("len(input) = %d, want 2", len(input))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output_text":"ok"}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIProvider(Config{
+		APIKey:  "sk-test",
+		BaseURL: server.URL,
+		Model:   "gpt-test",
+	}, server.Client())
+
+	_, err := client.CreateResponse(context.Background(), ChatRequest{
+		Model: "gpt-test",
+		Messages: []ChatMessage{
+			{Role: "developer", Content: "system prompt"},
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "world"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateResponse returned error: %v", err)
+	}
+}
+
 func TestDashScopeProviderParsesChatCompletionsText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -227,6 +268,127 @@ func TestDashScopeProviderParsesChatCompletionsText(t *testing.T) {
 	}
 	if text != "hello from dashscope" {
 		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestDashScopeProviderReturnsDiagnosticErrorWhenChoicesAreEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewDashScopeProvider(Config{
+		APIKey:  "glm-test",
+		BaseURL: server.URL,
+		Model:   "glm-5.1",
+	}, server.Client())
+
+	_, err := client.CreateResponse(context.Background(), ChatRequest{
+		Model: "glm-5.1",
+		Messages: []ChatMessage{
+			{Role: "system", Content: "system"},
+			{Role: "user", Content: "hello"},
+		},
+	})
+	if err == nil {
+		t.Fatal("CreateResponse returned nil error, want diagnostic error")
+	}
+	if !strings.Contains(err.Error(), "no choices") {
+		t.Fatalf("err = %v, want no choices diagnostic", err)
+	}
+	if !strings.Contains(err.Error(), "status=200") {
+		t.Fatalf("err = %v, want status=200", err)
+	}
+}
+
+func TestOpenAIProviderReturnsDiagnosticErrorWhenOutputTextIsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output_text":""}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIProvider(Config{
+		APIKey:  "sk-test",
+		BaseURL: server.URL,
+		Model:   "gpt-test",
+	}, server.Client())
+
+	_, err := client.CreateResponse(context.Background(), ChatRequest{
+		Model: "gpt-test",
+		Messages: []ChatMessage{
+			{Role: "developer", Content: "system"},
+			{Role: "user", Content: "hello"},
+		},
+	})
+	if err == nil {
+		t.Fatal("CreateResponse returned nil error, want diagnostic error")
+	}
+	if !strings.Contains(err.Error(), "empty output_text") {
+		t.Fatalf("err = %v, want empty output_text diagnostic", err)
+	}
+	if !strings.Contains(err.Error(), "status=200") {
+		t.Fatalf("err = %v, want status=200", err)
+	}
+}
+
+func TestOpenAIProviderParsesOutputTextFromOutputItemsWhenTopLevelOutputTextIsMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from output"}]}]}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIProvider(Config{
+		APIKey:  "sk-test",
+		BaseURL: server.URL,
+		Model:   "gpt-test",
+	}, server.Client())
+
+	text, err := client.CreateResponse(context.Background(), ChatRequest{
+		Model: "gpt-test",
+		Messages: []ChatMessage{
+			{Role: "developer", Content: "system"},
+			{Role: "user", Content: "hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateResponse returned error: %v", err)
+	}
+	if text != "hello from output" {
+		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestDashScopeProviderIncludesFirstMessageDetailsWhenChoiceContentIsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"","reasoning_content":"{\"classification\":\"progress_update\"}"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewDashScopeProvider(Config{
+		APIKey:  "glm-test",
+		BaseURL: server.URL,
+		Model:   "glm-5.4",
+	}, server.Client())
+
+	_, err := client.CreateResponse(context.Background(), ChatRequest{
+		Model: "glm-5.4",
+		Messages: []ChatMessage{
+			{Role: "system", Content: "system"},
+			{Role: "user", Content: "hello"},
+		},
+	})
+	if err == nil {
+		t.Fatal("CreateResponse returned nil error, want diagnostic error")
+	}
+	if !strings.Contains(err.Error(), `finish_reason="stop"`) {
+		t.Fatalf("err = %v, want finish_reason", err)
+	}
+	if !strings.Contains(err.Error(), `first_message=`) || !strings.Contains(err.Error(), `reasoning_content`) {
+		t.Fatalf("err = %v, want raw first message JSON", err)
 	}
 }
 

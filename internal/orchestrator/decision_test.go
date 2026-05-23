@@ -51,6 +51,49 @@ func TestBuildSupervisorRequestPromptIncludesTaskAndRequestFields(t *testing.T) 
 	}
 }
 
+func TestBuildSupervisorRequestPromptDoesNotDuplicateCompletedTurnSummary(t *testing.T) {
+	t.Parallel()
+
+	summary := "completed turn summary"
+	prompt := buildSupervisorRequestPrompt(SupervisorContext{
+		Task: TaskRun{
+			TaskID:                "task-123",
+			UserRequest:           "Implement task orchestration",
+			CompletionCheckStatus: CompletionCheckStatusNotStarted,
+		},
+		EventType: "turn_completed",
+		Summary:   summary,
+		TurnCompleted: &TurnCompletedEvent{
+			TurnID:            "turn-1",
+			ThreadStatus:      "completed",
+			Summary:           summary,
+			ThreadActiveFlags: []string{"idle"},
+		},
+	})
+
+	if count := strings.Count(prompt, summary); count != 1 {
+		t.Fatalf("summary occurrences = %d, want 1\n%s", count, prompt)
+	}
+}
+
+func TestBuildProgressPromptTruncatesLargeSummaries(t *testing.T) {
+	t.Parallel()
+
+	large := strings.Repeat("x", 12000)
+	prompt := buildProgressPrompt(TaskRun{
+		TaskID:            "task-progress",
+		UserRequest:       "do work",
+		LastOutputSummary: large,
+	}, large)
+
+	if strings.Count(prompt, large) != 0 {
+		t.Fatalf("prompt should not contain full large summary")
+	}
+	if !strings.Contains(prompt, "...(truncated)") {
+		t.Fatalf("prompt missing truncation marker")
+	}
+}
+
 func TestModelDecisionEngineParsesSupervisorClassificationSchema(t *testing.T) {
 	t.Parallel()
 
@@ -127,6 +170,20 @@ func TestModelDecisionEngineRejectsEmptyStructuredResponse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "parse decision JSON") {
 		t.Fatalf("err = %v, want parse decision JSON", err)
+	}
+}
+
+func TestModelDecisionEngineIncludesRawPreviewInParseError(t *testing.T) {
+	t.Parallel()
+
+	engine := NewModelDecisionEngine(&fakeDecisionModel{response: "not json"})
+
+	_, err := engine.EvaluateProgressUpdate(context.Background(), TaskRun{TaskID: "task-progress"}, "Completed migration and passed tests.")
+	if err == nil {
+		t.Fatal("EvaluateProgressUpdate returned nil error, want parse error")
+	}
+	if !strings.Contains(err.Error(), `raw_preview="not json"`) {
+		t.Fatalf("err = %v, want raw preview", err)
 	}
 }
 
