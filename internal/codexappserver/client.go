@@ -79,9 +79,7 @@ func (c *Client) StartTurn(ctx context.Context, req TurnStartRequest) (string, e
 	var result struct {
 		Turn Turn `json:"turn"`
 	}
-	if req.SandboxPolicy.Type == "workspace-write" {
-		req.SandboxPolicy.Type = "workspaceWrite"
-	}
+	req.SandboxPolicy.Type = normalizeTurnSandboxPolicyType(req.SandboxPolicy.Type)
 	if err := c.call(ctx, "turn/start", req, &result); err != nil {
 		return "", err
 	}
@@ -92,13 +90,26 @@ func (c *Client) SteerTurn(ctx context.Context, req TurnSteerRequest) (string, e
 	var result struct {
 		TurnID string `json:"turnId"`
 	}
-	if req.SandboxPolicy.Type == "workspace-write" {
-		req.SandboxPolicy.Type = "workspaceWrite"
-	}
+	req.SandboxPolicy.Type = normalizeTurnSandboxPolicyType(req.SandboxPolicy.Type)
 	if err := c.call(ctx, "turn/steer", req, &result); err != nil {
 		return "", err
 	}
 	return result.TurnID, nil
+}
+
+func normalizeTurnSandboxPolicyType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "workspace-write":
+		return "workspaceWrite"
+	case "danger-full-access":
+		return "dangerFullAccess"
+	case "read-only":
+		return "readOnly"
+	case "external-sandbox":
+		return "externalSandbox"
+	default:
+		return value
+	}
 }
 
 func (c *Client) InterruptTurn(ctx context.Context, req TurnInterruptRequest) error {

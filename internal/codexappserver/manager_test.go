@@ -287,6 +287,7 @@ type fakeClient struct {
 	notifications        chan rpcMessage
 	resumeThreadIDs      []string
 	resumeResult         json.RawMessage
+	startThreadRequests  []ThreadStartRequest
 	startTurnRequests    []TurnStartRequest
 	steerTurnRequests    []TurnSteerRequest
 	steerTurnErr         error
@@ -315,7 +316,8 @@ func (f *fakeClient) ResumeThread(_ context.Context, threadID string) (Thread, e
 	return result.Thread, nil
 }
 func (f *fakeClient) RespondToServerRequest(context.Context, string, any) error { return nil }
-func (f *fakeClient) StartThread(context.Context, ThreadStartRequest) (string, error) {
+func (f *fakeClient) StartThread(_ context.Context, req ThreadStartRequest) (string, error) {
+	f.startThreadRequests = append(f.startThreadRequests, req)
 	return "thread-1", nil
 }
 func (f *fakeClient) StartTurn(_ context.Context, req TurnStartRequest) (string, error) {
@@ -392,5 +394,45 @@ func TestManagerSendTaskInputStartsNewTurnWhenActiveTurnIsGone(t *testing.T) {
 	}
 	if client.startTurnRequests[0].SandboxPolicy.Type != "dangerFullAccess" {
 		t.Fatalf("fallback SandboxPolicy.Type = %q, want dangerFullAccess", client.startTurnRequests[0].SandboxPolicy.Type)
+	}
+}
+
+func TestManagerStartTaskSessionUsesThreadSandboxVariantExpectedByThreadStart(t *testing.T) {
+	t.Parallel()
+
+	client := newFakeClient()
+	manager := NewManager(ManagerOptions{
+		DialClient: func(context.Context, MachineRuntimeConfig) (ClientAPI, error) {
+			return client, nil
+		},
+	})
+
+	machine := MachineRuntimeConfig{MachineID: "machine_a", WebSocketURL: "ws://machine-a:4317"}
+	threadID, turnID, err := manager.StartTaskSession(context.Background(), machine, StartTaskSessionRequest{
+		Cwd:            "/srv/backend",
+		Input:          "continue",
+		ApprovalPolicy: "never",
+		SandboxPolicy: SandboxPolicy{
+			Type:          "dangerFullAccess",
+			NetworkAccess: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTaskSession returned error: %v", err)
+	}
+	if threadID != "thread-1" || turnID != "turn-1" {
+		t.Fatalf("threadID=%q turnID=%q, want thread-1/turn-1", threadID, turnID)
+	}
+	if len(client.startThreadRequests) != 1 {
+		t.Fatalf("startThreadRequests = %#v, want one request", client.startThreadRequests)
+	}
+	if client.startThreadRequests[0].Sandbox != "danger-full-access" {
+		t.Fatalf("thread sandbox = %q, want danger-full-access", client.startThreadRequests[0].Sandbox)
+	}
+	if len(client.startTurnRequests) != 1 {
+		t.Fatalf("startTurnRequests = %#v, want one request", client.startTurnRequests)
+	}
+	if client.startTurnRequests[0].SandboxPolicy.Type != "dangerFullAccess" {
+		t.Fatalf("turn sandbox type = %q, want dangerFullAccess", client.startTurnRequests[0].SandboxPolicy.Type)
 	}
 }

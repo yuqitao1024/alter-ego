@@ -86,8 +86,8 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		if threadParams["approvalPolicy"] != "never" {
 			t.Fatalf("thread/start approvalPolicy = %#v, want never", threadParams["approvalPolicy"])
 		}
-		if threadParams["sandbox"] != "dangerFullAccess" {
-			t.Fatalf("thread/start sandbox = %#v, want dangerFullAccess", threadParams["sandbox"])
+		if threadParams["sandbox"] != "danger-full-access" {
+			t.Fatalf("thread/start sandbox = %#v, want danger-full-access", threadParams["sandbox"])
 		}
 		turnRequest, ok := requestsByMethod["turn/start"]
 		if !ok {
@@ -159,7 +159,7 @@ func TestClientInitializesAndRoutesOutOfOrderResponses(t *testing.T) {
 		threadID, err := client.StartThread(ctx, ThreadStartRequest{
 			Cwd:            "/srv/task/repo",
 			ApprovalPolicy: "never",
-			Sandbox:        "dangerFullAccess",
+			Sandbox:        "danger-full-access",
 		})
 		if err != nil {
 			t.Errorf("StartThread returned error: %v", err)

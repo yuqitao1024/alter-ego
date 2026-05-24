@@ -90,7 +90,7 @@ func (m *Manager) StartTaskSession(ctx context.Context, machine MachineRuntimeCo
 		Cwd:              req.Cwd,
 		BaseInstructions: req.BaseInstructions,
 		ApprovalPolicy:   req.ApprovalPolicy,
-		Sandbox:          req.SandboxPolicy.Type,
+		Sandbox:          normalizeThreadSandboxType(req.SandboxPolicy.Type),
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("start thread: %w", err)
@@ -112,6 +112,21 @@ func (m *Manager) StartTaskSession(ctx context.Context, machine MachineRuntimeCo
 	}
 
 	return threadID, turnID, nil
+}
+
+func normalizeThreadSandboxType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "workspaceWrite":
+		return "workspace-write"
+	case "dangerFullAccess":
+		return "danger-full-access"
+	case "readOnly":
+		return "read-only"
+	case "externalSandbox":
+		return "external-sandbox"
+	default:
+		return value
+	}
 }
 
 func (m *Manager) WatchTaskThread(ctx context.Context, machine MachineRuntimeConfig, threadID string) (*ThreadWatcher, error) {
