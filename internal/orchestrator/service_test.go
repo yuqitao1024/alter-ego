@@ -443,6 +443,109 @@ func TestHandleRuntimeEventMovesTaskToWaitingAfterReportedRemaining(t *testing.T
 	}
 }
 
+func TestHandleRuntimeEventFallsBackToTurnDecisionWhenCompletionCheckFollowUpIsNotFinal(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification: ClassificationPlanDecision,
+			ReplyPolicy:    ReplyPolicyAskUser,
+			UserQuestion:   "请选择执行方案 A 或 B。",
+		},
+		completionDecision: SupervisorDecision{
+			CompletionDisposition: CompletionDispositionNone,
+		},
+	}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-completion-fallback", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	now := time.Now().UTC().Add(-time.Minute)
+	task.CompletionCheckStatus = CompletionCheckStatusSent
+	task.CompletionCheckSentAt = &now
+	seedTask(t, store, task)
+
+	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-1",
+		TurnCompleted: &TurnCompletedEvent{
+			TurnID:   "turn-2",
+			Summary:  "这里有两个可行方案，请先选择 A 或 B。",
+			ThreadID: "thread-1",
+		},
+	}); err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionText != "请选择执行方案 A 或 B。" {
+		t.Fatalf("persisted.AwaitingQuestion = %#v, want fallback question", persisted.AwaitingQuestion)
+	}
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	}
+}
+
+func TestHandleRuntimeEventFallsBackToTurnDecisionAfterReportedRemaining(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification: ClassificationPlanDecision,
+			ReplyPolicy:    ReplyPolicyAskUser,
+			UserQuestion:   "Codex 需要你确认剩余工作的执行方向。",
+		},
+		completionDecision: SupervisorDecision{
+			CompletionDisposition: CompletionDispositionNone,
+		},
+	}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-completion-reported-fallback", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	now := time.Now().UTC().Add(-time.Minute)
+	task.CompletionCheckStatus = CompletionCheckStatusReportedPending
+	task.CompletionCheckSentAt = &now
+	task.CompletionCheckDoneAt = &now
+	seedTask(t, store, task)
+
+	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-1",
+		TurnCompleted: &TurnCompletedEvent{
+			TurnID:   "turn-2",
+			Summary:  "还有剩余工作，但需要你先确认是继续方案 A 还是切换方案 B。",
+			ThreadID: "thread-1",
+		},
+	}); err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionText != "Codex 需要你确认剩余工作的执行方向。" {
+		t.Fatalf("persisted.AwaitingQuestion = %#v, want fallback question", persisted.AwaitingQuestion)
+	}
+	if notifier.lastTaskID != task.TaskID {
+		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	}
+}
+
 func TestHandleRuntimeEventEscalatesPlanDecisionOnCompletedTurnToUser(t *testing.T) {
 	t.Parallel()
 

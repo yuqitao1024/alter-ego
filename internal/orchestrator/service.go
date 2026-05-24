@@ -705,12 +705,6 @@ func (s *Service) handleTurnCompleted(ctx context.Context, task TaskRun, turn Tu
 		if handled {
 			return updatedTask, nil
 		}
-		task.LastCompletedTurnID = turnID
-		task.UpdatedAt = s.now()
-		if err := s.store.UpdateTask(ctx, task); err != nil {
-			return task, err
-		}
-		return task, nil
 	}
 
 	decision, err := s.decider.ClassifySupervisorEvent(ctx, SupervisorContext{
