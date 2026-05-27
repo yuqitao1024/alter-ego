@@ -17,6 +17,7 @@ type TaskService interface {
 	ListAll(ctx context.Context) ([]orchestrator.TaskRun, error)
 	Status(ctx context.Context, taskID string) (orchestrator.TaskRun, error)
 	Reply(ctx context.Context, taskID, text string) error
+	Reopen(ctx context.Context, taskID, text string) error
 	Complete(ctx context.Context, taskID string) error
 	Stop(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, taskID string) error
@@ -40,7 +41,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 
 	fields := strings.Fields(strings.TrimSpace(event.Text))
 	if len(fields) < 2 || fields[0] != "/task" {
-		reply.Text = "Usage: /task <start|list|status|reply|stop> ..."
+		reply.Text = "Usage: /task <start|list|status|reply|reopen|stop|delete> ..."
 		return reply, nil
 	}
 
@@ -100,6 +101,17 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 			return reply, err
 		}
 		reply.Text = fmt.Sprintf("Task %s resumed.", taskID)
+	case "reopen":
+		if len(fields) < 4 {
+			reply.Text = "Usage: /task reopen <task-id> <extra requirement>"
+			return reply, nil
+		}
+		taskID := fields[2]
+		extraRequirement := strings.TrimSpace(strings.Join(fields[3:], " "))
+		if err := h.service.Reopen(ctx, taskID, extraRequirement); err != nil {
+			return reply, err
+		}
+		reply.Text = fmt.Sprintf("Task %s reopened.", taskID)
 	case "stop":
 		if len(fields) != 3 {
 			reply.Text = "Usage: /task stop <task-id>"
@@ -129,7 +141,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		}
 		reply.Text = fmt.Sprintf("Task %s deleted.", taskID)
 	default:
-		reply.Text = "Usage: /task <start|list|status|reply|stop|delete> ..."
+		reply.Text = "Usage: /task <start|list|status|reply|reopen|stop|delete> ..."
 	}
 
 	return reply, nil

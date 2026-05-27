@@ -324,6 +324,43 @@ func (s *Service) Complete(ctx context.Context, taskID string) error {
 	return s.appendEvent(ctx, task.TaskID, "task_completed", "task marked completed by operator")
 }
 
+func (s *Service) Reopen(ctx context.Context, taskID, extraRequirement string) error {
+	task, err := s.store.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if !task.Status.IsReopenable() {
+		return fmt.Errorf("task %q is %s and cannot be reopened", taskID, task.Status)
+	}
+
+	requirement := strings.TrimSpace(extraRequirement)
+	if requirement == "" {
+		return fmt.Errorf("task %q reopen requirement cannot be empty", taskID)
+	}
+
+	session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), requirement)
+	if err != nil {
+		return fmt.Errorf("reopen task %q: %w", taskID, err)
+	}
+
+	if task.PendingRequestID != "" {
+		if err := s.store.MarkTaskServerRequestResolved(ctx, task.PendingRequestID, s.now()); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		task.PendingRequestID = ""
+	}
+
+	task.Status = StatusRunning
+	task.AwaitingQuestion = nil
+	task.LastInput = requirement
+	applySessionToTask(&task, session)
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return fmt.Errorf("persist reopened task %q: %w", taskID, err)
+	}
+	return s.appendEvent(ctx, task.TaskID, "task_reopened", "task reopened with additional requirement")
+}
+
 func (s *Service) List(ctx context.Context) ([]TaskRun, error) {
 	return s.store.ListActiveTasks(ctx)
 }

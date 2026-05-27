@@ -414,6 +414,115 @@ func TestCompleteIgnoresStopErrorsAndStillMarksTaskCompleted(t *testing.T) {
 	}
 }
 
+func TestReopenStoppedTaskSendsNewInputOnSameThread(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
+	defer cleanup()
+
+	askedAt := time.Now().UTC().Add(-2 * time.Minute)
+	task := sampleTaskRun("task-reopen", StatusStopped)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	task.PendingRequestID = "req-1"
+	task.AwaitingQuestion = &AwaitingQuestion{
+		QuestionText: "Need your input.",
+		QuestionType: "plan_decision",
+		AskedAt:      askedAt,
+	}
+	seedTask(t, store, task)
+	mustUpsertRequest(t, store, TaskServerRequest{
+		RequestID:      "req-1",
+		TaskID:         task.TaskID,
+		ThreadID:       "thread-1",
+		TurnID:         "turn-1",
+		RequestType:    ServerRequestTypeUserInput,
+		RequestPayload: `{"prompt":"choose"}`,
+		Status:         ServerRequestStatusPending,
+		CreatedAt:      time.Now().UTC().Add(-time.Minute),
+	})
+
+	runner.sendSession = RemoteSession{
+		MachineID:    "machine_a",
+		Workdir:      "/srv/backend",
+		ThreadID:     "thread-1",
+		ActiveTurnID: "turn-2",
+	}
+
+	if err := service.Reopen(context.Background(), task.TaskID, "Resolve the git conflict, rerun tests, and report the result."); err != nil {
+		t.Fatalf("Reopen returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusRunning {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusRunning)
+	}
+	if persisted.TaskID != task.TaskID {
+		t.Fatalf("persisted.TaskID = %q, want %q", persisted.TaskID, task.TaskID)
+	}
+	if persisted.ThreadID != "thread-1" {
+		t.Fatalf("persisted.ThreadID = %q, want thread-1", persisted.ThreadID)
+	}
+	if persisted.ActiveTurnID != "turn-2" {
+		t.Fatalf("persisted.ActiveTurnID = %q, want turn-2", persisted.ActiveTurnID)
+	}
+	if persisted.LastInput != "Resolve the git conflict, rerun tests, and report the result." {
+		t.Fatalf("persisted.LastInput = %q", persisted.LastInput)
+	}
+	if persisted.PendingRequestID != "" {
+		t.Fatalf("persisted.PendingRequestID = %q, want empty", persisted.PendingRequestID)
+	}
+	if persisted.AwaitingQuestion != nil {
+		t.Fatalf("persisted.AwaitingQuestion = %#v, want nil", persisted.AwaitingQuestion)
+	}
+
+	if len(runner.sentInputs) != 1 || runner.sentInputs[0] != "Resolve the git conflict, rerun tests, and report the result." {
+		t.Fatalf("runner.sentInputs = %#v", runner.sentInputs)
+	}
+
+	req, err := store.GetTaskServerRequest(context.Background(), "req-1")
+	if err != nil {
+		t.Fatalf("GetTaskServerRequest returned error: %v", err)
+	}
+	if req.Status != ServerRequestStatusResolved {
+		t.Fatalf("req.Status = %q, want %q", req.Status, ServerRequestStatusResolved)
+	}
+
+	events, err := store.ListEvents(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) == 0 || events[len(events)-1].EventType != "task_reopened" {
+		t.Fatalf("last event = %#v, want task_reopened", events)
+	}
+}
+
+func TestReopenRejectsNonTerminalTask(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	task := sampleTaskRun("task-reopen-invalid", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	err := service.Reopen(context.Background(), task.TaskID, "Do one more thing.")
+	if err == nil {
+		t.Fatal("Reopen returned nil error")
+	}
+	if want := `task "task-reopen-invalid" is running and cannot be reopened`; err.Error() != want {
+		t.Fatalf("Reopen error = %q, want %q", err.Error(), want)
+	}
+}
+
 func TestHandleRuntimeEventEscalatesPlanDecisionOnCompletedTurnToUser(t *testing.T) {
 	t.Parallel()
 

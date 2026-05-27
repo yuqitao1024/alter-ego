@@ -54,6 +54,7 @@ Supported commands:
 - `/task list -a`
 - `/task status <task-id>`
 - `/task reply <task-id> <decision text>`
+- `/task reopen <task-id> <extra requirement>`
 - `/task stop <task-id>`
 - `/task delete <task-id>`
 - `/task delete -a`
@@ -169,6 +170,9 @@ stateDiagram-v2
     recovering --> running : reconnect success
     recovering --> waiting_user_input : recovered waiting input
     recovering --> failed : recovery failed
+
+    completed --> running : operator reopen with extra requirement
+    stopped --> running : operator reopen with extra requirement
 
     completed --> [*]
     failed --> [*]

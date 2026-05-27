@@ -102,6 +102,15 @@ func (s TaskStatus) IsStoppable() bool {
 	}
 }
 
+func (s TaskStatus) IsReopenable() bool {
+	switch s {
+	case StatusCompleted, StatusStopped:
+		return true
+	default:
+		return false
+	}
+}
+
 type TaskQuestion struct {
 	ID             int64
 	TaskID         string

@@ -101,6 +101,51 @@ func TestTaskCommandListAllFormatsAllTasks(t *testing.T) {
 	}
 }
 
+func TestTaskCommandReopenResumesTerminalTask(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeTaskService{}
+	handler := NewTaskCommandHandler(service)
+
+	reply, err := handler.HandleCommand(context.Background(), channel.MessageEvent{
+		Text: "/task reopen task-1 Resolve the merge conflict and rerun tests",
+	})
+	if err != nil {
+		t.Fatalf("HandleCommand returned error: %v", err)
+	}
+
+	if service.reopenTaskID != "task-1" {
+		t.Fatalf("reopenTaskID = %q, want task-1", service.reopenTaskID)
+	}
+	if service.reopenText != "Resolve the merge conflict and rerun tests" {
+		t.Fatalf("reopenText = %q", service.reopenText)
+	}
+	if reply.Text != "Task task-1 reopened." {
+		t.Fatalf("reply.Text = %q", reply.Text)
+	}
+}
+
+func TestTaskCommandReopenRequiresExtraRequirement(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeTaskService{}
+	handler := NewTaskCommandHandler(service)
+
+	reply, err := handler.HandleCommand(context.Background(), channel.MessageEvent{
+		Text: "/task reopen task-1",
+	})
+	if err != nil {
+		t.Fatalf("HandleCommand returned error: %v", err)
+	}
+
+	if service.reopenTaskID != "" || service.reopenText != "" {
+		t.Fatalf("reopen args = %q %q, want none", service.reopenTaskID, service.reopenText)
+	}
+	if reply.Text != "Usage: /task reopen <task-id> <extra requirement>" {
+		t.Fatalf("reply.Text = %q", reply.Text)
+	}
+}
+
 func TestTaskCommandCardActionStopsTask(t *testing.T) {
 	t.Parallel()
 
@@ -408,6 +453,8 @@ type fakeTaskService struct {
 	startedBy       string
 	replyTaskID     string
 	replyText       string
+	reopenTaskID    string
+	reopenText      string
 	completeTaskID  string
 	stopTaskID      string
 	deleteTaskID    string
@@ -444,6 +491,12 @@ func (f *fakeTaskService) Status(ctx context.Context, taskID string) (orchestrat
 func (f *fakeTaskService) Reply(ctx context.Context, taskID, text string) error {
 	f.replyTaskID = taskID
 	f.replyText = text
+	return nil
+}
+
+func (f *fakeTaskService) Reopen(ctx context.Context, taskID, text string) error {
+	f.reopenTaskID = taskID
+	f.reopenText = text
 	return nil
 }
 
