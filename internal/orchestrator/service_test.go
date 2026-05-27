@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,16 +19,15 @@ func TestStartTaskSelectsMachineAndStartsSession(t *testing.T) {
 	defer cleanup()
 
 	seedTask(t, store, TaskRun{
-		TaskID:                "existing",
-		TemplateID:            "feature_dev",
-		RepositoryID:          "repo_backend",
-		MachineID:             "machine_a",
-		Status:                StatusRunning,
-		UserRequest:           "existing work",
-		CreatedBy:             "tester",
-		CompletionCheckStatus: CompletionCheckStatusNotStarted,
-		CreatedAt:             time.Now().UTC().Add(-time.Minute),
-		UpdatedAt:             time.Now().UTC().Add(-time.Minute),
+		TaskID:       "existing",
+		TemplateID:   "feature_dev",
+		RepositoryID: "repo_backend",
+		MachineID:    "machine_a",
+		Status:       StatusRunning,
+		UserRequest:  "existing work",
+		CreatedBy:    "tester",
+		CreatedAt:    time.Now().UTC().Add(-time.Minute),
+		UpdatedAt:    time.Now().UTC().Add(-time.Minute),
 	})
 
 	runner := service.runner.(*fakeServiceRunner)
@@ -310,82 +310,37 @@ func TestStopRejectsNonStoppableStatus(t *testing.T) {
 	}
 }
 
-func TestHandleRuntimeEventSendsCompletionCheckOnlyOnceForCompletedTurn(t *testing.T) {
+func TestCompleteMarksWaitingTaskCompleted(t *testing.T) {
 	t.Parallel()
 
 	runner := &fakeServiceRunner{}
-	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
-		supervisorDecision: SupervisorDecision{
-			Classification: ClassificationCompletionSignal,
-		},
-	})
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
 	defer cleanup()
 
-	task := sampleTaskRun("task-complete-once", StatusRunning)
+	askedAt := time.Now().UTC().Add(-time.Minute)
+	task := sampleTaskRun("task-complete", StatusWaitingUserInput)
 	task.ThreadID = "thread-1"
 	task.ActiveTurnID = "turn-1"
 	task.RemoteWorkdir = "/srv/backend"
+	task.AwaitingQuestion = &AwaitingQuestion{
+		QuestionText: "请确认任务是否完成。",
+		QuestionType: "plan_decision",
+		AskedAt:      askedAt,
+	}
 	seedTask(t, store, task)
-
-	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
-		ThreadID: "thread-1",
-		TurnCompleted: &TurnCompletedEvent{
-			TurnID:   "turn-1",
-			Summary:  "Task complete.",
-			ThreadID: "thread-1",
-		},
+	if err := store.AppendQuestion(context.Background(), TaskQuestion{
+		TaskID:         task.TaskID,
+		QuestionType:   "plan_decision",
+		QuestionText:   "请确认任务是否完成。",
+		OptionsSummary: "",
+		ContextExcerpt: "",
+		AskedAt:        askedAt,
 	}); err != nil {
-		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
-	}
-	if len(runner.sentInputs) != 1 {
-		t.Fatalf("sentInputs = %#v, want one completion check", runner.sentInputs)
+		t.Fatalf("AppendQuestion returned error: %v", err)
 	}
 
-	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
-		ThreadID: "thread-1",
-		TurnCompleted: &TurnCompletedEvent{
-			TurnID:   "turn-1",
-			Summary:  "Task complete.",
-			ThreadID: "thread-1",
-		},
-	}); err != nil {
-		t.Fatalf("second HandleRuntimeEvent returned error: %v", err)
-	}
-	if len(runner.sentInputs) != 1 {
-		t.Fatalf("sentInputs after second event = %#v, want still one completion check", runner.sentInputs)
-	}
-}
-
-func TestHandleRuntimeEventCompletesTaskAfterCompletionCheckConfirmation(t *testing.T) {
-	t.Parallel()
-
-	runner := &fakeServiceRunner{}
-	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
-		completionDecision: SupervisorDecision{
-			Classification:        ClassificationCompletionSignal,
-			CompletionDisposition: CompletionDispositionConfirmedDone,
-		},
-	})
-	defer cleanup()
-
-	task := sampleTaskRun("task-done", StatusRunning)
-	task.ThreadID = "thread-1"
-	task.ActiveTurnID = "turn-1"
-	task.RemoteWorkdir = "/srv/backend"
-	now := time.Now().UTC().Add(-time.Minute)
-	task.CompletionCheckStatus = CompletionCheckStatusSent
-	task.CompletionCheckSentAt = &now
-	seedTask(t, store, task)
-
-	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
-		ThreadID: "thread-1",
-		TurnCompleted: &TurnCompletedEvent{
-			TurnID:   "turn-1",
-			Summary:  "All requested work is complete.",
-			ThreadID: "thread-1",
-		},
-	}); err != nil {
-		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	if err := service.Complete(context.Background(), task.TaskID); err != nil {
+		t.Fatalf("Complete returned error: %v", err)
 	}
 
 	persisted, err := store.GetTask(context.Background(), task.TaskID)
@@ -395,154 +350,67 @@ func TestHandleRuntimeEventCompletesTaskAfterCompletionCheckConfirmation(t *test
 	if persisted.Status != StatusCompleted {
 		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
 	}
+	if persisted.AwaitingQuestion != nil {
+		t.Fatalf("persisted.AwaitingQuestion = %#v, want nil", persisted.AwaitingQuestion)
+	}
+	if len(runner.calls) != 1 || runner.calls[0] != "stop" {
+		t.Fatalf("runner.calls = %#v, want [stop]", runner.calls)
+	}
 }
 
-func TestHandleRuntimeEventMovesTaskToWaitingAfterReportedRemaining(t *testing.T) {
+func TestCompleteIgnoresStopErrorsAndStillMarksTaskCompleted(t *testing.T) {
 	t.Parallel()
 
-	runner := &fakeServiceRunner{}
-	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
-		completionDecision: SupervisorDecision{
-			Classification:        ClassificationCompletionSignal,
-			CompletionDisposition: CompletionDispositionReportedRemaining,
-		},
-	})
+	runner := &fakeServiceRunner{stopErr: errors.New("interrupt failed")}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
 	defer cleanup()
 
-	task := sampleTaskRun("task-done-after-remaining", StatusRunning)
+	askedAt := time.Now().UTC().Add(-time.Minute)
+	task := sampleTaskRun("task-complete-ignore-stop-error", StatusWaitingUserInput)
 	task.ThreadID = "thread-1"
 	task.ActiveTurnID = "turn-1"
 	task.RemoteWorkdir = "/srv/backend"
-	now := time.Now().UTC().Add(-time.Minute)
-	task.CompletionCheckStatus = CompletionCheckStatusReportedPending
-	task.CompletionCheckSentAt = &now
-	task.CompletionCheckDoneAt = &now
-	task.LastInput = "continue"
+	task.AwaitingQuestion = &AwaitingQuestion{
+		QuestionText: "请确认任务是否完成。",
+		QuestionType: "plan_decision",
+		AskedAt:      askedAt,
+	}
 	seedTask(t, store, task)
-
-	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
-		ThreadID: "thread-1",
-		TurnCompleted: &TurnCompletedEvent{
-			TurnID:   "turn-1",
-			Summary:  "remaining work still exists",
-			ThreadID: "thread-1",
-		},
+	if err := store.AppendQuestion(context.Background(), TaskQuestion{
+		TaskID:         task.TaskID,
+		QuestionType:   "plan_decision",
+		QuestionText:   "请确认任务是否完成。",
+		OptionsSummary: "",
+		ContextExcerpt: "",
+		AskedAt:        askedAt,
 	}); err != nil {
-		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+		t.Fatalf("AppendQuestion returned error: %v", err)
+	}
+
+	if err := service.Complete(context.Background(), task.TaskID); err != nil {
+		t.Fatalf("Complete returned error: %v", err)
 	}
 
 	persisted, err := store.GetTask(context.Background(), task.TaskID)
 	if err != nil {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
-	if persisted.Status != StatusWaitingUserInput {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
-	}
-	if persisted.CompletionCheckStatus != CompletionCheckStatusReportedPending {
-		t.Fatalf("persisted.CompletionCheckStatus = %q, want %q", persisted.CompletionCheckStatus, CompletionCheckStatusReportedPending)
-	}
-}
-
-func TestHandleRuntimeEventFallsBackToTurnDecisionWhenCompletionCheckFollowUpIsNotFinal(t *testing.T) {
-	t.Parallel()
-
-	notifier := &fakeTaskNotifier{}
-	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{
-		supervisorDecision: SupervisorDecision{
-			Classification: ClassificationPlanDecision,
-			ReplyPolicy:    ReplyPolicyAskUser,
-			UserQuestion:   "请选择执行方案 A 或 B。",
-		},
-		completionDecision: SupervisorDecision{
-			CompletionDisposition: CompletionDispositionNone,
-		},
-	}, notifier)
-	defer cleanup()
-
-	task := sampleTaskRun("task-completion-fallback", StatusRunning)
-	task.ThreadID = "thread-1"
-	task.ActiveTurnID = "turn-1"
-	task.RemoteWorkdir = "/srv/backend"
-	now := time.Now().UTC().Add(-time.Minute)
-	task.CompletionCheckStatus = CompletionCheckStatusSent
-	task.CompletionCheckSentAt = &now
-	seedTask(t, store, task)
-
-	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
-		ThreadID: "thread-1",
-		TurnCompleted: &TurnCompletedEvent{
-			TurnID:   "turn-2",
-			Summary:  "这里有两个可行方案，请先选择 A 或 B。",
-			ThreadID: "thread-1",
-		},
-	}); err != nil {
-		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	if persisted.Status != StatusCompleted {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusCompleted)
 	}
 
-	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	events, err := store.ListEvents(context.Background(), task.TaskID)
 	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
+		t.Fatalf("ListEvents returned error: %v", err)
 	}
-	if persisted.Status != StatusWaitingUserInput {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	if len(events) < 2 {
+		t.Fatalf("events = %#v, want interrupt skipped and completed events", events)
 	}
-	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionText != "请选择执行方案 A 或 B。" {
-		t.Fatalf("persisted.AwaitingQuestion = %#v, want fallback question", persisted.AwaitingQuestion)
+	if events[len(events)-2].EventType != "task_complete_interrupt_skipped" {
+		t.Fatalf("events[len-2].EventType = %q, want task_complete_interrupt_skipped", events[len(events)-2].EventType)
 	}
-	if notifier.lastTaskID != task.TaskID {
-		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
-	}
-}
-
-func TestHandleRuntimeEventFallsBackToTurnDecisionAfterReportedRemaining(t *testing.T) {
-	t.Parallel()
-
-	notifier := &fakeTaskNotifier{}
-	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{
-		supervisorDecision: SupervisorDecision{
-			Classification: ClassificationPlanDecision,
-			ReplyPolicy:    ReplyPolicyAskUser,
-			UserQuestion:   "Codex 需要你确认剩余工作的执行方向。",
-		},
-		completionDecision: SupervisorDecision{
-			CompletionDisposition: CompletionDispositionNone,
-		},
-	}, notifier)
-	defer cleanup()
-
-	task := sampleTaskRun("task-completion-reported-fallback", StatusRunning)
-	task.ThreadID = "thread-1"
-	task.ActiveTurnID = "turn-1"
-	task.RemoteWorkdir = "/srv/backend"
-	now := time.Now().UTC().Add(-time.Minute)
-	task.CompletionCheckStatus = CompletionCheckStatusReportedPending
-	task.CompletionCheckSentAt = &now
-	task.CompletionCheckDoneAt = &now
-	seedTask(t, store, task)
-
-	if err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
-		ThreadID: "thread-1",
-		TurnCompleted: &TurnCompletedEvent{
-			TurnID:   "turn-2",
-			Summary:  "还有剩余工作，但需要你先确认是继续方案 A 还是切换方案 B。",
-			ThreadID: "thread-1",
-		},
-	}); err != nil {
-		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
-	}
-
-	persisted, err := store.GetTask(context.Background(), task.TaskID)
-	if err != nil {
-		t.Fatalf("GetTask returned error: %v", err)
-	}
-	if persisted.Status != StatusWaitingUserInput {
-		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
-	}
-	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionText != "Codex 需要你确认剩余工作的执行方向。" {
-		t.Fatalf("persisted.AwaitingQuestion = %#v, want fallback question", persisted.AwaitingQuestion)
-	}
-	if notifier.lastTaskID != task.TaskID {
-		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	if events[len(events)-1].EventType != "task_completed" {
+		t.Fatalf("events[len-1].EventType = %q, want task_completed", events[len(events)-1].EventType)
 	}
 }
 
@@ -800,7 +668,10 @@ func TestResumeActiveTasksRestoresUnprocessedCompletedTurn(t *testing.T) {
 	}
 	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{
 		supervisorDecision: SupervisorDecision{
-			Classification: ClassificationCompletionSignal,
+			Classification:   ClassificationExecutionApproval,
+			ReplyPolicy:      ReplyPolicyAutoContinue,
+			ShouldReplyCodex: true,
+			CodexReply:       "continue",
 		},
 	})
 	defer cleanup()
@@ -817,7 +688,10 @@ func TestResumeActiveTasksRestoresUnprocessedCompletedTurn(t *testing.T) {
 		t.Fatalf("ResumeActiveTasks returned error: %v", err)
 	}
 	if len(runner.sentInputs) != 1 {
-		t.Fatalf("sentInputs = %#v, want one completion check", runner.sentInputs)
+		t.Fatalf("sentInputs = %#v, want one continue reply", runner.sentInputs)
+	}
+	if runner.sentInputs[0] != "continue" {
+		t.Fatalf("sentInputs[0] = %q, want continue", runner.sentInputs[0])
 	}
 }
 
@@ -882,9 +756,9 @@ func TestResumeActiveTasksRenotifiesExistingWaitingQuestion(t *testing.T) {
 	task.ThreadID = "thread-123"
 	task.ActiveTurnID = "turn-456"
 	task.AwaitingQuestion = &AwaitingQuestion{
-		QuestionText:   "Codex reports there is remaining work after the completion check.",
+		QuestionText:   "Codex reports there is remaining work and needs another decision.",
 		ContextExcerpt: "2) remaining work still exists.",
-		QuestionType:   "completion_follow_up",
+		QuestionType:   "plan_decision",
 		AskedAt:        time.Now().UTC().Add(-time.Minute),
 	}
 	seedTask(t, store, task)
@@ -1174,9 +1048,6 @@ func seedTask(t *testing.T, store *Store, task TaskRun) TaskRun {
 	if task.UpdatedAt.IsZero() {
 		task.UpdatedAt = now
 	}
-	if task.CompletionCheckStatus == "" {
-		task.CompletionCheckStatus = CompletionCheckStatusNotStarted
-	}
 
 	if err := store.CreateTask(context.Background(), task); err != nil {
 		t.Fatalf("CreateTask returned error: %v", err)
@@ -1313,7 +1184,6 @@ func (f *fakeServiceRunner) Events() <-chan RuntimeEvent {
 type fakeDecisionEngine struct {
 	supervisorDecision SupervisorDecision
 	progressDecision   SupervisorDecision
-	completionDecision SupervisorDecision
 	err                error
 }
 
@@ -1323,10 +1193,6 @@ func (f *fakeDecisionEngine) ClassifySupervisorEvent(context.Context, Supervisor
 
 func (f *fakeDecisionEngine) EvaluateProgressUpdate(context.Context, TaskRun, string) (SupervisorDecision, error) {
 	return f.progressDecision, f.err
-}
-
-func (f *fakeDecisionEngine) EvaluateCompletionSignal(context.Context, TaskRun, string) (SupervisorDecision, error) {
-	return f.completionDecision, f.err
 }
 
 type fakeTaskNotifier struct {

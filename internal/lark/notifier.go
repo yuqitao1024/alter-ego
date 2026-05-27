@@ -87,6 +87,23 @@ func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 					"task_id": task.TaskID,
 				},
 			},
+			map[string]interface{}{
+				"tag":         "button",
+				"name":        "task_reply_complete",
+				"type":        "default",
+				"action_type": "form_submit",
+				"text": map[string]interface{}{
+					"tag":     "lark_md",
+					"content": "任务完成",
+				},
+				"value": map[string]interface{}{
+					"source":  "alterego",
+					"version": 1,
+					"kind":    "task_reply_action",
+					"action":  "complete",
+					"task_id": task.TaskID,
+				},
+			},
 		},
 	})
 

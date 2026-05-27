@@ -141,11 +141,39 @@ Interactive task lifecycle:
 1. `pending`
 2. `starting`
 3. `running`
-4. `waiting_user_input` when Codex issues an explicit app-server server request that needs user involvement
+4. `waiting_user_input` when Codex issues an explicit app-server server request that needs user involvement, or when a completed turn needs a human decision
 5. `recovering` when Alter Ego loses contact with the remote app-server thread and is attempting recovery
-6. `completed` when Codex confirms the requested workflow is finished
+6. `completed` when the operator explicitly marks the task complete
 7. `failed` when startup, recovery, or remote execution cannot continue
 8. `stopped` when the operator explicitly stops the task
+
+Task state transitions:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> starting : scheduler picks machine
+    starting --> running : app-server thread/turn started
+    starting --> failed : startup error
+
+    running --> waiting_user_input : server_request needs user decision
+    running --> waiting_user_input : turn_completed -> model asks user
+    running --> running : turn_completed -> auto reply to Codex
+    running --> recovering : reconnect needed
+    running --> stopped : operator stop
+
+    waiting_user_input --> running : submit reply
+    waiting_user_input --> completed : operator marks task complete
+    waiting_user_input --> stopped : operator stop
+
+    recovering --> running : reconnect success
+    recovering --> waiting_user_input : recovered waiting input
+    recovering --> failed : recovery failed
+
+    completed --> [*]
+    failed --> [*]
+    stopped --> [*]
+```
 
 Task list output now uses Lark interactive cards when sent from the Lark channel. Each task card includes action buttons:
 
@@ -176,10 +204,10 @@ Task decision flow:
 
 1. subscribe to Codex app-server websocket events and keep the latest thread snapshot in memory;
 2. persist each explicit app-server server request and handle it exactly once;
-3. only reply to Codex when an explicit server request is pending;
-4. use the model to classify whether a pending request can be auto-handled or should be escalated to the user;
-5. keep the 2-minute polling loop only for progress reporting and completion-check logic, never for inventing new Codex input;
-6. send the one-time completion-check prompt after Codex signals completion, and never send it twice.
+3. require every explicit server request to either auto-reply or escalate to the user;
+4. require every `turn_completed` event to either auto-reply to Codex or escalate to the user;
+5. use the model as a supervisor only for that routing decision, not for inventing extra workflows or completion checks;
+6. keep the 2-minute polling loop only for status refresh and optional progress reporting, never for inventing new Codex input.
 
 Run locally:
 

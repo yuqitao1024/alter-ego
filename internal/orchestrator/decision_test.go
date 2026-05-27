@@ -33,9 +33,8 @@ func TestBuildSupervisorRequestPromptIncludesTaskAndRequestFields(t *testing.T) 
 
 	prompt := buildSupervisorRequestPrompt(SupervisorContext{
 		Task: TaskRun{
-			TaskID:                "task-123",
-			UserRequest:           "Implement task orchestration",
-			CompletionCheckStatus: CompletionCheckStatusNotStarted,
+			TaskID:      "task-123",
+			UserRequest: "Implement task orchestration",
 		},
 		Request: TaskServerRequest{
 			RequestID:      "req-1",
@@ -58,9 +57,8 @@ func TestBuildSupervisorRequestPromptDoesNotDuplicateCompletedTurnSummary(t *tes
 	summary := "completed turn summary"
 	prompt := buildSupervisorRequestPrompt(SupervisorContext{
 		Task: TaskRun{
-			TaskID:                "task-123",
-			UserRequest:           "Implement task orchestration",
-			CompletionCheckStatus: CompletionCheckStatusNotStarted,
+			TaskID:      "task-123",
+			UserRequest: "Implement task orchestration",
 		},
 		EventType: "turn_completed",
 		Summary:   summary,
@@ -138,25 +136,6 @@ func TestModelDecisionEngineEvaluatesProgressUpdate(t *testing.T) {
 	}
 	if !result.ShouldNotifyUser {
 		t.Fatal("ShouldNotifyUser = false, want true")
-	}
-}
-
-func TestModelDecisionEngineEvaluatesCompletionSignal(t *testing.T) {
-	t.Parallel()
-
-	engine := NewModelDecisionEngine(&fakeDecisionModel{
-		response: `{"classification":"completion_signal","completion_disposition":"confirmed_done","reason":"Codex explicitly confirmed all work is complete."}`,
-	})
-
-	result, err := engine.EvaluateCompletionSignal(context.Background(), TaskRun{
-		TaskID:                "task-done",
-		CompletionCheckStatus: CompletionCheckStatusSent,
-	}, "All requested work is complete.")
-	if err != nil {
-		t.Fatalf("EvaluateCompletionSignal returned error: %v", err)
-	}
-	if result.CompletionDisposition != CompletionDispositionConfirmedDone {
-		t.Fatalf("CompletionDisposition = %q, want %q", result.CompletionDisposition, CompletionDispositionConfirmedDone)
 	}
 }
 

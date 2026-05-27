@@ -13,13 +13,12 @@ const decisionModelMaxAttempts = 3
 const supervisorRequestRules = `You are Alter Ego's Codex supervisor.
 - Alter Ego is a supervisor, not a co-worker.
 - Handle two event types: server_request and turn_completed.
-- Classify the event as one of: plan_decision, execution_approval, completion_signal, or ignore.
+- Classify the event as one of: plan_decision or execution_approval.
 - For server_request events, prefer plan_decision when the request asks for scope, architecture, prioritization, or other product/solution choices.
 - For server_request events, prefer execution_approval when the request is a routine continue/resume/approval that does not change scope.
-- For turn_completed events, use completion_signal only when the completed turn clearly claims the task is done enough to trigger the one fixed completion-check prompt.
-- For turn_completed events, prefer plan_decision when the summary is clearly asking the user to choose scope, architecture, priorities, or options.
+- For turn_completed events, Codex will not continue until Alter Ego sends another input.
+- For turn_completed events, prefer plan_decision when the summary asks the user to choose scope, architecture, priorities, options, or to confirm that the task should be considered complete.
 - For turn_completed events, prefer execution_approval only when a routine continue/resume reply is clearly appropriate.
-- For turn_completed events, do not invent a reply unless the summary clearly asks for the next instruction or approval.
 - Return strict JSON only.`
 
 const progressUpdateRules = `You are Alter Ego's Codex supervisor.
@@ -27,14 +26,6 @@ const progressUpdateRules = `You are Alter Ego's Codex supervisor.
 - classification must be one of: progress_update, ignore.
 - progress_update means the user should receive a short update now.
 - ignore means no user update is needed.
-- Return strict JSON only.`
-
-const completionSignalRules = `You are Alter Ego's Codex supervisor.
-- Evaluate completion-related summaries only.
-- completion_disposition must be one of: none, signal_complete, confirmed_done, reported_remaining.
-- signal_complete means Codex appears to claim the task is done and should receive the one fixed completion-check prompt.
-- confirmed_done means Codex explicitly confirmed all requested work is complete after the completion-check prompt.
-- reported_remaining means Codex explicitly said work remains after the completion-check prompt.
 - Return strict JSON only.`
 
 type SupervisorContext struct {
@@ -48,7 +39,6 @@ type SupervisorContext struct {
 type DecisionEngine interface {
 	ClassifySupervisorEvent(ctx context.Context, in SupervisorContext) (SupervisorDecision, error)
 	EvaluateProgressUpdate(ctx context.Context, task TaskRun, summary string) (SupervisorDecision, error)
-	EvaluateCompletionSignal(ctx context.Context, task TaskRun, summary string) (SupervisorDecision, error)
 }
 
 type DecisionModel interface {
@@ -77,14 +67,6 @@ func (e *ModelDecisionEngine) EvaluateProgressUpdate(ctx context.Context, task T
 	}
 	userPrompt := buildProgressPrompt(task, summary)
 	return e.completeStructured(ctx, progressUpdateRules, userPrompt)
-}
-
-func (e *ModelDecisionEngine) EvaluateCompletionSignal(ctx context.Context, task TaskRun, summary string) (SupervisorDecision, error) {
-	if e == nil || e.model == nil {
-		return SupervisorDecision{}, fmt.Errorf("decision model is not configured")
-	}
-	userPrompt := buildCompletionPrompt(task, summary)
-	return e.completeStructured(ctx, completionSignalRules, userPrompt)
 }
 
 func (e *ModelDecisionEngine) completeStructured(ctx context.Context, systemPrompt, userPrompt string) (SupervisorDecision, error) {
@@ -123,7 +105,6 @@ func isRetryableDecisionModelError(err error) bool {
 func normalizeSupervisorDecision(decision SupervisorDecision) SupervisorDecision {
 	decision.Classification = SupervisorClassification(strings.ToLower(strings.TrimSpace(string(decision.Classification))))
 	decision.ReplyPolicy = ReplyPolicy(strings.ToLower(strings.TrimSpace(string(decision.ReplyPolicy))))
-	decision.CompletionDisposition = CompletionDisposition(strings.ToLower(strings.TrimSpace(string(decision.CompletionDisposition))))
 	decision.Reason = strings.TrimSpace(decision.Reason)
 	decision.UserUpdate = strings.TrimSpace(decision.UserUpdate)
 	decision.UserQuestion = strings.TrimSpace(decision.UserQuestion)
@@ -163,8 +144,6 @@ func buildSupervisorRequestPrompt(in SupervisorContext) string {
 	builder.WriteString(firstNonEmpty(in.EventType, "server_request"))
 	builder.WriteString("\nuser_request: ")
 	builder.WriteString(in.Task.UserRequest)
-	builder.WriteString("\ncompletion_check_status: ")
-	builder.WriteString(string(in.Task.CompletionCheckStatus))
 	if in.TurnCompleted != nil {
 		builder.WriteString("\nturn_id: ")
 		builder.WriteString(in.TurnCompleted.TurnID)
@@ -210,23 +189,6 @@ func buildProgressPrompt(task TaskRun, summary string) string {
 	builder.WriteString("\n\n[Latest Summary]\n")
 	builder.WriteString(promptSnippet(summary, 4000))
 	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, user_update, reason.")
-	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
-	builder.WriteString("\nDo not add any explanation before or after the JSON.")
-	return builder.String()
-}
-
-func buildCompletionPrompt(task TaskRun, summary string) string {
-	var builder strings.Builder
-	builder.WriteString("[Task]\n")
-	builder.WriteString("task_id: ")
-	builder.WriteString(task.TaskID)
-	builder.WriteString("\ncompletion_check_status: ")
-	builder.WriteString(string(task.CompletionCheckStatus))
-	builder.WriteString("\nuser_request: ")
-	builder.WriteString(task.UserRequest)
-	builder.WriteString("\n\n[Latest Summary]\n")
-	builder.WriteString(promptSnippet(summary, 4000))
-	builder.WriteString("\n\nReturn exactly one JSON object with fields: classification, completion_disposition, should_notify_user, user_update, reason.")
 	builder.WriteString("\nDo not wrap the JSON in Markdown code fences.")
 	builder.WriteString("\nDo not add any explanation before or after the JSON.")
 	return builder.String()

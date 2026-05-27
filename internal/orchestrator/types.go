@@ -3,7 +3,6 @@ package orchestrator
 import "time"
 
 type TaskStatus string
-type CompletionCheckStatus string
 type ServerRequestType string
 type ServerRequestStatus string
 
@@ -16,13 +15,6 @@ const (
 	StatusCompleted        TaskStatus = "completed"
 	StatusFailed           TaskStatus = "failed"
 	StatusStopped          TaskStatus = "stopped"
-)
-
-const (
-	CompletionCheckStatusNotStarted      CompletionCheckStatus = "not_started"
-	CompletionCheckStatusSent            CompletionCheckStatus = "sent"
-	CompletionCheckStatusConfirmedDone   CompletionCheckStatus = "confirmed_done"
-	CompletionCheckStatusReportedPending CompletionCheckStatus = "reported_remaining"
 )
 
 const (
@@ -40,27 +32,24 @@ const (
 )
 
 type TaskRun struct {
-	TaskID                string
-	TemplateID            string
-	RepositoryID          string
-	MachineID             string
-	Status                TaskStatus
-	UserRequest           string
-	CreatedBy             string
-	RemoteWorkdir         string
-	ThreadID              string
-	ActiveTurnID          string
-	LastCompletedTurnID   string
-	LastInput             string
-	LastOutputSummary     string
-	LastDecisionAction    string
-	PendingRequestID      string
-	CompletionCheckStatus CompletionCheckStatus
-	CompletionCheckSentAt *time.Time
-	CompletionCheckDoneAt *time.Time
-	AwaitingQuestion      *AwaitingQuestion
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	TaskID              string
+	TemplateID          string
+	RepositoryID        string
+	MachineID           string
+	Status              TaskStatus
+	UserRequest         string
+	CreatedBy           string
+	RemoteWorkdir       string
+	ThreadID            string
+	ActiveTurnID        string
+	LastCompletedTurnID string
+	LastInput           string
+	LastOutputSummary   string
+	LastDecisionAction  string
+	PendingRequestID    string
+	AwaitingQuestion    *AwaitingQuestion
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type TaskServerRequest struct {

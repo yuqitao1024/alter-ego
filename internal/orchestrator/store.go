@@ -57,16 +57,13 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 			active_turn_id,
 			last_completed_turn_id,
 			last_input,
-			last_output_summary,
-			last_decision_action,
-			pending_request_id,
-			completion_check_status,
-			completion_check_sent_at,
-			completion_check_done_at,
-			awaiting_question,
-			created_at,
-			updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				last_output_summary,
+				last_decision_action,
+				pending_request_id,
+				awaiting_question,
+				created_at,
+				updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
@@ -83,9 +80,6 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		task.LastOutputSummary,
 		task.LastDecisionAction,
 		task.PendingRequestID,
-		firstNonEmpty(string(task.CompletionCheckStatus), string(CompletionCheckStatusNotStarted)),
-		formatOptionalTime(task.CompletionCheckSentAt),
-		formatOptionalTime(task.CompletionCheckDoneAt),
 		awaitingQuestion,
 		task.CreatedAt.UTC().Format(time.RFC3339Nano),
 		task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -116,15 +110,12 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 			active_turn_id = ?,
 			last_completed_turn_id = ?,
 			last_input = ?,
-			last_output_summary = ?,
-			last_decision_action = ?,
-			pending_request_id = ?,
-			completion_check_status = ?,
-			completion_check_sent_at = ?,
-			completion_check_done_at = ?,
-			awaiting_question = ?,
-			created_at = ?,
-			updated_at = ?
+				last_output_summary = ?,
+				last_decision_action = ?,
+				pending_request_id = ?,
+				awaiting_question = ?,
+				created_at = ?,
+				updated_at = ?
 		WHERE task_id = ?
 	`,
 		task.TemplateID,
@@ -141,9 +132,6 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		task.LastOutputSummary,
 		task.LastDecisionAction,
 		task.PendingRequestID,
-		firstNonEmpty(string(task.CompletionCheckStatus), string(CompletionCheckStatusNotStarted)),
-		formatOptionalTime(task.CompletionCheckSentAt),
-		formatOptionalTime(task.CompletionCheckDoneAt),
 		awaitingQuestion,
 		task.CreatedAt.UTC().Format(time.RFC3339Nano),
 		task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -179,15 +167,12 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 			active_turn_id,
 			last_completed_turn_id,
 			last_input,
-			last_output_summary,
-			last_decision_action,
-			pending_request_id,
-			completion_check_status,
-			completion_check_sent_at,
-			completion_check_done_at,
-			awaiting_question,
-			created_at,
-			updated_at
+				last_output_summary,
+				last_decision_action,
+				pending_request_id,
+				awaiting_question,
+				created_at,
+				updated_at
 		FROM tasks
 		WHERE task_id = ?
 	`, taskID)
@@ -233,15 +218,12 @@ func (s *Store) GetTaskByThread(ctx context.Context, threadID string) (TaskRun, 
 			active_turn_id,
 			last_completed_turn_id,
 			last_input,
-			last_output_summary,
-			last_decision_action,
-			pending_request_id,
-			completion_check_status,
-			completion_check_sent_at,
-			completion_check_done_at,
-			awaiting_question,
-			created_at,
-			updated_at
+				last_output_summary,
+				last_decision_action,
+				pending_request_id,
+				awaiting_question,
+				created_at,
+				updated_at
 		FROM tasks
 		WHERE thread_id = ?
 	`, threadID)
@@ -268,15 +250,12 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 			active_turn_id,
 			last_completed_turn_id,
 			last_input,
-			last_output_summary,
-			last_decision_action,
-			pending_request_id,
-			completion_check_status,
-			completion_check_sent_at,
-			completion_check_done_at,
-			awaiting_question,
-			created_at,
-			updated_at
+				last_output_summary,
+				last_decision_action,
+				pending_request_id,
+				awaiting_question,
+				created_at,
+				updated_at
 		FROM tasks
 		WHERE status NOT IN (?, ?, ?)
 		ORDER BY created_at, task_id
@@ -316,15 +295,12 @@ func (s *Store) ListTasks(ctx context.Context) ([]TaskRun, error) {
 			active_turn_id,
 			last_completed_turn_id,
 			last_input,
-			last_output_summary,
-			last_decision_action,
-			pending_request_id,
-			completion_check_status,
-			completion_check_sent_at,
-			completion_check_done_at,
-			awaiting_question,
-			created_at,
-			updated_at
+				last_output_summary,
+				last_decision_action,
+				pending_request_id,
+				awaiting_question,
+				created_at,
+				updated_at
 		FROM tasks
 		ORDER BY created_at, task_id
 	`)
@@ -665,15 +641,12 @@ func (s *Store) init(ctx context.Context) error {
 			active_turn_id TEXT NOT NULL DEFAULT '',
 			last_completed_turn_id TEXT NOT NULL DEFAULT '',
 			last_input TEXT NOT NULL,
-			last_output_summary TEXT NOT NULL,
-			last_decision_action TEXT NOT NULL DEFAULT '',
-			pending_request_id TEXT NOT NULL DEFAULT '',
-			completion_check_status TEXT NOT NULL DEFAULT 'not_started',
-			completion_check_sent_at TEXT,
-			completion_check_done_at TEXT,
-			awaiting_question TEXT,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+				last_output_summary TEXT NOT NULL,
+				last_decision_action TEXT NOT NULL DEFAULT '',
+				pending_request_id TEXT NOT NULL DEFAULT '',
+				awaiting_question TEXT,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS task_server_requests (
 			request_id TEXT PRIMARY KEY,
@@ -763,9 +736,6 @@ type taskScanner interface {
 func scanTask(scanner taskScanner) (TaskRun, error) {
 	var task TaskRun
 	var status string
-	var completionStatus string
-	var completionSentAt sql.NullString
-	var completionDoneAt sql.NullString
 	var awaitingQuestion sql.NullString
 	var createdAt string
 	var updatedAt string
@@ -786,9 +756,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 		&task.LastOutputSummary,
 		&task.LastDecisionAction,
 		&task.PendingRequestID,
-		&completionStatus,
-		&completionSentAt,
-		&completionDoneAt,
 		&awaitingQuestion,
 		&createdAt,
 		&updatedAt,
@@ -798,7 +765,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	}
 
 	task.Status = TaskStatus(status)
-	task.CompletionCheckStatus = CompletionCheckStatus(completionStatus)
 
 	task.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
@@ -807,14 +773,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	task.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
 	if err != nil {
 		return TaskRun{}, fmt.Errorf("parse updated_at: %w", err)
-	}
-	task.CompletionCheckSentAt, err = parseOptionalTime(completionSentAt)
-	if err != nil {
-		return TaskRun{}, fmt.Errorf("parse completion_check_sent_at: %w", err)
-	}
-	task.CompletionCheckDoneAt, err = parseOptionalTime(completionDoneAt)
-	if err != nil {
-		return TaskRun{}, fmt.Errorf("parse completion_check_done_at: %w", err)
 	}
 	task.AwaitingQuestion, err = unmarshalAwaitingQuestion(awaitingQuestion)
 	if err != nil {

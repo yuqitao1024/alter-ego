@@ -17,6 +17,7 @@ type TaskService interface {
 	ListAll(ctx context.Context) ([]orchestrator.TaskRun, error)
 	Status(ctx context.Context, taskID string) (orchestrator.TaskRun, error)
 	Reply(ctx context.Context, taskID, text string) error
+	Complete(ctx context.Context, taskID string) error
 	Stop(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, taskID string) error
 	DeleteTerminalTasks(ctx context.Context) (int, error)
@@ -196,6 +197,11 @@ func (h *TaskCommandHandler) handleTaskReplyCard(ctx context.Context, event chan
 			return channel.CardActionResponse{}, err
 		}
 		return channel.CardActionResponse{ToastText: fmt.Sprintf("Task %s resumed.", request.taskID)}, nil
+	case "complete":
+		if err := h.service.Complete(ctx, request.taskID); err != nil {
+			return channel.CardActionResponse{}, err
+		}
+		return channel.CardActionResponse{ToastText: fmt.Sprintf("Task %s completed.", request.taskID)}, nil
 	default:
 		return channel.CardActionResponse{ToastText: fmt.Sprintf("Unsupported task reply action: %s", request.action)}, nil
 	}
@@ -234,7 +240,7 @@ func parseTaskCardAction(value map[string]interface{}) (taskCardAction, error) {
 		return taskCardAction{}, fmt.Errorf("Unsupported task action: %s", action)
 	case "task_reply_action":
 		switch action {
-		case "submit":
+		case "submit", "complete":
 			return taskCardAction{
 				kind:   kind,
 				action: action,

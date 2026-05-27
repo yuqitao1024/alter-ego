@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-const completionCheckPrompt = "Please verify once, against the confirmed task scope only, whether all requested work is complete. Reply with either: 1) all requested work is complete, or 2) remaining work still exists."
-
 type Service struct {
 	store                  *Store
 	registry               *Registry
@@ -66,16 +64,15 @@ func (s *Service) StartTask(ctx context.Context, templateID, createdBy, userRequ
 
 	now := s.now()
 	task := TaskRun{
-		TaskID:                newTaskID(now),
-		TemplateID:            template.ID,
-		RepositoryID:          template.Repository.ID,
-		MachineID:             machineID,
-		Status:                StatusPending,
-		UserRequest:           userRequest,
-		CreatedBy:             createdBy,
-		CompletionCheckStatus: CompletionCheckStatusNotStarted,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		TaskID:       newTaskID(now),
+		TemplateID:   template.ID,
+		RepositoryID: template.Repository.ID,
+		MachineID:    machineID,
+		Status:       StatusPending,
+		UserRequest:  userRequest,
+		CreatedBy:    createdBy,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	if err := s.store.CreateTask(ctx, task); err != nil {
 		return TaskRun{}, fmt.Errorf("create task: %w", err)
@@ -292,6 +289,41 @@ func (s *Service) Stop(ctx context.Context, taskID string) error {
 	return s.appendEvent(ctx, task.TaskID, "task_stopped", "task stopped by operator")
 }
 
+func (s *Service) Complete(ctx context.Context, taskID string) error {
+	task, err := s.store.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task.Status != StatusWaitingUserInput {
+		return fmt.Errorf("task %q is not waiting for user input", taskID)
+	}
+
+	if err := s.runner.StopSession(ctx, sessionFromTask(task)); err != nil && !errors.Is(err, ErrAppServerStopUnsupported) {
+		if appendErr := s.appendEvent(ctx, task.TaskID, "task_complete_interrupt_skipped", err.Error()); appendErr != nil {
+			return appendErr
+		}
+	}
+
+	if task.PendingRequestID != "" {
+		if err := s.store.MarkTaskServerRequestResolved(ctx, task.PendingRequestID, s.now()); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		task.PendingRequestID = ""
+	}
+
+	question := task.AwaitingQuestion
+	task.Status = StatusCompleted
+	task.AwaitingQuestion = nil
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, task); err != nil {
+		return fmt.Errorf("persist completed task %q: %w", taskID, err)
+	}
+	if err := s.markAnsweredQuestion(ctx, task.TaskID, question, "task complete"); err != nil {
+		return err
+	}
+	return s.appendEvent(ctx, task.TaskID, "task_completed", "task marked completed by operator")
+}
+
 func (s *Service) List(ctx context.Context) ([]TaskRun, error) {
 	return s.store.ListActiveTasks(ctx)
 }
@@ -460,7 +492,7 @@ func (s *Service) handlePendingRequest(ctx context.Context, taskID, requestID st
 		return fmt.Errorf("classify supervisor request for task %q: %w", task.TaskID, err)
 	}
 	policy := ApplySupervisorPolicy(task, &req, decision)
-	if !policy.AllowReply && !policy.EscalateToUser && decision.Classification != ClassificationIgnore {
+	if !policy.AllowReply && !policy.EscalateToUser {
 		policy.EscalateToUser = true
 	}
 
@@ -697,16 +729,6 @@ func (s *Service) handleTurnCompleted(ctx context.Context, task TaskRun, turn Tu
 		task.LastOutputSummary = summary
 	}
 
-	if task.CompletionCheckStatus == CompletionCheckStatusSent || task.CompletionCheckStatus == CompletionCheckStatusReportedPending {
-		updatedTask, handled, err := s.handleCompletionCheckFollowUp(ctx, task, turnID, summary)
-		if err != nil {
-			return task, err
-		}
-		if handled {
-			return updatedTask, nil
-		}
-	}
-
 	decision, err := s.decider.ClassifySupervisorEvent(ctx, SupervisorContext{
 		Task:          task,
 		TurnCompleted: &turn,
@@ -718,112 +740,15 @@ func (s *Service) handleTurnCompleted(ctx context.Context, task TaskRun, turn Tu
 	}
 
 	switch decision.Classification {
-	case ClassificationCompletionSignal:
-		return s.sendCompletionCheckForTurn(ctx, task, turnID)
 	case ClassificationPlanDecision, ClassificationExecutionApproval:
-		return s.applyTurnDecision(ctx, task, turnID, summary, decision)
-	case ClassificationProgressUpdate:
-		if s.progressReportsEnabled && s.notifier != nil && decision.ShouldNotifyUser && strings.TrimSpace(decision.UserUpdate) != "" {
-			if err := s.notifier.NotifyTaskProgress(ctx, task, decision.UserUpdate); err != nil {
-				return task, err
-			}
-		}
 	default:
-	}
-
-	task.LastCompletedTurnID = turnID
-	task.UpdatedAt = s.now()
-	if err := s.store.UpdateTask(ctx, task); err != nil {
-		return task, err
-	}
-	return task, nil
-}
-
-func (s *Service) sendCompletionCheckForTurn(ctx context.Context, task TaskRun, turnID string) (TaskRun, error) {
-	if task.CompletionCheckStatus != CompletionCheckStatusNotStarted {
-		return task, nil
-	}
-
-	now := s.now()
-	task.CompletionCheckStatus = CompletionCheckStatusSent
-	task.CompletionCheckSentAt = &now
-	task.LastInput = completionCheckPrompt
-	task.LastCompletedTurnID = turnID
-	task.UpdatedAt = now
-	if err := s.store.UpdateTask(ctx, task); err != nil {
-		return task, err
-	}
-
-	session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), completionCheckPrompt)
-	if err != nil {
-		return task, fmt.Errorf("send completion check for task %q: %w", task.TaskID, err)
-	}
-	applySessionToTask(&task, session)
-	task.UpdatedAt = s.now()
-	if err := s.store.UpdateTask(ctx, task); err != nil {
-		return task, err
-	}
-	if err := s.appendEvent(ctx, task.TaskID, "completion_check_sent", "sent one-time completion verification prompt"); err != nil {
-		return task, err
-	}
-	return task, nil
-}
-
-func (s *Service) handleCompletionCheckFollowUp(ctx context.Context, task TaskRun, turnID string, summary string) (TaskRun, bool, error) {
-	decision, err := s.decider.EvaluateCompletionSignal(ctx, task, summary)
-	if err != nil {
-		return task, false, err
-	}
-
-	now := s.now()
-	switch decision.CompletionDisposition {
-	case CompletionDispositionConfirmedDone:
-		task.CompletionCheckStatus = CompletionCheckStatusConfirmedDone
-		task.CompletionCheckDoneAt = &now
-		task.Status = StatusCompleted
-		task.LastCompletedTurnID = turnID
-		task.UpdatedAt = now
-		if err := s.store.UpdateTask(ctx, task); err != nil {
-			return task, false, err
+		decision = SupervisorDecision{
+			Classification: ClassificationPlanDecision,
+			ReplyPolicy:    ReplyPolicyAskUser,
+			UserQuestion:   firstNonEmpty(decision.UserQuestion, summary),
 		}
-		if err := s.runner.StopSession(ctx, sessionFromTask(task)); err != nil && !errors.Is(err, ErrAppServerStopUnsupported) {
-			return task, false, err
-		}
-		if err := s.appendEvent(ctx, task.TaskID, "task_completed", "codex confirmed the full task scope is complete"); err != nil {
-			return task, false, err
-		}
-		return task, true, nil
-	case CompletionDispositionReportedRemaining:
-		task.CompletionCheckStatus = CompletionCheckStatusReportedPending
-		task.CompletionCheckDoneAt = &now
-		task.Status = StatusWaitingUserInput
-		task.LastCompletedTurnID = turnID
-		task.AwaitingQuestion = &AwaitingQuestion{
-			QuestionText:   "Codex reports there is remaining work after the completion check. Reply with whether to continue the remaining work.",
-			OptionsSummary: "",
-			ContextExcerpt: summary,
-			QuestionType:   "completion_follow_up",
-			AskedAt:        now,
-		}
-		task.UpdatedAt = now
-		if err := s.store.UpdateTask(ctx, task); err != nil {
-			return task, false, err
-		}
-		if err := s.appendQuestion(ctx, task); err != nil {
-			return task, false, err
-		}
-		if s.notifier != nil {
-			if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
-				return task, false, err
-			}
-		}
-		if err := s.appendEvent(ctx, task.TaskID, "completion_check_reported_remaining", "codex reported remaining work after completion check"); err != nil {
-			return task, false, err
-		}
-		return task, true, nil
-	default:
-		return task, false, nil
 	}
+	return s.applyTurnDecision(ctx, task, turnID, summary, decision)
 }
 
 func (s *Service) applyTurnDecision(ctx context.Context, task TaskRun, turnID string, summary string, decision SupervisorDecision) (TaskRun, error) {

@@ -44,7 +44,7 @@ func TestTaskNotifierSendsApprovalCard(t *testing.T) {
 	if !strings.Contains(fake.content, "task-1") {
 		t.Fatalf("content missing task ID: %s", fake.content)
 	}
-	for _, want := range []string{"提交回复", "reply_text", "请输入你的回复"} {
+	for _, want := range []string{"提交回复", "任务完成", "reply_text", "请输入你的回复"} {
 		if !strings.Contains(fake.content, want) {
 			t.Fatalf("content missing %q: %s", want, fake.content)
 		}
@@ -124,6 +124,7 @@ func TestTaskNotifierQuestionCardFormIncludesSubmitButton(t *testing.T) {
 	foundForm := false
 	foundInput := false
 	foundSubmit := false
+	foundComplete := false
 	for _, element := range elements {
 		node, ok := element.(map[string]interface{})
 		if !ok || node["tag"] != "form" {
@@ -143,7 +144,13 @@ func TestTaskNotifierQuestionCardFormIncludesSubmitButton(t *testing.T) {
 				foundInput = true
 			}
 			if child["tag"] == "button" && child["action_type"] == "form_submit" {
-				foundSubmit = true
+				value, _ := child["value"].(map[string]interface{})
+				switch value["action"] {
+				case "submit":
+					foundSubmit = true
+				case "complete":
+					foundComplete = true
+				}
 			}
 		}
 	}
@@ -156,6 +163,9 @@ func TestTaskNotifierQuestionCardFormIncludesSubmitButton(t *testing.T) {
 	}
 	if !foundSubmit {
 		t.Fatal("form missing submit button")
+	}
+	if !foundComplete {
+		t.Fatal("form missing complete button")
 	}
 }
 

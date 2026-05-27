@@ -2,39 +2,27 @@ package orchestrator
 
 type SupervisorClassification string
 type ReplyPolicy string
-type CompletionDisposition string
 
 const (
 	ClassificationPlanDecision      SupervisorClassification = "plan_decision"
 	ClassificationExecutionApproval SupervisorClassification = "execution_approval"
 	ClassificationProgressUpdate    SupervisorClassification = "progress_update"
-	ClassificationCompletionSignal  SupervisorClassification = "completion_signal"
-	ClassificationIgnore            SupervisorClassification = "ignore"
 )
 
 const (
-	ReplyPolicyNoReply      ReplyPolicy = "no_reply"
 	ReplyPolicyAutoContinue ReplyPolicy = "auto_continue"
 	ReplyPolicyAskUser      ReplyPolicy = "ask_user"
 )
 
-const (
-	CompletionDispositionNone             CompletionDisposition = "none"
-	CompletionDispositionSignalComplete   CompletionDisposition = "signal_complete"
-	CompletionDispositionConfirmedDone    CompletionDisposition = "confirmed_done"
-	CompletionDispositionReportedRemaining CompletionDisposition = "reported_remaining"
-)
-
 type SupervisorDecision struct {
-	Classification         SupervisorClassification `json:"classification"`
-	ShouldReplyCodex       bool                     `json:"should_reply_codex"`
-	ShouldNotifyUser       bool                     `json:"should_notify_user"`
-	ReplyPolicy            ReplyPolicy              `json:"reply_policy"`
-	Reason                 string                   `json:"reason"`
-	UserUpdate             string                   `json:"user_update"`
-	UserQuestion           string                   `json:"user_question"`
-	CodexReply             string                   `json:"codex_reply"`
-	CompletionDisposition  CompletionDisposition    `json:"completion_disposition"`
+	Classification   SupervisorClassification `json:"classification"`
+	ShouldReplyCodex bool                     `json:"should_reply_codex"`
+	ShouldNotifyUser bool                     `json:"should_notify_user"`
+	ReplyPolicy      ReplyPolicy              `json:"reply_policy"`
+	Reason           string                   `json:"reason"`
+	UserUpdate       string                   `json:"user_update"`
+	UserQuestion     string                   `json:"user_question"`
+	CodexReply       string                   `json:"codex_reply"`
 }
 
 type PolicyResult struct {
@@ -66,7 +54,6 @@ func ApplySupervisorPolicy(task TaskRun, req *TaskServerRequest, decision Superv
 		}
 	case ClassificationPlanDecision:
 		result.EscalateToUser = true
-	case ClassificationIgnore:
 	}
 
 	if decision.ReplyPolicy == ReplyPolicyAskUser {

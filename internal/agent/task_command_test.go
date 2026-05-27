@@ -258,6 +258,34 @@ func TestTaskCommandCardActionRequiresReplyText(t *testing.T) {
 	}
 }
 
+func TestTaskCommandCardActionCompletesTask(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeTaskService{}
+	handler := NewTaskCommandHandler(service)
+
+	reply, err := handler.HandleCardAction(context.Background(), channel.CardActionEvent{
+		Conversation: channel.Conversation{ID: "oc_1", Kind: channel.ConversationGroup},
+		Value: map[string]interface{}{
+			"source":  "alterego",
+			"version": float64(1),
+			"kind":    "task_reply_action",
+			"action":  "complete",
+			"task_id": "task-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleCardAction returned error: %v", err)
+	}
+
+	if service.completeTaskID != "task-1" {
+		t.Fatalf("completeTaskID = %q, want task-1", service.completeTaskID)
+	}
+	if reply.ToastText != "Task task-1 completed." {
+		t.Fatalf("reply.ToastText = %q", reply.ToastText)
+	}
+}
+
 func cardContains(payload interface{}, needle string) bool {
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -380,6 +408,7 @@ type fakeTaskService struct {
 	startedBy       string
 	replyTaskID     string
 	replyText       string
+	completeTaskID  string
 	stopTaskID      string
 	deleteTaskID    string
 
@@ -415,6 +444,11 @@ func (f *fakeTaskService) Status(ctx context.Context, taskID string) (orchestrat
 func (f *fakeTaskService) Reply(ctx context.Context, taskID, text string) error {
 	f.replyTaskID = taskID
 	f.replyText = text
+	return nil
+}
+
+func (f *fakeTaskService) Complete(ctx context.Context, taskID string) error {
+	f.completeTaskID = taskID
 	return nil
 }
 

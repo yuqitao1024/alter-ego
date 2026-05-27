@@ -105,16 +105,15 @@ func TestStorePersistsThreadIdentity(t *testing.T) {
 
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
 	task := TaskRun{
-		TaskID:                "task-appserver",
-		TemplateID:            "simt-stl-dev",
-		RepositoryID:          "simt-stl",
-		MachineID:             "A5-82",
-		Status:                StatusRunning,
-		ThreadID:              "thread_123",
-		ActiveTurnID:          "turn_456",
-		CompletionCheckStatus: CompletionCheckStatusNotStarted,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		TaskID:       "task-appserver",
+		TemplateID:   "simt-stl-dev",
+		RepositoryID: "simt-stl",
+		MachineID:    "A5-82",
+		Status:       StatusRunning,
+		ThreadID:     "thread_123",
+		ActiveTurnID: "turn_456",
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	if err := store.CreateTask(context.Background(), task); err != nil {
@@ -140,21 +139,19 @@ func TestStorePersistsSupervisorControlFields(t *testing.T) {
 
 	now := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
 	task := TaskRun{
-		TaskID:                "task-supervisor",
-		TemplateID:            "feature_dev",
-		RepositoryID:          "repo_backend",
-		MachineID:             "machine_a",
-		Status:                StatusRecovering,
-		UserRequest:           "continue",
-		CreatedBy:             "ou_1",
-		ThreadID:              "thread-1",
-		ActiveTurnID:          "turn-1",
-		LastOutputSummary:     "running tests",
-		PendingRequestID:      "req-1",
-		CompletionCheckStatus: CompletionCheckStatusSent,
-		CompletionCheckSentAt: ptrTime(now.Add(time.Minute)),
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		TaskID:            "task-supervisor",
+		TemplateID:        "feature_dev",
+		RepositoryID:      "repo_backend",
+		MachineID:         "machine_a",
+		Status:            StatusRecovering,
+		UserRequest:       "continue",
+		CreatedBy:         "ou_1",
+		ThreadID:          "thread-1",
+		ActiveTurnID:      "turn-1",
+		LastOutputSummary: "running tests",
+		PendingRequestID:  "req-1",
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 
 	if err := store.CreateTask(context.Background(), task); err != nil {
@@ -171,12 +168,6 @@ func TestStorePersistsSupervisorControlFields(t *testing.T) {
 	}
 	if got.PendingRequestID != "req-1" {
 		t.Fatalf("PendingRequestID = %q, want %q", got.PendingRequestID, "req-1")
-	}
-	if got.CompletionCheckStatus != CompletionCheckStatusSent {
-		t.Fatalf("CompletionCheckStatus = %q, want %q", got.CompletionCheckStatus, CompletionCheckStatusSent)
-	}
-	if got.CompletionCheckSentAt == nil || !got.CompletionCheckSentAt.Equal(now.Add(time.Minute)) {
-		t.Fatalf("CompletionCheckSentAt = %#v, want %s", got.CompletionCheckSentAt, now.Add(time.Minute))
 	}
 }
 
@@ -390,26 +381,21 @@ func openTestStore(t *testing.T) *Store {
 	return store
 }
 
-func ptrTime(value time.Time) *time.Time {
-	return &value
-}
-
 func sampleTaskRun(taskID string, status TaskStatus) TaskRun {
 	now := time.Date(2026, 5, 11, 9, 30, 0, 0, time.UTC)
 	return TaskRun{
-		TaskID:                taskID,
-		TemplateID:            "feature_dev",
-		RepositoryID:          "repo_backend",
-		MachineID:             "machine_a",
-		Status:                status,
-		UserRequest:           "Implement persisted store",
-		CreatedBy:             "user_123",
-		RemoteWorkdir:         "",
-		LastInput:             "Continue with Task 2",
-		LastOutputSummary:     "Store not started yet",
-		CompletionCheckStatus: CompletionCheckStatusNotStarted,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		TaskID:            taskID,
+		TemplateID:        "feature_dev",
+		RepositoryID:      "repo_backend",
+		MachineID:         "machine_a",
+		Status:            status,
+		UserRequest:       "Implement persisted store",
+		CreatedBy:         "user_123",
+		RemoteWorkdir:     "",
+		LastInput:         "Continue with Task 2",
+		LastOutputSummary: "Store not started yet",
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 }
 
@@ -461,30 +447,10 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	if got.PendingRequestID != want.PendingRequestID {
 		t.Fatalf("PendingRequestID = %q, want %q", got.PendingRequestID, want.PendingRequestID)
 	}
-	if got.CompletionCheckStatus != want.CompletionCheckStatus {
-		t.Fatalf("CompletionCheckStatus = %q, want %q", got.CompletionCheckStatus, want.CompletionCheckStatus)
-	}
-	if !timesEqual(got.CompletionCheckSentAt, want.CompletionCheckSentAt) {
-		t.Fatalf("CompletionCheckSentAt = %#v, want %#v", got.CompletionCheckSentAt, want.CompletionCheckSentAt)
-	}
-	if !timesEqual(got.CompletionCheckDoneAt, want.CompletionCheckDoneAt) {
-		t.Fatalf("CompletionCheckDoneAt = %#v, want %#v", got.CompletionCheckDoneAt, want.CompletionCheckDoneAt)
-	}
 	if !got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("CreatedAt = %s, want %s", got.CreatedAt, want.CreatedAt)
 	}
 	if !got.UpdatedAt.Equal(want.UpdatedAt) {
 		t.Fatalf("UpdatedAt = %s, want %s", got.UpdatedAt, want.UpdatedAt)
-	}
-}
-
-func timesEqual(left, right *time.Time) bool {
-	switch {
-	case left == nil && right == nil:
-		return true
-	case left == nil || right == nil:
-		return false
-	default:
-		return left.Equal(*right)
 	}
 }
