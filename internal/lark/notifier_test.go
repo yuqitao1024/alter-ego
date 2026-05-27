@@ -44,9 +44,14 @@ func TestTaskNotifierSendsApprovalCard(t *testing.T) {
 	if !strings.Contains(fake.content, "task-1") {
 		t.Fatalf("content missing task ID: %s", fake.content)
 	}
-	for _, want := range []string{"同意", "拒绝", "提交回复", "/task reply task-1"} {
+	for _, want := range []string{"提交回复", "reply_text", "请输入你的回复"} {
 		if !strings.Contains(fake.content, want) {
 			t.Fatalf("content missing %q: %s", want, fake.content)
+		}
+	}
+	for _, unwanted := range []string{"同意", "拒绝", "/task reply task-1", "select_static", "reply_choice"} {
+		if strings.Contains(fake.content, unwanted) {
+			t.Fatalf("content should not contain %q: %s", unwanted, fake.content)
 		}
 	}
 }
@@ -117,6 +122,7 @@ func TestTaskNotifierQuestionCardFormIncludesSubmitButton(t *testing.T) {
 	}
 
 	foundForm := false
+	foundInput := false
 	foundSubmit := false
 	for _, element := range elements {
 		node, ok := element.(map[string]interface{})
@@ -130,10 +136,13 @@ func TestTaskNotifierQuestionCardFormIncludesSubmitButton(t *testing.T) {
 		}
 		for _, formElement := range formElements {
 			child, ok := formElement.(map[string]interface{})
-			if !ok || child["tag"] != "button" {
+			if !ok {
 				continue
 			}
-			if child["action_type"] == "form_submit" {
+			if child["tag"] == "input" && child["name"] == "reply_text" {
+				foundInput = true
+			}
+			if child["tag"] == "button" && child["action_type"] == "form_submit" {
 				foundSubmit = true
 			}
 		}
@@ -141,6 +150,9 @@ func TestTaskNotifierQuestionCardFormIncludesSubmitButton(t *testing.T) {
 
 	if !foundForm {
 		t.Fatal("card missing form element")
+	}
+	if !foundInput {
+		t.Fatal("form missing reply input")
 	}
 	if !foundSubmit {
 		t.Fatal("form missing submit button")
@@ -177,35 +189,5 @@ func TestTaskNotifierQuestionCardDoesNotUseActionTag(t *testing.T) {
 		if node["tag"] == "action" {
 			t.Fatalf("card contains unsupported action tag: %#v", node)
 		}
-	}
-}
-
-func TestTaskNotifierUsesPlanOptionsWhenAvailable(t *testing.T) {
-	t.Parallel()
-
-	fake := &fakeMessageCreator{}
-	notifier := &TaskNotifier{sender: NewSender(fake)}
-
-	err := notifier.NotifyTaskQuestion(context.Background(), orchestrator.TaskRun{
-		TaskID:    "task-2",
-		CreatedBy: "ou_user",
-		AwaitingQuestion: &orchestrator.AwaitingQuestion{
-			QuestionType:   "plan_decision",
-			QuestionText:   "Choose an approach.",
-			OptionsSummary: "方案A: 保留轮询\n方案B: 改成订阅",
-			AskedAt:        time.Now().UTC(),
-		},
-	})
-	if err != nil {
-		t.Fatalf("NotifyTaskQuestion returned error: %v", err)
-	}
-
-	for _, want := range []string{"方案A: 保留轮询", "方案B: 改成订阅"} {
-		if !strings.Contains(fake.content, want) {
-			t.Fatalf("content missing %q: %s", want, fake.content)
-		}
-	}
-	if strings.Contains(fake.content, "同意") {
-		t.Fatalf("content should not use approval defaults when plan options exist: %s", fake.content)
 	}
 }

@@ -182,22 +182,15 @@ func (h *TaskCommandHandler) handleTaskActionCard(ctx context.Context, event cha
 
 func (h *TaskCommandHandler) handleTaskReplyCard(ctx context.Context, event channel.CardActionEvent, request taskCardAction) (channel.CardActionResponse, error) {
 	switch request.action {
-	case "copy_command":
-		command := request.command
-		if command == "" {
-			command = fmt.Sprintf("/task reply %s <content>", request.taskID)
-		}
-		return channel.CardActionResponse{ToastText: fmt.Sprintf("Reply with: %s", command)}, nil
 	case "submit":
 		replyText := firstNonEmpty(
-			formStringValue(event.FormValue, "reply_choice"),
+			formStringValue(event.FormValue, "reply_text"),
 			strings.TrimSpace(event.Option),
 			firstOption(event.Options),
 			strings.TrimSpace(event.InputValue),
-			stringValue(event.Value, "reply_text"),
 		)
 		if replyText == "" {
-			return channel.CardActionResponse{ToastText: "Select a reply first."}, nil
+			return channel.CardActionResponse{ToastText: "Enter a reply first."}, nil
 		}
 		if err := h.service.Reply(ctx, request.taskID, replyText); err != nil {
 			return channel.CardActionResponse{}, err
@@ -209,10 +202,9 @@ func (h *TaskCommandHandler) handleTaskReplyCard(ctx context.Context, event chan
 }
 
 type taskCardAction struct {
-	kind    string
-	action  string
-	taskID  string
-	command string
+	kind   string
+	action string
+	taskID string
 }
 
 func parseTaskCardAction(value map[string]interface{}) (taskCardAction, error) {
@@ -242,12 +234,11 @@ func parseTaskCardAction(value map[string]interface{}) (taskCardAction, error) {
 		return taskCardAction{}, fmt.Errorf("Unsupported task action: %s", action)
 	case "task_reply_action":
 		switch action {
-		case "submit", "copy_command":
+		case "submit":
 			return taskCardAction{
-				kind:    kind,
-				action:  action,
-				taskID:  taskID,
-				command: stringValue(value, "command"),
+				kind:   kind,
+				action: action,
+				taskID: taskID,
 			}, nil
 		}
 		return taskCardAction{}, fmt.Errorf("Unsupported task reply action: %s", action)

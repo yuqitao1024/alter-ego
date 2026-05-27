@@ -215,7 +215,7 @@ func TestTaskCommandCardActionRepliesWithSelectedChoice(t *testing.T) {
 			"task_id": "task-1",
 		},
 		FormValue: map[string]interface{}{
-			"reply_choice": "continue",
+			"reply_text": "continue",
 		},
 	})
 	if err != nil {
@@ -230,10 +230,11 @@ func TestTaskCommandCardActionRepliesWithSelectedChoice(t *testing.T) {
 	}
 }
 
-func TestTaskCommandCardActionReturnsReplyCommandToast(t *testing.T) {
+func TestTaskCommandCardActionRequiresReplyText(t *testing.T) {
 	t.Parallel()
 
-	handler := NewTaskCommandHandler(&fakeTaskService{})
+	service := &fakeTaskService{}
+	handler := NewTaskCommandHandler(service)
 
 	reply, err := handler.HandleCardAction(context.Background(), channel.CardActionEvent{
 		Conversation: channel.Conversation{ID: "oc_1", Kind: channel.ConversationGroup},
@@ -241,7 +242,7 @@ func TestTaskCommandCardActionReturnsReplyCommandToast(t *testing.T) {
 			"source":  "alterego",
 			"version": float64(1),
 			"kind":    "task_reply_action",
-			"action":  "copy_command",
+			"action":  "submit",
 			"task_id": "task-1",
 		},
 	})
@@ -249,7 +250,10 @@ func TestTaskCommandCardActionReturnsReplyCommandToast(t *testing.T) {
 		t.Fatalf("HandleCardAction returned error: %v", err)
 	}
 
-	if reply.ToastText != "Reply with: /task reply task-1 <content>" {
+	if service.replyTaskID != "" || service.replyText != "" {
+		t.Fatalf("reply args = %q %q, want none", service.replyTaskID, service.replyText)
+	}
+	if reply.ToastText != "Enter a reply first." {
 		t.Fatalf("reply.ToastText = %q", reply.ToastText)
 	}
 }

@@ -3,7 +3,6 @@ package lark
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	larkapi "github.com/larksuite/oapi-sdk-go/v3"
@@ -39,15 +38,8 @@ func (n *TaskNotifier) NotifyTaskProgress(ctx context.Context, task orchestrator
 	return n.sender.SendDirectMessage(ctx, task.CreatedBy, text)
 }
 
-type taskReplyOption struct {
-	Label string
-	Value string
-}
-
 func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 	question := task.AwaitingQuestion
-	command := fmt.Sprintf("/task reply %s <content>", task.TaskID)
-	options := questionReplyOptions(question)
 
 	elements := []interface{}{
 		map[string]interface{}{
@@ -63,55 +55,39 @@ func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 		})
 	}
 
-	if len(options) > 0 {
-		optionItems := make([]interface{}, 0, len(options))
-		for _, option := range options {
-			optionItems = append(optionItems, map[string]interface{}{
-				"text": map[string]interface{}{
+	elements = append(elements, map[string]interface{}{
+		"tag":  "form",
+		"name": "task_reply_form",
+		"elements": []interface{}{
+			map[string]interface{}{
+				"tag":        "input",
+				"name":       "reply_text",
+				"input_type": "multiline_text",
+				"rows":       4,
+				"max_length": 1000,
+				"placeholder": map[string]interface{}{
 					"tag":     "plain_text",
-					"content": option.Label,
-				},
-				"value": option.Value,
-			})
-		}
-
-		elements = append(elements, map[string]interface{}{
-			"tag":  "form",
-			"name": "task_reply_form",
-			"elements": []interface{}{
-				map[string]interface{}{
-					"tag":  "select_static",
-					"name": "reply_choice",
-					"placeholder": map[string]interface{}{
-						"tag":     "plain_text",
-						"content": "请选择回复",
-					},
-					"options": optionItems,
-				},
-				map[string]interface{}{
-					"tag":         "button",
-					"name":        "task_reply_submit",
-					"type":        "primary",
-					"action_type": "form_submit",
-					"text": map[string]interface{}{
-						"tag":     "lark_md",
-						"content": "提交回复",
-					},
-					"value": map[string]interface{}{
-						"source":  "alterego",
-						"version": 1,
-						"kind":    "task_reply_action",
-						"action":  "submit",
-						"task_id": task.TaskID,
-					},
+					"content": "请输入你的回复",
 				},
 			},
-		})
-	}
-
-	elements = append(elements, map[string]interface{}{
-		"tag":     "markdown",
-		"content": fmt.Sprintf("使用命令回复自定义内容：`%s`", command),
+			map[string]interface{}{
+				"tag":         "button",
+				"name":        "task_reply_submit",
+				"type":        "primary",
+				"action_type": "form_submit",
+				"text": map[string]interface{}{
+					"tag":     "lark_md",
+					"content": "提交回复",
+				},
+				"value": map[string]interface{}{
+					"source":  "alterego",
+					"version": 1,
+					"kind":    "task_reply_action",
+					"action":  "submit",
+					"task_id": task.TaskID,
+				},
+			},
+		},
 	})
 
 	return map[string]interface{}{
@@ -130,52 +106,4 @@ func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 			"elements": elements,
 		},
 	}
-}
-
-func questionReplyOptions(question *orchestrator.AwaitingQuestion) []taskReplyOption {
-	if question == nil {
-		return nil
-	}
-
-	switch strings.TrimSpace(question.QuestionType) {
-	case "plan_decision":
-		options := parsePlanReplyOptions(question.OptionsSummary)
-		if len(options) > 0 {
-			return options
-		}
-		return parsePlanReplyOptions(question.QuestionText)
-	default:
-		return []taskReplyOption{
-			{Label: "同意", Value: "continue"},
-			{Label: "拒绝", Value: "reject"},
-		}
-	}
-}
-
-var optionPrefixPattern = regexp.MustCompile(`^(?:[-*]\s+|\d+[.)]\s+|[A-Za-z][.:：)]\s*)`)
-
-func parsePlanReplyOptions(raw string) []taskReplyOption {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-
-	fields := strings.Split(raw, "\n")
-	if len(fields) == 1 && strings.Contains(raw, ";") {
-		fields = strings.Split(raw, ";")
-	}
-
-	options := make([]taskReplyOption, 0, len(fields))
-	for _, field := range fields {
-		text := strings.TrimSpace(field)
-		text = optionPrefixPattern.ReplaceAllString(text, "")
-		if text == "" {
-			continue
-		}
-		options = append(options, taskReplyOption{
-			Label: text,
-			Value: text,
-		})
-	}
-	return options
 }
