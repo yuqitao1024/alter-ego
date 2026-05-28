@@ -203,6 +203,67 @@ func TestHandleRuntimeEventEscalatesPlanDecisionToUser(t *testing.T) {
 	}
 }
 
+func TestHandleRuntimeEventEscalatesPlanDecisionDespiteNotifierFailure(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{questionErr: errors.New("notify failed")}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{
+		supervisorDecision: SupervisorDecision{
+			Classification: ClassificationPlanDecision,
+			ReplyPolicy:    ReplyPolicyAskUser,
+			UserQuestion:   "Codex wants a scope decision. Continue with option A or B?",
+		},
+	}, notifier)
+	defer cleanup()
+
+	var changed []string
+	service.SetChangeHook(func(taskID string) {
+		changed = append(changed, taskID)
+	})
+
+	task := sampleTaskRun("task-plan-notify-fail", StatusRunning)
+	task.ThreadID = "thread-plan"
+	task.ActiveTurnID = "turn-plan"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	err := service.HandleRuntimeEvent(context.Background(), RuntimeEvent{
+		ThreadID: "thread-plan",
+		ServerRequest: &TaskServerRequest{
+			RequestID:      "req-plan",
+			ThreadID:       "thread-plan",
+			TurnID:         "turn-plan",
+			RequestType:    ServerRequestTypeUserInput,
+			RequestPayload: `{"prompt":"A or B?"}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleRuntimeEvent returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+	if persisted.AwaitingQuestion == nil || persisted.AwaitingQuestion.QuestionText == "" {
+		t.Fatalf("persisted.AwaitingQuestion = %#v, want question", persisted.AwaitingQuestion)
+	}
+	if len(changed) == 0 || changed[0] != task.TaskID {
+		t.Fatalf("changed = %#v, want first notification for %q", changed, task.TaskID)
+	}
+
+	events, err := store.ListEvents(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) < 3 || events[len(events)-1].EventType != "task_question_notify_failed" {
+		t.Fatalf("events = %#v, want trailing task_question_notify_failed", events)
+	}
+}
+
 func TestReplyResumesWaitingTaskAndMarksRequestReplied(t *testing.T) {
 	t.Parallel()
 
@@ -1084,6 +1145,49 @@ func TestResumeActiveTasksRenotifiesExistingWaitingQuestion(t *testing.T) {
 	}
 }
 
+func TestResumeActiveTasksRenotifiesExistingWaitingQuestionDespiteNotifierFailure(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{questionErr: errors.New("notify failed")}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, &fakeServiceRunner{}, &fakeDecisionEngine{}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-waiting-existing-notify-fail", StatusWaitingUserInput)
+	task.RemoteWorkdir = "/srv/backend"
+	task.ThreadID = "thread-123"
+	task.ActiveTurnID = "turn-456"
+	task.AwaitingQuestion = &AwaitingQuestion{
+		QuestionText:   "Codex reports there is remaining work and needs another decision.",
+		ContextExcerpt: "2) remaining work still exists.",
+		QuestionType:   "plan_decision",
+		AskedAt:        time.Now().UTC().Add(-time.Minute),
+	}
+	seedTask(t, store, task)
+
+	runner := service.runner.(*fakeServiceRunner)
+	runner.hasSession = true
+
+	if err := service.ResumeActiveTasks(context.Background()); err != nil {
+		t.Fatalf("ResumeActiveTasks returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+
+	events, err := store.ListEvents(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) == 0 || events[len(events)-1].EventType != "task_question_notify_failed" {
+		t.Fatalf("events = %#v, want trailing task_question_notify_failed", events)
+	}
+}
+
 func TestTickTransitionsRecoveredWaitingThreadToWaitingUserInput(t *testing.T) {
 	t.Parallel()
 
@@ -1121,6 +1225,48 @@ func TestTickTransitionsRecoveredWaitingThreadToWaitingUserInput(t *testing.T) {
 	}
 	if notifier.lastTaskID != task.TaskID {
 		t.Fatalf("notifier.lastTaskID = %q, want %q", notifier.lastTaskID, task.TaskID)
+	}
+}
+
+func TestTickTransitionsRecoveredWaitingThreadDespiteNotifierFailure(t *testing.T) {
+	t.Parallel()
+
+	notifier := &fakeTaskNotifier{questionErr: errors.New("notify failed")}
+	runner := &fakeServiceRunner{
+		outputWindow: OutputWindow{
+			Summary: "Need one more input to continue.",
+			SessionState: SessionState{
+				ThreadStatus:      "active",
+				ThreadActiveFlags: []string{"waitingOnUserInput"},
+			},
+		},
+	}
+	service, store, cleanup := newCustomTestServiceWithNotifier(t, runner, &fakeDecisionEngine{}, notifier)
+	defer cleanup()
+
+	task := sampleTaskRun("task-waiting-flags-notify-fail", StatusRunning)
+	task.ThreadID = "thread-1"
+	task.RemoteWorkdir = "/srv/backend"
+	seedTask(t, store, task)
+
+	if err := service.TickOnce(context.Background()); err != nil {
+		t.Fatalf("TickOnce returned error: %v", err)
+	}
+
+	persisted, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	if persisted.Status != StatusWaitingUserInput {
+		t.Fatalf("persisted.Status = %q, want %q", persisted.Status, StatusWaitingUserInput)
+	}
+
+	events, err := store.ListEvents(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) < 2 || events[len(events)-1].EventType != "task_question_notify_failed" {
+		t.Fatalf("events = %#v, want trailing task_question_notify_failed", events)
 	}
 }
 
@@ -1507,11 +1653,12 @@ func (f *fakeDecisionEngine) EvaluateProgressUpdate(context.Context, TaskRun, st
 type fakeTaskNotifier struct {
 	lastTaskID       string
 	progressMessages []string
+	questionErr      error
 }
 
 func (f *fakeTaskNotifier) NotifyTaskQuestion(_ context.Context, task TaskRun) error {
 	f.lastTaskID = task.TaskID
-	return nil
+	return f.questionErr
 }
 
 func (f *fakeTaskNotifier) NotifyTaskProgress(_ context.Context, _ TaskRun, message string) error {

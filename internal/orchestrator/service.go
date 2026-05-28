@@ -741,7 +741,6 @@ func (s *Service) handlePendingRequest(ctx context.Context, taskID, requestID st
 		}
 		return s.appendEvent(ctx, task.TaskID, "server_request_replied", string(req.RequestType))
 	case policy.EscalateToUser:
-		task.Status = StatusWaitingUserInput
 		task.AwaitingQuestion = &AwaitingQuestion{
 			QuestionText:   firstNonEmpty(policy.UserQuestion, decision.UserQuestion, task.LastOutputSummary, req.RequestPayload),
 			OptionsSummary: "",
@@ -749,22 +748,7 @@ func (s *Service) handlePendingRequest(ctx context.Context, taskID, requestID st
 			QuestionType:   string(decision.Classification),
 			AskedAt:        s.now(),
 		}
-		task.UpdatedAt = s.now()
-		if err := s.store.UpdateTask(ctx, task); err != nil {
-			return err
-		}
-		if err := s.appendQuestion(ctx, task); err != nil {
-			return err
-		}
-		if err := s.appendEvent(ctx, task.TaskID, "waiting_user_input", fmt.Sprintf("waiting for %s", task.AwaitingQuestion.QuestionType)); err != nil {
-			return err
-		}
-		if s.notifier != nil {
-			if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
-				return fmt.Errorf("notify task question for %q: %w", task.TaskID, err)
-			}
-		}
-		return nil
+		return s.persistWaitingQuestion(ctx, &task, fmt.Sprintf("waiting for %s", task.AwaitingQuestion.QuestionType))
 	default:
 		if err := s.store.MarkTaskServerRequestIgnored(ctx, req.RequestID, s.now()); err != nil {
 			return err
@@ -868,7 +852,8 @@ func (s *Service) renotifyWaitingTask(ctx context.Context, task TaskRun) error {
 	if s.notifier == nil || task.AwaitingQuestion == nil {
 		return nil
 	}
-	return s.notifier.NotifyTaskQuestion(ctx, task)
+	s.notifyChanged(task.TaskID)
+	return s.notifyTaskQuestionBestEffort(ctx, task)
 }
 
 func (s *Service) reconcilePersistedRequest(ctx context.Context, task TaskRun, req TaskServerRequest) error {
@@ -881,7 +866,6 @@ func (s *Service) reconcilePersistedRequest(ctx context.Context, task TaskRun, r
 		return s.handlePendingRequest(ctx, task.TaskID, req.RequestID)
 	case ServerRequestStatusReplying:
 		now := s.now()
-		task.Status = StatusWaitingUserInput
 		task.AwaitingQuestion = &AwaitingQuestion{
 			QuestionText:   "Task recovery found an in-flight Codex request that was interrupted during restart. Review the context and reply to continue recovery.",
 			OptionsSummary: "",
@@ -889,19 +873,7 @@ func (s *Service) reconcilePersistedRequest(ctx context.Context, task TaskRun, r
 			QuestionType:   "recovery_interrupted_request",
 			AskedAt:        now,
 		}
-		task.UpdatedAt = now
-		if err := s.store.UpdateTask(ctx, task); err != nil {
-			return err
-		}
-		if err := s.appendQuestion(ctx, task); err != nil {
-			return err
-		}
-		if s.notifier != nil {
-			if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
-				return err
-			}
-		}
-		return s.appendEvent(ctx, task.TaskID, "waiting_user_input", "waiting for recovery of interrupted Codex request")
+		return s.persistWaitingQuestion(ctx, &task, "waiting for recovery of interrupted Codex request")
 	default:
 		return nil
 	}
@@ -916,7 +888,6 @@ func (s *Service) transitionTaskToRecoveredWaitingState(ctx context.Context, tas
 			break
 		}
 	}
-	task.Status = StatusWaitingUserInput
 	task.AwaitingQuestion = &AwaitingQuestion{
 		QuestionText:   questionText,
 		OptionsSummary: "",
@@ -924,19 +895,7 @@ func (s *Service) transitionTaskToRecoveredWaitingState(ctx context.Context, tas
 		QuestionType:   "recovered_waiting_input",
 		AskedAt:        now,
 	}
-	task.UpdatedAt = now
-	if err := s.store.UpdateTask(ctx, task); err != nil {
-		return err
-	}
-	if err := s.appendQuestion(ctx, task); err != nil {
-		return err
-	}
-	if s.notifier != nil {
-		if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
-			return err
-		}
-	}
-	return s.appendEvent(ctx, task.TaskID, "waiting_user_input", "codex thread is waiting for input after recovery")
+	return s.persistWaitingQuestion(ctx, &task, "codex thread is waiting for input after recovery")
 }
 
 func (s *Service) handleTurnCompleted(ctx context.Context, task TaskRun, turn TurnCompletedEvent) (TaskRun, error) {
@@ -998,7 +957,6 @@ func (s *Service) applyTurnDecision(ctx context.Context, task TaskRun, turnID st
 	}
 
 	if decision.ReplyPolicy == ReplyPolicyAskUser {
-		task.Status = StatusWaitingUserInput
 		task.AwaitingQuestion = &AwaitingQuestion{
 			QuestionText:   firstNonEmpty(decision.UserQuestion, summary),
 			OptionsSummary: "",
@@ -1007,20 +965,8 @@ func (s *Service) applyTurnDecision(ctx context.Context, task TaskRun, turnID st
 			AskedAt:        s.now(),
 		}
 		task.LastCompletedTurnID = turnID
-		task.UpdatedAt = s.now()
-		if err := s.store.UpdateTask(ctx, task); err != nil {
+		if err := s.persistWaitingQuestion(ctx, &task, fmt.Sprintf("waiting for %s", task.AwaitingQuestion.QuestionType)); err != nil {
 			return task, err
-		}
-		if err := s.appendQuestion(ctx, task); err != nil {
-			return task, err
-		}
-		if err := s.appendEvent(ctx, task.TaskID, "waiting_user_input", fmt.Sprintf("waiting for %s", task.AwaitingQuestion.QuestionType)); err != nil {
-			return task, err
-		}
-		if s.notifier != nil {
-			if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
-				return task, err
-			}
 		}
 		return task, nil
 	}
@@ -1143,6 +1089,41 @@ func (s *Service) appendQuestion(ctx context.Context, task TaskRun) error {
 		AskedAt:        task.AwaitingQuestion.AskedAt,
 	}); err != nil {
 		return fmt.Errorf("append task question for %q: %w", task.TaskID, err)
+	}
+	return nil
+}
+
+func (s *Service) persistWaitingQuestion(ctx context.Context, task *TaskRun, eventMessage string) error {
+	if task == nil || task.AwaitingQuestion == nil {
+		return nil
+	}
+	if task.AwaitingQuestion.AskedAt.IsZero() {
+		task.AwaitingQuestion.AskedAt = s.now()
+	}
+	task.Status = StatusWaitingUserInput
+	task.UpdatedAt = s.now()
+	if err := s.store.UpdateTask(ctx, *task); err != nil {
+		return err
+	}
+	if err := s.appendQuestion(ctx, *task); err != nil {
+		return err
+	}
+	if err := s.appendEvent(ctx, task.TaskID, "waiting_user_input", eventMessage); err != nil {
+		return err
+	}
+	s.notifyChanged(task.TaskID)
+	return s.notifyTaskQuestionBestEffort(ctx, *task)
+}
+
+func (s *Service) notifyTaskQuestionBestEffort(ctx context.Context, task TaskRun) error {
+	if s.notifier == nil || task.AwaitingQuestion == nil {
+		return nil
+	}
+	if err := s.notifier.NotifyTaskQuestion(ctx, task); err != nil {
+		if appendErr := s.appendEvent(ctx, task.TaskID, "task_question_notify_failed", err.Error()); appendErr != nil {
+			return appendErr
+		}
+		s.notifyChanged(task.TaskID)
 	}
 	return nil
 }
