@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,11 @@ import (
 
 type DataProvider interface {
 	Dashboard(ctx context.Context) (any, error)
+	StopTask(ctx context.Context, taskID string) error
+	CompleteTask(ctx context.Context, taskID string) error
+	DeleteTask(ctx context.Context, taskID string) error
+	ReplyTask(ctx context.Context, taskID, text string) error
+	ReopenTask(ctx context.Context, taskID, text string) error
 }
 
 type Handler struct {
@@ -119,6 +125,77 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func (h *Handler) TaskAction(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.sessions.ReadSession(r); !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	taskID, action, err := parseTaskActionPath(r.URL.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var body struct {
+		Text string `json:"text"`
+	}
+	if action == "reply" || action == "reopen" {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+		body.Text = strings.TrimSpace(body.Text)
+		if body.Text == "" {
+			http.Error(w, "text is required", http.StatusBadRequest)
+			return
+		}
+	}
+
+	switch action {
+	case "stop":
+		err = h.data.StopTask(r.Context(), taskID)
+	case "complete":
+		err = h.data.CompleteTask(r.Context(), taskID)
+	case "delete":
+		err = h.data.DeleteTask(r.Context(), taskID)
+	case "reply":
+		err = h.data.ReplyTask(r.Context(), taskID, body.Text)
+	case "reopen":
+		err = h.data.ReopenTask(r.Context(), taskID, body.Text)
+	default:
+		http.Error(w, "unsupported action", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"task_id": taskID,
+		"action":  action,
+	})
+}
+
+func parseTaskActionPath(path string) (taskID string, action string, err error) {
+	trimmed := strings.Trim(path, "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 5 || parts[0] != "api" || parts[1] != "web" || parts[2] != "tasks" {
+		return "", "", fmt.Errorf("not found")
+	}
+	taskID = strings.TrimSpace(parts[3])
+	action = strings.TrimSpace(parts[4])
+	if taskID == "" || action == "" {
+		return "", "", fmt.Errorf("not found")
+	}
+	return taskID, action, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

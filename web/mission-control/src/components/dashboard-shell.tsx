@@ -17,10 +17,15 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   const [payload, setPayload] = useState<DashboardPayload | null>(null)
   const [selectedTask, setSelectedTask] = useState<DashboardTask | null>(null)
   const [loading, setLoading] = useState(true)
+  const [actionText, setActionText] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
+  const [actionBusy, setActionBusy] = useState(false)
+  const [busyTaskID, setBusyTaskID] = useState('')
 
-  useEffect(() => {
+  async function loadDashboard() {
     let active = true
-    fetch('/api/web/dashboard', { credentials: 'include' })
+    return fetch('/api/web/dashboard', { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error('dashboard unavailable')
@@ -32,7 +37,12 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
           return
         }
         setPayload(data)
-        setSelectedTask(data.tasks[0] ?? null)
+        setSelectedTask((current) => {
+          if (!current) {
+            return data.tasks[0] ?? null
+          }
+          return data.tasks.find((task) => task.id === current.id) ?? data.tasks[0] ?? null
+        })
       })
       .catch(() => {
         if (!active) {
@@ -58,12 +68,65 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
           setLoading(false)
         }
       })
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    loadDashboard().finally(() => {
+      if (cancelled) {
+        return
+      }
+    })
     return () => {
-      active = false
+      cancelled = true
     }
   }, [])
 
+  useEffect(() => {
+    setActionText('')
+    setActionError('')
+    setActionSuccess('')
+  }, [selectedTask?.id])
+
   const tasks = payload?.tasks ?? []
+
+  async function runAction(action: 'stop' | 'complete' | 'delete' | 'reply' | 'reopen', taskOverride?: DashboardTask | null) {
+    const task = taskOverride ?? selectedTask
+    if (!task || actionBusy) {
+      return
+    }
+    if ((action === 'reply' || action === 'reopen') && !actionText.trim()) {
+      setActionError('Input text is required for this action.')
+      return
+    }
+
+    setActionBusy(true)
+    setBusyTaskID(task.id)
+    setActionError('')
+    setActionSuccess('')
+    try {
+      const response = await fetch(`/api/web/tasks/${task.id}/${action}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: action === 'reply' || action === 'reopen' ? JSON.stringify({ text: actionText.trim() }) : undefined
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || 'Action failed')
+      }
+      setActionText('')
+      await loadDashboard()
+      setActionSuccess(actionSuccessMessage(action, task.title))
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Action failed')
+    } finally {
+      setActionBusy(false)
+      setBusyTaskID('')
+    }
+  }
 
   return (
     <main className="min-h-screen px-5 py-5 lg:px-8 lg:py-7">
@@ -135,23 +198,32 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                   </div>
                   <div className="divide-y divide-white/6">
                     {tasks.map((task, index) => (
-                      <button
+                      <div
                         key={task.id}
-                        className="grid w-full grid-cols-[1.2fr_0.8fr_2fr] gap-4 px-4 py-4 text-left transition hover:bg-white/[0.03]"
-                        onClick={() => setSelectedTask(task)}
+                        className={`grid grid-cols-[1.15fr_0.8fr_1.7fr_0.95fr] gap-4 px-4 py-4 transition hover:bg-white/[0.03] ${selectedTask?.id === task.id ? 'bg-white/[0.04]' : ''}`}
                         style={{ animationDelay: `${index * 70}ms` }}
                       >
-                        <span>
+                        <button className="text-left" onClick={() => setSelectedTask(task)}>
                           <span className="block text-sm font-semibold text-white">{task.title}</span>
                           <span className="mt-1 block text-xs text-[rgba(143,165,184,0.72)]">{task.id} · {task.machine_id}</span>
-                        </span>
-                        <span>
+                        </button>
+                        <button className="text-left" onClick={() => setSelectedTask(task)}>
                           <span className={`inline-flex rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em] ${statusTone[task.status] || 'text-[rgba(201,213,224,0.82)] border-white/10 bg-white/[0.04]'}`}>
                             {task.status}
                           </span>
-                        </span>
-                        <span className="text-sm leading-6 text-[rgba(178,194,207,0.8)]">{task.summary}</span>
-                      </button>
+                        </button>
+                        <button className="text-left text-sm leading-6 text-[rgba(178,194,207,0.8)]" onClick={() => setSelectedTask(task)}>
+                          {task.summary}
+                        </button>
+                        <InlineTaskActions
+                          task={task}
+                          busy={actionBusy && busyTaskID === task.id}
+                          onSelect={() => setSelectedTask(task)}
+                          onStop={() => runAction('stop', task)}
+                          onComplete={() => runAction('complete', task)}
+                          onDelete={() => runAction('delete', task)}
+                        />
+                      </div>
                     ))}
                     {!loading && tasks.length === 0 ? (
                       <div className="px-4 py-8 text-sm text-[rgba(143,165,184,0.74)]">No tasks available.</div>
@@ -183,10 +255,24 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                 />
               </div>
 
+              <TaskControls
+                task={selectedTask}
+                actionText={actionText}
+                actionError={actionError}
+                actionSuccess={actionSuccess}
+                actionBusy={actionBusy}
+                onActionTextChange={setActionText}
+                onStop={() => runAction('stop')}
+                onComplete={() => runAction('complete')}
+                onDelete={() => runAction('delete')}
+                onReply={() => runAction('reply')}
+                onReopen={() => runAction('reopen')}
+              />
+
               <div className="mt-8 rounded-[24px] border border-[rgba(92,112,255,0.18)] bg-[linear-gradient(180deg,rgba(70,94,245,0.12),rgba(14,22,41,0.02))] p-5">
                 <p className="text-xs uppercase tracking-[0.24em] text-[rgba(162,176,255,0.76)]">Next slice</p>
                 <p className="mt-3 text-sm leading-7 text-[rgba(185,197,223,0.8)]">
-                  The next slice can add in-browser actions for stop, reply, reopen, and task completion without changing the data model again.
+                  Browser actions now reuse the same Go task service decisions. A later slice can add richer histories and optimistic refresh.
                 </p>
               </div>
             </aside>
@@ -194,6 +280,187 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
         </section>
       </div>
     </main>
+  )
+}
+
+function TaskControls({
+  task,
+  actionText,
+  actionError,
+  actionSuccess,
+  actionBusy,
+  onActionTextChange,
+  onStop,
+  onComplete,
+  onDelete,
+  onReply,
+  onReopen
+}: {
+  task: DashboardTask | null
+  actionText: string
+  actionError: string
+  actionSuccess: string
+  actionBusy: boolean
+  onActionTextChange: (value: string) => void
+  onStop: () => void
+  onComplete: () => void
+  onDelete: () => void
+  onReply: () => void
+  onReopen: () => void
+}) {
+  if (!task) {
+    return null
+  }
+
+  const canStop = task.status === 'running' || task.status === 'waiting_user_input'
+  const canReply = task.status === 'waiting_user_input'
+  const canComplete = task.status === 'waiting_user_input'
+  const canDelete = task.status === 'completed' || task.status === 'failed' || task.status === 'stopped'
+  const canReopen = task.status === 'completed' || task.status === 'stopped'
+
+  return (
+    <div className="mt-8 rounded-[24px] border border-white/10 bg-[rgba(255,255,255,0.03)] p-5">
+      <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Controls</p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        {canStop ? <ActionButton label="Stop task" disabled={actionBusy} onClick={onStop} tone="danger" /> : null}
+        {canComplete ? <ActionButton label="Mark complete" disabled={actionBusy} onClick={onComplete} tone="primary" /> : null}
+        {canDelete ? <ActionButton label="Delete task" disabled={actionBusy} onClick={onDelete} tone="danger" /> : null}
+      </div>
+
+      {canReply || canReopen ? (
+        <div className="mt-5 space-y-3">
+          <textarea
+            value={actionText}
+            onChange={(event) => onActionTextChange(event.target.value)}
+            placeholder={canReply ? 'Reply to Codex to continue this task.' : 'Describe the extra requirement for reopening this task.'}
+            className="min-h-[110px] w-full rounded-[20px] border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none transition placeholder:text-[rgba(135,154,170,0.72)] focus:border-[rgba(91,208,180,0.42)]"
+          />
+          <div className="flex flex-wrap gap-3">
+            {canReply ? <ActionButton label="Send reply" disabled={actionBusy} onClick={onReply} tone="primary" /> : null}
+            {canReopen ? <ActionButton label="Reopen task" disabled={actionBusy} onClick={onReopen} tone="secondary" /> : null}
+          </div>
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <p className="mt-4 rounded-2xl border border-[rgba(255,122,122,0.18)] bg-[rgba(160,45,45,0.1)] px-4 py-3 text-sm text-[rgba(255,185,185,0.92)]">
+          {actionError}
+        </p>
+      ) : null}
+
+      {actionSuccess ? (
+        <p className="mt-4 rounded-2xl border border-[rgba(87,224,172,0.18)] bg-[rgba(53,158,127,0.12)] px-4 py-3 text-sm text-[rgba(206,255,236,0.94)]">
+          {actionSuccess}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function InlineTaskActions({
+  task,
+  busy,
+  onSelect,
+  onStop,
+  onComplete,
+  onDelete
+}: {
+  task: DashboardTask
+  busy: boolean
+  onSelect: () => void
+  onStop: () => void
+  onComplete: () => void
+  onDelete: () => void
+}) {
+  const showStop = task.status === 'running' || task.status === 'waiting_user_input'
+  const showComplete = task.status === 'waiting_user_input'
+  const showDelete = task.status === 'completed' || task.status === 'failed' || task.status === 'stopped'
+
+  return (
+    <div className="flex flex-wrap items-start justify-end gap-2">
+      <button
+        type="button"
+        onClick={onSelect}
+        className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-[rgba(201,213,224,0.82)] transition hover:bg-white/[0.08]"
+      >
+        Inspect
+      </button>
+      {showStop ? <MiniActionButton label={busy ? 'Stopping' : 'Stop'} onClick={onStop} disabled={busy} tone="danger" /> : null}
+      {showComplete ? <MiniActionButton label={busy ? 'Completing' : 'Complete'} onClick={onComplete} disabled={busy} tone="primary" /> : null}
+      {showDelete ? <MiniActionButton label={busy ? 'Deleting' : 'Delete'} onClick={onDelete} disabled={busy} tone="danger" /> : null}
+    </div>
+  )
+}
+
+function MiniActionButton({
+  label,
+  onClick,
+  disabled,
+  tone
+}: {
+  label: string
+  onClick: () => void
+  disabled: boolean
+  tone: 'primary' | 'danger'
+}) {
+  const toneClass =
+    tone === 'danger'
+      ? 'border-[rgba(255,122,122,0.18)] bg-[rgba(166,54,54,0.1)] text-[rgba(255,205,205,0.9)]'
+      : 'border-[rgba(87,224,172,0.18)] bg-[rgba(53,158,127,0.1)] text-[rgba(200,255,236,0.9)]'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function actionSuccessMessage(action: 'stop' | 'complete' | 'delete' | 'reply' | 'reopen', taskTitle: string) {
+  switch (action) {
+    case 'stop':
+      return `Stopped ${taskTitle}.`
+    case 'complete':
+      return `Marked ${taskTitle} as complete.`
+    case 'delete':
+      return `Deleted ${taskTitle}.`
+    case 'reply':
+      return `Reply sent for ${taskTitle}.`
+    case 'reopen':
+      return `Reopened ${taskTitle}.`
+  }
+}
+
+function ActionButton({
+  label,
+  disabled,
+  onClick,
+  tone
+}: {
+  label: string
+  disabled: boolean
+  onClick: () => void
+  tone: 'primary' | 'secondary' | 'danger'
+}) {
+  const toneClass =
+    tone === 'danger'
+      ? 'border-[rgba(255,122,122,0.24)] bg-[rgba(166,54,54,0.14)] text-[rgba(255,205,205,0.94)]'
+      : tone === 'secondary'
+        ? 'border-[rgba(133,163,255,0.24)] bg-[rgba(67,90,199,0.14)] text-[rgba(208,218,255,0.94)]'
+        : 'border-[rgba(87,224,172,0.24)] bg-[rgba(53,158,127,0.14)] text-[rgba(200,255,236,0.94)]'
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-2xl border px-4 py-3 text-sm font-medium transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
+    >
+      {label}
+    </button>
   )
 }
 

@@ -21,6 +21,12 @@ func (stubDashboardService) Dashboard(context.Context) (orchestrator.DashboardSn
 	return orchestrator.DashboardSnapshot{}, nil
 }
 
+func (stubDashboardService) Reply(context.Context, string, string) error { return nil }
+func (stubDashboardService) Reopen(context.Context, string, string) error { return nil }
+func (stubDashboardService) Complete(context.Context, string) error       { return nil }
+func (stubDashboardService) Stop(context.Context, string) error           { return nil }
+func (stubDashboardService) Delete(context.Context, string) error         { return nil }
+
 func TestBuildTaskSubsystemRequiresConfigRoot(t *testing.T) {
 	t.Parallel()
 

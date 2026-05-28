@@ -20,7 +20,7 @@ func TestRouterServesCallbackAndLoginRoutes(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, stubDataProvider{}), callback)
+	}, stubOAuthClient{}, &stubDataProvider{}), callback)
 
 	loginReq := httptest.NewRequest(http.MethodGet, "/login", nil)
 	loginRecorder := httptest.NewRecorder()
