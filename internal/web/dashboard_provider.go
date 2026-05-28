@@ -8,6 +8,7 @@ import (
 
 type TaskDashboardService interface {
 	Dashboard(ctx context.Context) (orchestrator.DashboardSnapshot, error)
+	TaskDetail(ctx context.Context, taskID string) (orchestrator.DashboardTaskDetail, error)
 	StartTask(ctx context.Context, templateID, createdBy, userRequest string) (orchestrator.TaskRun, error)
 	Reply(ctx context.Context, taskID, text string) error
 	Reopen(ctx context.Context, taskID, text string) error
@@ -44,6 +45,13 @@ func (p OrchestratorDashboardProvider) Templates(ctx context.Context) (any, erro
 		return []TemplateSummary{}, nil
 	}
 	return p.Catalog.ListTemplates(ctx)
+}
+
+func (p OrchestratorDashboardProvider) TaskDetail(ctx context.Context, taskID string) (any, error) {
+	if p.Service == nil {
+		return orchestrator.DashboardTaskDetail{}, nil
+	}
+	return p.Service.TaskDetail(ctx, taskID)
 }
 
 func (p OrchestratorDashboardProvider) StartTask(ctx context.Context, templateID, createdBy, requirement string) (any, error) {

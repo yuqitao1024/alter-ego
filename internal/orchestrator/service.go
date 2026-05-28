@@ -446,6 +446,68 @@ func (s *Service) Dashboard(ctx context.Context) (DashboardSnapshot, error) {
 	return snapshot, nil
 }
 
+func (s *Service) TaskDetail(ctx context.Context, taskID string) (DashboardTaskDetail, error) {
+	task, err := s.store.GetTask(ctx, taskID)
+	if err != nil {
+		return DashboardTaskDetail{}, err
+	}
+
+	events, err := s.store.ListEvents(ctx, taskID)
+	if err != nil {
+		return DashboardTaskDetail{}, err
+	}
+	questions, err := s.store.ListQuestions(ctx, taskID)
+	if err != nil {
+		return DashboardTaskDetail{}, err
+	}
+
+	detail := DashboardTaskDetail{
+		ID:            task.TaskID,
+		Title:         firstNonEmpty(task.UserRequest, task.TemplateID, task.TaskID),
+		Status:        task.Status,
+		TemplateID:    task.TemplateID,
+		RepositoryID:  task.RepositoryID,
+		MachineID:     task.MachineID,
+		ThreadID:      task.ThreadID,
+		Summary:       task.LastOutputSummary,
+		LastInput:     task.LastInput,
+		LastUpdatedAt: task.UpdatedAt,
+		CreatedAt:     task.CreatedAt,
+		Events:        make([]DashboardTaskEvent, 0, len(events)),
+		Questions:     make([]DashboardTaskQuestion, 0, len(questions)),
+	}
+	if task.AwaitingQuestion != nil {
+		detail.AwaitingQuestion = &DashboardQuestion{
+			QuestionType:   task.AwaitingQuestion.QuestionType,
+			QuestionText:   task.AwaitingQuestion.QuestionText,
+			OptionsSummary: task.AwaitingQuestion.OptionsSummary,
+			ContextExcerpt: task.AwaitingQuestion.ContextExcerpt,
+			AskedAt:        task.AwaitingQuestion.AskedAt,
+		}
+	}
+
+	for _, event := range events {
+		detail.Events = append(detail.Events, DashboardTaskEvent{
+			EventType: event.EventType,
+			Message:   event.Message,
+			CreatedAt: event.CreatedAt,
+		})
+	}
+	for _, question := range questions {
+		detail.Questions = append(detail.Questions, DashboardTaskQuestion{
+			QuestionType:   question.QuestionType,
+			QuestionText:   question.QuestionText,
+			OptionsSummary: question.OptionsSummary,
+			ContextExcerpt: question.ContextExcerpt,
+			AskedAt:        question.AskedAt,
+			AnsweredAt:     question.AnsweredAt,
+			AnswerText:     question.AnswerText,
+		})
+	}
+
+	return detail, nil
+}
+
 func (s *Service) Delete(ctx context.Context, taskID string) error {
 	task, err := s.store.GetTask(ctx, taskID)
 	if err != nil {

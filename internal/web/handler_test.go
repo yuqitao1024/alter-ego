@@ -163,6 +163,105 @@ func TestProtectedTemplatesEndpointReturnsPayload(t *testing.T) {
 	}
 }
 
+func TestTaskDetailRequiresSession(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, &stubDataProvider{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/web/tasks/task-1", nil)
+	recorder := httptest.NewRecorder()
+	handler.TaskAction(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("Code = %d, want 401", recorder.Code)
+	}
+}
+
+func TestTaskDetailReturnsPayload(t *testing.T) {
+	t.Parallel()
+
+	provider := &stubDataProvider{}
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, provider)
+
+	loginRecorder := httptest.NewRecorder()
+	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
+		t.Fatalf("SetSession returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/web/tasks/task-1", nil)
+	for _, cookie := range loginRecorder.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.TaskAction(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("Code = %d, want 200", recorder.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if payload["id"] != "task-1" {
+		t.Fatalf("payload.id = %#v, want task-1", payload["id"])
+	}
+	events, ok := payload["events"].([]any)
+	if !ok || len(events) != 2 {
+		t.Fatalf("payload.events = %#v, want two events", payload["events"])
+	}
+	questions, ok := payload["questions"].([]any)
+	if !ok || len(questions) != 1 {
+		t.Fatalf("payload.questions = %#v, want one question", payload["questions"])
+	}
+	if provider.lastTaskID != "task-1" {
+		t.Fatalf("provider.lastTaskID = %q, want task-1", provider.lastTaskID)
+	}
+}
+
+func TestTaskDetailPropagatesNotFound(t *testing.T) {
+	t.Parallel()
+
+	provider := &stubDataProvider{detailErr: "task not found"}
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, provider)
+
+	loginRecorder := httptest.NewRecorder()
+	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
+		t.Fatalf("SetSession returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/web/tasks/task-missing", nil)
+	for _, cookie := range loginRecorder.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.TaskAction(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("Code = %d, want 404", recorder.Code)
+	}
+	if body := strings.TrimSpace(recorder.Body.String()); body != "task not found" {
+		t.Fatalf("body = %q, want task not found", body)
+	}
+}
+
 func TestTaskCreateReadsTemplateAndRequirement(t *testing.T) {
 	t.Parallel()
 
@@ -331,6 +430,7 @@ type stubDataProvider struct {
 	lastTaskID         string
 	lastText           string
 	stopErr            string
+	detailErr          string
 	startedTemplateID  string
 	startedRequirement string
 	startedBy          string
@@ -348,6 +448,37 @@ func (*stubDataProvider) Templates(context.Context) (any, error) {
 	return []map[string]any{
 		{"id": "feature_dev", "display_name": "Feature Development", "description": "Default feature workflow"},
 		{"id": "simt-stl-research", "display_name": "Research", "description": "Research workflow"},
+	}, nil
+}
+
+func (s *stubDataProvider) TaskDetail(_ context.Context, taskID string) (any, error) {
+	s.lastTaskID = taskID
+	if s.detailErr != "" {
+		return nil, contextErrorString(s.detailErr)
+	}
+	return map[string]any{
+		"id":            taskID,
+		"title":         "Investigate stalled task",
+		"status":        "waiting_user_input",
+		"template_id":   "feature_dev",
+		"repository_id": "repo_backend",
+		"machine_id":    "machine_a",
+		"thread_id":     "thread-1",
+		"summary":       "Need operator confirmation before continuing.",
+		"last_input":    "Investigate websocket reconnect handling",
+		"events": []map[string]any{
+			{"event_type": "task_started", "message": "task started", "created_at": "2026-05-28T10:00:00Z"},
+			{"event_type": "waiting_user_input", "message": "waiting for plan_decision", "created_at": "2026-05-28T10:05:00Z"},
+		},
+		"questions": []map[string]any{
+			{
+				"question_type":   "plan_decision",
+				"question_text":   "Choose between websocket and polling fallback.",
+				"options_summary": "A websocket only; B websocket plus polling",
+				"context_excerpt": "Current subscription mode is unreliable after reconnect.",
+				"asked_at":        "2026-05-28T10:05:00Z",
+			},
+		},
 	}, nil
 }
 

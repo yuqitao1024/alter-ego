@@ -21,6 +21,10 @@ func (stubDashboardService) Dashboard(context.Context) (orchestrator.DashboardSn
 	return orchestrator.DashboardSnapshot{}, nil
 }
 
+func (stubDashboardService) TaskDetail(context.Context, string) (orchestrator.DashboardTaskDetail, error) {
+	return orchestrator.DashboardTaskDetail{}, nil
+}
+
 func (stubDashboardService) StartTask(context.Context, string, string, string) (orchestrator.TaskRun, error) {
 	return orchestrator.TaskRun{}, nil
 }

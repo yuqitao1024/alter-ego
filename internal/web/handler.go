@@ -2,7 +2,9 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +14,7 @@ import (
 type DataProvider interface {
 	Dashboard(ctx context.Context) (any, error)
 	Templates(ctx context.Context) (any, error)
+	TaskDetail(ctx context.Context, taskID string) (any, error)
 	StartTask(ctx context.Context, templateID, createdBy, requirement string) (any, error)
 	StopTask(ctx context.Context, taskID string) error
 	CompleteTask(ctx context.Context, taskID string) error
@@ -181,14 +184,32 @@ func (h *Handler) TaskAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	taskID, action, err := parseTaskActionPath(r.URL.Path, r.Method)
+	if err != nil {
+		if errors.Is(err, errMethodNotAllowed) {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	taskID, action, err := parseTaskActionPath(r.URL.Path)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+	if r.Method == http.MethodGet && action == "" {
+		payload, err := h.data.TaskDetail(r.Context(), taskID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) || strings.Contains(strings.ToLower(err.Error()), "not found") {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, payload)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -233,15 +254,29 @@ func (h *Handler) TaskAction(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func parseTaskActionPath(path string) (taskID string, action string, err error) {
+var errMethodNotAllowed = errors.New("method not allowed")
+
+func parseTaskActionPath(path string, method string) (taskID string, action string, err error) {
 	trimmed := strings.Trim(path, "/")
 	parts := strings.Split(trimmed, "/")
-	if len(parts) != 5 || parts[0] != "api" || parts[1] != "web" || parts[2] != "tasks" {
+	if len(parts) < 4 || len(parts) > 5 || parts[0] != "api" || parts[1] != "web" || parts[2] != "tasks" {
 		return "", "", fmt.Errorf("not found")
 	}
 	taskID = strings.TrimSpace(parts[3])
+	if taskID == "" {
+		return "", "", fmt.Errorf("not found")
+	}
+	if len(parts) == 4 {
+		if method != http.MethodGet {
+			return "", "", errMethodNotAllowed
+		}
+		return taskID, "", nil
+	}
+	if method != http.MethodPost {
+		return "", "", errMethodNotAllowed
+	}
 	action = strings.TrimSpace(parts[4])
-	if taskID == "" || action == "" {
+	if action == "" {
 		return "", "", fmt.Errorf("not found")
 	}
 	return taskID, action, nil

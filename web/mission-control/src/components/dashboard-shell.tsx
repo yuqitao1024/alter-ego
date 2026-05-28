@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { DashboardPayload, DashboardTask, TaskTemplate, WebSession } from '@/lib/types'
+import type { DashboardPayload, DashboardTask, DashboardTaskDetail, DashboardTaskEvent, DashboardTaskQuestion, TaskTemplate, WebSession } from '@/lib/types'
 
 type DashboardShellProps = {
   initialSession: WebSession
@@ -17,6 +17,8 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   const [payload, setPayload] = useState<DashboardPayload | null>(null)
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [selectedTask, setSelectedTask] = useState<DashboardTask | null>(null)
+  const [selectedTaskDetail, setSelectedTaskDetail] = useState<DashboardTaskDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [actionText, setActionText] = useState('')
   const [actionError, setActionError] = useState('')
@@ -109,6 +111,43 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
     setActionText('')
     setActionError('')
     setActionSuccess('')
+  }, [selectedTask?.id])
+
+  useEffect(() => {
+    if (!selectedTask?.id) {
+      setSelectedTaskDetail(null)
+      return
+    }
+
+    let cancelled = false
+    setDetailLoading(true)
+    setSelectedTaskDetail(null)
+    fetch(`/api/web/tasks/${selectedTask.id}`, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error('task detail unavailable')
+        }
+        return res.json()
+      })
+      .then((data: DashboardTaskDetail) => {
+        if (!cancelled) {
+          setSelectedTaskDetail(data)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedTaskDetail(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDetailLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [selectedTask?.id])
 
   const tasks = payload?.tasks ?? []
@@ -310,22 +349,40 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
             <aside className="rounded-[28px] border border-white/10 bg-[rgba(6,11,18,0.82)] p-6">
               <p className="text-xs uppercase tracking-[0.3em] text-[rgba(145,165,182,0.74)]">Detail panel</p>
               <h2 className="mt-3 text-2xl font-semibold text-white">
-                {selectedTask?.title || 'Select a task'}
+                {selectedTaskDetail?.title || selectedTask?.title || 'Select a task'}
               </h2>
               <div className="mt-6 space-y-4">
-                <DetailBlock label="Task ID" value={selectedTask?.id || 'No selection'} />
-                <DetailBlock label="Status" value={selectedTask?.status || 'No selection'} />
-                <DetailBlock label="Repository / Template" value={selectedTask ? `${selectedTask.repository_id} / ${selectedTask.template_id}` : 'No selection'} />
-                <DetailBlock label="Latest summary" value={selectedTask?.summary || 'Choose a task row to inspect the live task payload.'} multiline />
-                <DetailBlock label="Awaiting operator input" value={selectedTask?.awaiting_question?.question_text || 'No explicit operator question is pending.'} multiline />
+                <DetailBlock label="Task ID" value={selectedTaskDetail?.id || selectedTask?.id || 'No selection'} />
+                <DetailBlock label="Status" value={selectedTaskDetail?.status || selectedTask?.status || 'No selection'} />
                 <DetailBlock
-                  label="Recent signals"
+                  label="Repository / Template"
                   value={
-                    selectedTask?.recent_events?.length
-                      ? selectedTask.recent_events.map((event) => `${event.event_type}: ${event.message}`).join('\n')
-                      : 'No recent signals.'
+                    selectedTaskDetail
+                      ? `${selectedTaskDetail.repository_id} / ${selectedTaskDetail.template_id}`
+                      : selectedTask
+                        ? `${selectedTask.repository_id} / ${selectedTask.template_id}`
+                        : 'No selection'
                   }
+                />
+                <DetailBlock
+                  label="Latest summary"
+                  value={selectedTaskDetail?.summary || selectedTask?.summary || 'Choose a task row to inspect the live task payload.'}
                   multiline
+                />
+                <DetailBlock
+                  label="Awaiting operator input"
+                  value={selectedTaskDetail?.awaiting_question?.question_text || selectedTask?.awaiting_question?.question_text || 'No explicit operator question is pending.'}
+                  multiline
+                />
+                <TimelineBlock
+                  label="Event timeline"
+                  loading={detailLoading}
+                  events={selectedTaskDetail?.events || []}
+                />
+                <QuestionHistoryBlock
+                  label="Question history"
+                  loading={detailLoading}
+                  questions={selectedTaskDetail?.questions || []}
                 />
               </div>
 
@@ -346,7 +403,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
               <div className="mt-8 rounded-[24px] border border-[rgba(92,112,255,0.18)] bg-[linear-gradient(180deg,rgba(70,94,245,0.12),rgba(14,22,41,0.02))] p-5">
                 <p className="text-xs uppercase tracking-[0.24em] text-[rgba(162,176,255,0.76)]">Next slice</p>
                 <p className="mt-3 text-sm leading-7 text-[rgba(185,197,223,0.8)]">
-                  Browser actions now reuse the same Go task service decisions. A later slice can add richer histories and optimistic refresh.
+                  Browser actions now reuse the same Go task service decisions, and detail inspection reads full task history from the store.
                 </p>
               </div>
             </aside>
@@ -643,4 +700,78 @@ function DetailBlock({ label, value, multiline }: { label: string; value: string
       <p className={`mt-3 text-sm text-[rgba(224,231,239,0.92)] ${multiline ? 'leading-7' : ''}`}>{value}</p>
     </div>
   )
+}
+
+function TimelineBlock({ label, loading, events }: { label: string; loading: boolean; events: DashboardTaskEvent[] }) {
+  return (
+    <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-4">
+      <p className="text-xs uppercase tracking-[0.24em] text-[rgba(144,165,183,0.72)]">{label}</p>
+      {loading ? <p className="mt-3 text-sm text-[rgba(156,177,194,0.74)]">Loading detail timeline...</p> : null}
+      {!loading && events.length === 0 ? <p className="mt-3 text-sm text-[rgba(156,177,194,0.74)]">No recorded events.</p> : null}
+      {!loading && events.length > 0 ? (
+        <div className="mt-4 space-y-3">
+          {events.map((event, index) => (
+            <div key={`${event.event_type}-${event.created_at}-${index}`} className="rounded-2xl border border-white/8 bg-[rgba(4,10,17,0.48)] px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-[rgba(145,196,182,0.84)]">{event.event_type}</p>
+                <p className="text-[11px] text-[rgba(136,158,178,0.72)]">{formatTimestamp(event.created_at)}</p>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-[rgba(224,231,239,0.92)]">{event.message}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function QuestionHistoryBlock({ label, loading, questions }: { label: string; loading: boolean; questions: DashboardTaskQuestion[] }) {
+  return (
+    <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-4">
+      <p className="text-xs uppercase tracking-[0.24em] text-[rgba(144,165,183,0.72)]">{label}</p>
+      {loading ? <p className="mt-3 text-sm text-[rgba(156,177,194,0.74)]">Loading question history...</p> : null}
+      {!loading && questions.length === 0 ? <p className="mt-3 text-sm text-[rgba(156,177,194,0.74)]">No recorded questions.</p> : null}
+      {!loading && questions.length > 0 ? (
+        <div className="mt-4 space-y-3">
+          {questions.map((question, index) => (
+            <div key={`${question.question_text}-${question.asked_at}-${index}`} className="rounded-2xl border border-white/8 bg-[rgba(4,10,17,0.48)] px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-[rgba(255,214,145,0.88)]">{question.question_type || 'question'}</p>
+                <p className="text-[11px] text-[rgba(136,158,178,0.72)]">{formatTimestamp(question.asked_at)}</p>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-[rgba(224,231,239,0.92)]">{question.question_text}</p>
+              {question.context_excerpt ? (
+                <p className="mt-2 text-sm leading-6 text-[rgba(174,191,206,0.78)]">{question.context_excerpt}</p>
+              ) : null}
+              {question.options_summary ? (
+                <p className="mt-2 text-sm leading-6 text-[rgba(154,176,194,0.78)]">Options: {question.options_summary}</p>
+              ) : null}
+              {question.answer_text ? (
+                <p className="mt-3 rounded-xl border border-[rgba(87,224,172,0.14)] bg-[rgba(53,158,127,0.08)] px-3 py-2 text-sm leading-6 text-[rgba(208,248,232,0.92)]">
+                  Answer: {question.answer_text}
+                  {question.answered_at ? ` · ${formatTimestamp(question.answered_at)}` : ''}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function formatTimestamp(value?: string) {
+  if (!value) {
+    return ''
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date)
 }

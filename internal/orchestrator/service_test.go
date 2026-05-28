@@ -647,6 +647,82 @@ func TestReopenRejectsNonTerminalTask(t *testing.T) {
 	}
 }
 
+func TestTaskDetailReturnsEventsAndQuestions(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	answeredAt := time.Date(2026, 5, 28, 11, 12, 0, 0, time.UTC)
+	task := sampleTaskRun("task-detail", StatusWaitingUserInput)
+	task.LastOutputSummary = "Codex paused for a scope decision."
+	task.LastInput = "Build dashboard detail panel"
+	task.ThreadID = "thread-detail"
+	task.AwaitingQuestion = &AwaitingQuestion{
+		QuestionType:   "plan_decision",
+		QuestionText:   "Choose between compact and expanded task history.",
+		OptionsSummary: "A compact; B expanded",
+		ContextExcerpt: "Expanded history helps with audits but adds noise.",
+		AskedAt:        time.Date(2026, 5, 28, 11, 10, 0, 0, time.UTC),
+	}
+	seedTask(t, store, task)
+
+	if err := store.AppendEvent(context.Background(), TaskEvent{
+		TaskID:    task.TaskID,
+		EventType: "task_started",
+		Message:   "task started",
+		CreatedAt: time.Date(2026, 5, 28, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("AppendEvent returned error: %v", err)
+	}
+	if err := store.AppendEvent(context.Background(), TaskEvent{
+		TaskID:    task.TaskID,
+		EventType: "waiting_user_input",
+		Message:   "waiting for plan_decision",
+		CreatedAt: time.Date(2026, 5, 28, 11, 10, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("AppendEvent returned error: %v", err)
+	}
+	if err := store.AppendQuestion(context.Background(), TaskQuestion{
+		TaskID:         task.TaskID,
+		QuestionType:   "plan_decision",
+		QuestionText:   "Choose between compact and expanded task history.",
+		OptionsSummary: "A compact; B expanded",
+		ContextExcerpt: "Expanded history helps with audits but adds noise.",
+		AskedAt:        task.AwaitingQuestion.AskedAt,
+		AnsweredAt:     &answeredAt,
+		AnswerText:     "Use expanded history.",
+	}); err != nil {
+		t.Fatalf("AppendQuestion returned error: %v", err)
+	}
+
+	detail, err := service.TaskDetail(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("TaskDetail returned error: %v", err)
+	}
+	if detail.ID != task.TaskID {
+		t.Fatalf("detail.ID = %q, want %q", detail.ID, task.TaskID)
+	}
+	if detail.AwaitingQuestion == nil || detail.AwaitingQuestion.QuestionText != task.AwaitingQuestion.QuestionText {
+		t.Fatalf("detail.AwaitingQuestion = %#v, want current awaiting question", detail.AwaitingQuestion)
+	}
+	if len(detail.Events) != 2 {
+		t.Fatalf("len(detail.Events) = %d, want 2", len(detail.Events))
+	}
+	if detail.Events[1].EventType != "waiting_user_input" {
+		t.Fatalf("detail.Events[1].EventType = %q, want waiting_user_input", detail.Events[1].EventType)
+	}
+	if len(detail.Questions) != 1 {
+		t.Fatalf("len(detail.Questions) = %d, want 1", len(detail.Questions))
+	}
+	if detail.Questions[0].AnswerText != "Use expanded history." {
+		t.Fatalf("detail.Questions[0].AnswerText = %q", detail.Questions[0].AnswerText)
+	}
+	if detail.Questions[0].AnsweredAt == nil || !detail.Questions[0].AnsweredAt.Equal(answeredAt) {
+		t.Fatalf("detail.Questions[0].AnsweredAt = %#v, want %v", detail.Questions[0].AnsweredAt, answeredAt)
+	}
+}
+
 func TestHandleRuntimeEventEscalatesPlanDecisionOnCompletedTurnToUser(t *testing.T) {
 	t.Parallel()
 

@@ -156,6 +156,23 @@ type DashboardTask struct {
 	RecentEvents     []DashboardTaskEvent  `json:"recent_events"`
 }
 
+type DashboardTaskDetail struct {
+	ID               string                   `json:"id"`
+	Title            string                   `json:"title"`
+	Status           TaskStatus               `json:"status"`
+	TemplateID       string                   `json:"template_id"`
+	RepositoryID     string                   `json:"repository_id"`
+	MachineID        string                   `json:"machine_id"`
+	ThreadID         string                   `json:"thread_id"`
+	Summary          string                   `json:"summary"`
+	LastInput        string                   `json:"last_input"`
+	LastUpdatedAt    time.Time                `json:"last_updated_at"`
+	CreatedAt        time.Time                `json:"created_at"`
+	AwaitingQuestion *DashboardQuestion       `json:"awaiting_question,omitempty"`
+	Events           []DashboardTaskEvent     `json:"events"`
+	Questions        []DashboardTaskQuestion  `json:"questions"`
+}
+
 type DashboardQuestion struct {
 	QuestionType   string    `json:"question_type"`
 	QuestionText   string    `json:"question_text"`
@@ -168,4 +185,14 @@ type DashboardTaskEvent struct {
 	EventType string    `json:"event_type"`
 	Message   string    `json:"message"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type DashboardTaskQuestion struct {
+	QuestionType   string     `json:"question_type"`
+	QuestionText   string     `json:"question_text"`
+	OptionsSummary string     `json:"options_summary"`
+	ContextExcerpt string     `json:"context_excerpt"`
+	AskedAt        time.Time  `json:"asked_at"`
+	AnsweredAt     *time.Time `json:"answered_at,omitempty"`
+	AnswerText     string     `json:"answer_text,omitempty"`
 }
