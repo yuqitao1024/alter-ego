@@ -56,6 +56,31 @@ func TestTaskNotifierSendsApprovalCard(t *testing.T) {
 	}
 }
 
+func TestTaskNotifierSendsProgressCard(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeMessageCreator{}
+	notifier := &TaskNotifier{sender: NewSender(fake)}
+
+	err := notifier.NotifyTaskProgress(context.Background(), orchestrator.TaskRun{
+		TaskID:            "task-2",
+		CreatedBy:         "ou_user",
+		LastOutputSummary: "Tests are still running.",
+	}, "Codex finished implementation and entered verification.")
+	if err != nil {
+		t.Fatalf("NotifyTaskProgress returned error: %v", err)
+	}
+
+	if fake.msgType != "interactive" {
+		t.Fatalf("msgType = %q, want interactive", fake.msgType)
+	}
+	for _, want := range []string{"task-2", "Codex finished implementation and entered verification.", "Tests are still running."} {
+		if !strings.Contains(fake.content, want) {
+			t.Fatalf("content missing %q: %s", want, fake.content)
+		}
+	}
+}
+
 func TestTaskNotifierQuestionCardDoesNotNestActionInsideForm(t *testing.T) {
 	t.Parallel()
 

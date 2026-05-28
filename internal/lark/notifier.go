@@ -34,8 +34,7 @@ func (n *TaskNotifier) NotifyTaskProgress(ctx context.Context, task orchestrator
 		return nil
 	}
 
-	text := fmt.Sprintf("Task %s progress update:\n\n%s", task.TaskID, message)
-	return n.sender.SendDirectMessage(ctx, task.CreatedBy, text)
+	return n.sender.SendDirectCard(ctx, task.CreatedBy, buildTaskProgressCard(task, message))
 }
 
 func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
@@ -117,6 +116,38 @@ func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 			"title": map[string]interface{}{
 				"tag":     "plain_text",
 				"content": fmt.Sprintf("Task %s 需要回复", task.TaskID),
+			},
+		},
+		"body": map[string]interface{}{
+			"elements": elements,
+		},
+	}
+}
+
+func buildTaskProgressCard(task orchestrator.TaskRun, message string) map[string]interface{} {
+	elements := []interface{}{
+		map[string]interface{}{
+			"tag":     "markdown",
+			"content": fmt.Sprintf("**Task**: `%s`\n\n%s", task.TaskID, strings.TrimSpace(message)),
+		},
+	}
+	if summary := strings.TrimSpace(task.LastOutputSummary); summary != "" {
+		elements = append(elements, map[string]interface{}{
+			"tag":     "markdown",
+			"content": fmt.Sprintf("**Latest Summary**\n%s", summary),
+		})
+	}
+
+	return map[string]interface{}{
+		"schema": "2.0",
+		"config": map[string]interface{}{
+			"update_multi": true,
+		},
+		"header": map[string]interface{}{
+			"template": "blue",
+			"title": map[string]interface{}{
+				"tag":     "plain_text",
+				"content": fmt.Sprintf("Task %s Progress", task.TaskID),
 			},
 		},
 		"body": map[string]interface{}{

@@ -120,8 +120,13 @@ func TestTaskCommandReopenResumesTerminalTask(t *testing.T) {
 	if service.reopenText != "Resolve the merge conflict and rerun tests" {
 		t.Fatalf("reopenText = %q", service.reopenText)
 	}
-	if reply.Text != "Task task-1 reopened." {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	for _, part := range []string{"Task Reopened", "task-1"} {
+		if !cardContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
+		}
 	}
 }
 
@@ -141,8 +146,8 @@ func TestTaskCommandReopenRequiresExtraRequirement(t *testing.T) {
 	if service.reopenTaskID != "" || service.reopenText != "" {
 		t.Fatalf("reopen args = %q %q, want none", service.reopenTaskID, service.reopenText)
 	}
-	if reply.Text != "Usage: /task reopen <task-id> <extra requirement>" {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
 	}
 }
 
@@ -236,8 +241,11 @@ func TestTaskCommandCardActionSendsStatusMessage(t *testing.T) {
 	if reply.Message == nil {
 		t.Fatal("reply.Message is nil")
 	}
-	if !strings.Contains(reply.Message.Text, "Working on tests") {
-		t.Fatalf("reply.Message.Text = %q", reply.Message.Text)
+	if reply.Message.Card == nil {
+		t.Fatal("reply.Message.Card is nil")
+	}
+	if !cardContains(reply.Message.Card.Payload, "Working on tests") {
+		t.Fatalf("reply.Message.Card.Payload = %#v", reply.Message.Card.Payload)
 	}
 	if reply.Message.Conversation.ID != "oc_1" {
 		t.Fatalf("reply.Message.Conversation = %#v", reply.Message.Conversation)
@@ -272,6 +280,9 @@ func TestTaskCommandCardActionRepliesWithSelectedChoice(t *testing.T) {
 	}
 	if reply.ToastText != "Task task-1 resumed." {
 		t.Fatalf("reply.ToastText = %q", reply.ToastText)
+	}
+	if reply.Message == nil || reply.Message.Card == nil {
+		t.Fatal("reply.Message.Card is nil")
 	}
 }
 
@@ -329,6 +340,9 @@ func TestTaskCommandCardActionCompletesTask(t *testing.T) {
 	if reply.ToastText != "Task task-1 completed." {
 		t.Fatalf("reply.ToastText = %q", reply.ToastText)
 	}
+	if reply.Message == nil || reply.Message.Card == nil {
+		t.Fatal("reply.Message.Card is nil")
+	}
 }
 
 func cardContains(payload interface{}, needle string) bool {
@@ -359,10 +373,13 @@ func TestTaskCommandStatusFormatsTaskDetails(t *testing.T) {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
 
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
 	wantParts := []string{"task-1", "feature_dev", "repo_backend", "machine_a", "thread-1", "Tests passed"}
 	for _, part := range wantParts {
-		if !strings.Contains(reply.Text, part) {
-			t.Fatalf("reply.Text missing %q: %q", part, reply.Text)
+		if !cardContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
 		}
 	}
 }
@@ -381,8 +398,11 @@ func TestTaskCommandReplyResumesWaitingTask(t *testing.T) {
 	if service.replyTaskID != "task-1" || service.replyText != "Use polling" {
 		t.Fatalf("reply args = %q %q", service.replyTaskID, service.replyText)
 	}
-	if !strings.Contains(reply.Text, "resumed") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	if !cardContains(reply.Card.Payload, "Task **task-1** resumed.") {
+		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
 	}
 }
 
@@ -400,8 +420,11 @@ func TestTaskCommandStopStopsTask(t *testing.T) {
 	if service.stopTaskID != "task-1" {
 		t.Fatalf("stopTaskID = %q", service.stopTaskID)
 	}
-	if !strings.Contains(reply.Text, "stopped") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	if !cardContains(reply.Card.Payload, "Task **task-1** stopped.") {
+		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
 	}
 }
 
@@ -419,8 +442,11 @@ func TestTaskCommandDeleteDeletesTask(t *testing.T) {
 	if service.deleteTaskID != "task-1" {
 		t.Fatalf("deleteTaskID = %q", service.deleteTaskID)
 	}
-	if !strings.Contains(reply.Text, "deleted") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	if !cardContains(reply.Card.Payload, "Task **task-1** deleted.") {
+		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
 	}
 }
 
@@ -438,8 +464,11 @@ func TestTaskCommandDeleteAllDeletesTerminalTasks(t *testing.T) {
 	if !service.deleteTerminalCalled {
 		t.Fatal("DeleteTerminalTasks was not called")
 	}
-	if !strings.Contains(reply.Text, "Deleted 3 terminal task(s).") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	if !cardContains(reply.Card.Payload, "Deleted **3** terminal task(s).") {
+		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
 	}
 }
 

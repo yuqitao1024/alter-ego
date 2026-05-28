@@ -35,20 +35,20 @@ func NewTaskCommandHandler(service TaskService) *TaskCommandHandler {
 func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.MessageEvent) (channel.OutgoingMessage, error) {
 	reply := channel.OutgoingMessage{Conversation: event.Conversation}
 	if h.service == nil {
-		reply.Text = "Task service is not configured."
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Service", larkcard.TemplateRed, "Task service is not configured.", nil)}
 		return reply, nil
 	}
 
 	fields := strings.Fields(strings.TrimSpace(event.Text))
 	if len(fields) < 2 || fields[0] != "/task" {
-		reply.Text = "Usage: /task <start|list|status|reply|reopen|stop|delete> ..."
+		reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task <start|list|status|reply|reopen|stop|delete> ...")}
 		return reply, nil
 	}
 
 	switch fields[1] {
 	case "start":
 		if len(fields) < 4 {
-			reply.Text = "Usage: /task start <template> <requirement text>"
+			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task start <template> <requirement text>")}
 			return reply, nil
 		}
 		templateID := fields[2]
@@ -61,7 +61,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 	case "list":
 		showAll := len(fields) == 3 && fields[2] == "-a"
 		if len(fields) > 3 || (len(fields) == 3 && !showAll) {
-			reply.Text = "Usage: /task list [-a]"
+			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task list [-a]")}
 			return reply, nil
 		}
 		var tasks []orchestrator.TaskRun
@@ -75,24 +75,24 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 			return reply, err
 		}
 		if len(tasks) == 0 {
-			reply.Text = "No active tasks."
+			reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("No Tasks", larkcard.TemplateGrey, "No active tasks.", nil)}
 			return reply, nil
 		}
 
 		reply.Card = &channel.CardMessage{Payload: buildTaskListCard(tasks, showAll)}
 	case "status":
 		if len(fields) != 3 {
-			reply.Text = "Usage: /task status <task-id>"
+			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task status <task-id>")}
 			return reply, nil
 		}
 		task, err := h.service.Status(ctx, fields[2])
 		if err != nil {
 			return reply, err
 		}
-		reply.Text = formatTaskStatus(task)
+		reply.Card = &channel.CardMessage{Payload: buildTaskStatusCard(task)}
 	case "reply":
 		if len(fields) < 4 {
-			reply.Text = "Usage: /task reply <task-id> <decision text>"
+			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task reply <task-id> <decision text>")}
 			return reply, nil
 		}
 		taskID := fields[2]
@@ -100,10 +100,14 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		if err := h.service.Reply(ctx, taskID, decisionText); err != nil {
 			return reply, err
 		}
-		reply.Text = fmt.Sprintf("Task %s resumed.", taskID)
+		task, err := h.service.Status(ctx, taskID)
+		if err != nil {
+			return reply, err
+		}
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Resumed", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** resumed.", taskID), &task)}
 	case "reopen":
 		if len(fields) < 4 {
-			reply.Text = "Usage: /task reopen <task-id> <extra requirement>"
+			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task reopen <task-id> <extra requirement>")}
 			return reply, nil
 		}
 		taskID := fields[2]
@@ -111,20 +115,28 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		if err := h.service.Reopen(ctx, taskID, extraRequirement); err != nil {
 			return reply, err
 		}
-		reply.Text = fmt.Sprintf("Task %s reopened.", taskID)
+		task, err := h.service.Status(ctx, taskID)
+		if err != nil {
+			return reply, err
+		}
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Reopened", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** reopened.", taskID), &task)}
 	case "stop":
 		if len(fields) != 3 {
-			reply.Text = "Usage: /task stop <task-id>"
+			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task stop <task-id>")}
 			return reply, nil
 		}
 		taskID := fields[2]
 		if err := h.service.Stop(ctx, taskID); err != nil {
 			return reply, err
 		}
-		reply.Text = fmt.Sprintf("Task %s stopped.", taskID)
+		task, err := h.service.Status(ctx, taskID)
+		if err != nil {
+			return reply, err
+		}
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Stopped", larkcard.TemplateRed, fmt.Sprintf("Task **%s** stopped.", taskID), &task)}
 	case "delete":
 		if len(fields) != 3 {
-			reply.Text = "Usage: /task delete <task-id|-a>"
+			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task delete <task-id|-a>")}
 			return reply, nil
 		}
 		if fields[2] == "-a" {
@@ -132,16 +144,16 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 			if err != nil {
 				return reply, err
 			}
-			reply.Text = fmt.Sprintf("Deleted %d terminal task(s).", count)
+			reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Tasks Deleted", larkcard.TemplateRed, fmt.Sprintf("Deleted **%d** terminal task(s).", count), nil)}
 			return reply, nil
 		}
 		taskID := fields[2]
 		if err := h.service.Delete(ctx, taskID); err != nil {
 			return reply, err
 		}
-		reply.Text = fmt.Sprintf("Task %s deleted.", taskID)
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Deleted", larkcard.TemplateRed, fmt.Sprintf("Task **%s** deleted.", taskID), nil)}
 	default:
-		reply.Text = "Usage: /task <start|list|status|reply|reopen|stop|delete> ..."
+		reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task <start|list|status|reply|reopen|stop|delete> ...")}
 	}
 
 	return reply, nil
@@ -172,7 +184,7 @@ func (h *TaskCommandHandler) handleTaskActionCard(ctx context.Context, event cha
 		}
 		message := channel.OutgoingMessage{
 			Conversation: event.Conversation,
-			Text:         formatTaskStatus(task),
+			Card:         &channel.CardMessage{Payload: buildTaskStatusCard(task)},
 		}
 		return channel.CardActionResponse{
 			ToastText: "Task status sent.",
@@ -182,12 +194,28 @@ func (h *TaskCommandHandler) handleTaskActionCard(ctx context.Context, event cha
 		if err := h.service.Stop(ctx, taskID); err != nil {
 			return channel.CardActionResponse{}, err
 		}
-		return channel.CardActionResponse{ToastText: fmt.Sprintf("Task %s stopped.", taskID)}, nil
+		task, err := h.service.Status(ctx, taskID)
+		if err != nil {
+			return channel.CardActionResponse{}, err
+		}
+		return channel.CardActionResponse{
+			ToastText: fmt.Sprintf("Task %s stopped.", taskID),
+			Message: &channel.OutgoingMessage{
+				Conversation: event.Conversation,
+				Card:         &channel.CardMessage{Payload: buildTaskNoticeCard("Task Stopped", larkcard.TemplateRed, fmt.Sprintf("Task **%s** stopped.", taskID), &task)},
+			},
+		}, nil
 	case "delete":
 		if err := h.service.Delete(ctx, taskID); err != nil {
 			return channel.CardActionResponse{}, err
 		}
-		return channel.CardActionResponse{ToastText: fmt.Sprintf("Task %s deleted.", taskID)}, nil
+		return channel.CardActionResponse{
+			ToastText: fmt.Sprintf("Task %s deleted.", taskID),
+			Message: &channel.OutgoingMessage{
+				Conversation: event.Conversation,
+				Card:         &channel.CardMessage{Payload: buildTaskNoticeCard("Task Deleted", larkcard.TemplateRed, fmt.Sprintf("Task **%s** deleted.", taskID), nil)},
+			},
+		}, nil
 	default:
 		return channel.CardActionResponse{ToastText: fmt.Sprintf("Unsupported task action: %s", action)}, nil
 	}
@@ -208,12 +236,32 @@ func (h *TaskCommandHandler) handleTaskReplyCard(ctx context.Context, event chan
 		if err := h.service.Reply(ctx, request.taskID, replyText); err != nil {
 			return channel.CardActionResponse{}, err
 		}
-		return channel.CardActionResponse{ToastText: fmt.Sprintf("Task %s resumed.", request.taskID)}, nil
+		task, err := h.service.Status(ctx, request.taskID)
+		if err != nil {
+			return channel.CardActionResponse{}, err
+		}
+		return channel.CardActionResponse{
+			ToastText: fmt.Sprintf("Task %s resumed.", request.taskID),
+			Message: &channel.OutgoingMessage{
+				Conversation: event.Conversation,
+				Card:         &channel.CardMessage{Payload: buildTaskNoticeCard("Task Resumed", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** resumed.", request.taskID), &task)},
+			},
+		}, nil
 	case "complete":
 		if err := h.service.Complete(ctx, request.taskID); err != nil {
 			return channel.CardActionResponse{}, err
 		}
-		return channel.CardActionResponse{ToastText: fmt.Sprintf("Task %s completed.", request.taskID)}, nil
+		task, err := h.service.Status(ctx, request.taskID)
+		if err != nil {
+			return channel.CardActionResponse{}, err
+		}
+		return channel.CardActionResponse{
+			ToastText: fmt.Sprintf("Task %s completed.", request.taskID),
+			Message: &channel.OutgoingMessage{
+				Conversation: event.Conversation,
+				Card:         &channel.CardMessage{Payload: buildTaskNoticeCard("Task Completed", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** completed.", request.taskID), &task)},
+			},
+		}, nil
 	default:
 		return channel.CardActionResponse{ToastText: fmt.Sprintf("Unsupported task reply action: %s", request.action)}, nil
 	}
@@ -317,6 +365,39 @@ func buildTaskStartCard(task orchestrator.TaskRun) interface{} {
 		Build()
 }
 
+func buildTaskStatusCard(task orchestrator.TaskRun) interface{} {
+	return buildTaskNoticeCard("Task Status", larkcard.TemplateBlue, formatTaskStatusMarkdown(task), &task)
+}
+
+func buildTaskNoticeCard(title string, template string, message string, task *orchestrator.TaskRun) interface{} {
+	elements := []larkcard.MessageCardElement{
+		larkcard.NewMessageCardMarkdown().
+			Content(strings.TrimSpace(message)).
+			Build(),
+	}
+	if task != nil {
+		elements = append(elements,
+			larkcard.NewMessageCardMarkdown().
+				Content(fmt.Sprintf("Template: `%s`\nRepository: `%s`\nMachine: `%s`\nStatus: `%s`\nThread: `%s`", task.TemplateID, task.RepositoryID, task.MachineID, task.Status, task.ThreadID)).
+				Build(),
+		)
+		elements = append(elements, taskActionRow(*task).Build())
+	}
+
+	return larkcard.NewMessageCard().
+		Config(larkcard.NewMessageCardConfig().WideScreenMode(true).Build()).
+		Header(larkcard.NewMessageCardHeader().
+			Template(template).
+			Title(larkcard.NewMessageCardPlainText().Content(title).Build()).
+			Build()).
+		Elements(elements).
+		Build()
+}
+
+func buildTaskUsageCard(message string) interface{} {
+	return buildTaskNoticeCard("Task Command Usage", larkcard.TemplateGrey, message, nil)
+}
+
 func taskActionRow(task orchestrator.TaskRun) *larkcard.MessageCardAction {
 	actions := []larkcard.MessageCardActionElement{
 		taskButton("Status", "status", task.TaskID, larkcard.MessageCardButtonTypeDefault, nil),
@@ -366,6 +447,19 @@ func formatTaskStatus(task orchestrator.TaskRun) string {
 		task.Status,
 		task.ThreadID,
 		task.LastOutputSummary,
+	)
+}
+
+func formatTaskStatusMarkdown(task orchestrator.TaskRun) string {
+	return fmt.Sprintf(
+		"**Task**: `%s`\n**Template**: `%s`\n**Repository**: `%s`\n**Machine**: `%s`\n**Status**: `%s`\n**Thread**: `%s`\n**Summary**: %s",
+		task.TaskID,
+		task.TemplateID,
+		task.RepositoryID,
+		task.MachineID,
+		task.Status,
+		task.ThreadID,
+		firstNonEmpty(task.LastOutputSummary, "(empty)"),
 	)
 }
 
