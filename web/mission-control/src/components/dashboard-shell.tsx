@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { DashboardPayload, DashboardTask, DashboardTaskDetail, DashboardTaskEvent, DashboardTaskQuestion, TaskTemplate, WebSession } from '@/lib/types'
 
 type DashboardShellProps = {
@@ -30,6 +30,8 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState('')
   const [createSuccess, setCreateSuccess] = useState('')
+  const selectedTaskIDRef = useRef('')
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   async function loadDashboard() {
     let active = true
@@ -78,6 +80,32 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
       })
   }
 
+  async function loadTaskDetail(taskID: string) {
+    const trimmed = taskID.trim()
+    if (!trimmed) {
+      setSelectedTaskDetail(null)
+      return
+    }
+
+    setDetailLoading(true)
+    return fetch(`/api/web/tasks/${trimmed}`, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error('task detail unavailable')
+        }
+        return res.json()
+      })
+      .then((data: DashboardTaskDetail) => {
+        setSelectedTaskDetail(data)
+      })
+      .catch(() => {
+        setSelectedTaskDetail(null)
+      })
+      .finally(() => {
+        setDetailLoading(false)
+      })
+  }
+
   async function loadTemplates() {
     return fetch('/api/web/templates', { credentials: 'include' })
       .then(async (res) => {
@@ -114,41 +142,37 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   }, [selectedTask?.id])
 
   useEffect(() => {
+    selectedTaskIDRef.current = selectedTask?.id || ''
     if (!selectedTask?.id) {
       setSelectedTaskDetail(null)
       return
     }
-
-    let cancelled = false
-    setDetailLoading(true)
-    setSelectedTaskDetail(null)
-    fetch(`/api/web/tasks/${selectedTask.id}`, { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error('task detail unavailable')
-        }
-        return res.json()
-      })
-      .then((data: DashboardTaskDetail) => {
-        if (!cancelled) {
-          setSelectedTaskDetail(data)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSelectedTaskDetail(null)
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setDetailLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
+    void loadTaskDetail(selectedTask.id)
   }, [selectedTask?.id])
+
+  useEffect(() => {
+    const source = new EventSource('/api/web/events')
+    const refresh = () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+      }
+      refreshTimerRef.current = setTimeout(() => {
+        void loadDashboard()
+        if (selectedTaskIDRef.current) {
+          void loadTaskDetail(selectedTaskIDRef.current)
+        }
+      }, 150)
+    }
+
+    source.addEventListener('task_updated', refresh)
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+      }
+      source.removeEventListener('task_updated', refresh)
+      source.close()
+    }
+  }, [])
 
   const tasks = payload?.tasks ?? []
 

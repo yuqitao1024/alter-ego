@@ -17,6 +17,7 @@ type Service struct {
 	runner                 RemoteRunner
 	decider                DecisionEngine
 	notifier               TaskNotifier
+	changeHook             func(taskID string)
 	progressReportsEnabled bool
 
 	now func() time.Time
@@ -44,6 +45,17 @@ func (s *Service) SetNotifier(notifier TaskNotifier) {
 
 func (s *Service) SetProgressReportsEnabled(enabled bool) {
 	s.progressReportsEnabled = enabled
+}
+
+func (s *Service) SetChangeHook(hook func(taskID string)) {
+	s.changeHook = hook
+}
+
+func (s *Service) notifyChanged(taskID string) {
+	if s == nil || s.changeHook == nil {
+		return
+	}
+	s.changeHook(strings.TrimSpace(taskID))
 }
 
 func (s *Service) StartTask(ctx context.Context, templateID, createdBy, userRequest string) (TaskRun, error) {
@@ -84,6 +96,7 @@ func (s *Service) StartTask(ctx context.Context, templateID, createdBy, userRequ
 	if err := s.startPendingTask(ctx, task); err != nil {
 		return TaskRun{}, err
 	}
+	s.notifyChanged(task.TaskID)
 	return s.store.GetTask(ctx, task.TaskID)
 }
 
@@ -114,6 +127,9 @@ func (s *Service) TickOnce(ctx context.Context) error {
 		}
 	}
 
+	if len(tasks) > 0 {
+		s.notifyChanged("")
+	}
 	return nil
 }
 
@@ -139,6 +155,9 @@ func (s *Service) ResumeActiveTasks(ctx context.Context) error {
 		}
 	}
 
+	if len(tasks) > 0 {
+		s.notifyChanged("")
+	}
 	return firstErr
 }
 
@@ -169,14 +188,20 @@ func (s *Service) HandleRuntimeEvent(ctx context.Context, event RuntimeEvent) er
 			if err := s.store.UpdateTask(ctx, task); err != nil {
 				return err
 			}
+			s.notifyChanged(task.TaskID)
 		}
+		s.notifyChanged(task.TaskID)
 		return nil
 	}
 
 	if event.ServerRequest == nil {
 		if event.TurnCompleted != nil {
-			_, err := s.handleTurnCompleted(ctx, task, *event.TurnCompleted)
-			return err
+			updatedTask, err := s.handleTurnCompleted(ctx, task, *event.TurnCompleted)
+			if err != nil {
+				return err
+			}
+			s.notifyChanged(updatedTask.TaskID)
+			return nil
 		}
 		return nil
 	}
@@ -211,7 +236,11 @@ func (s *Service) HandleRuntimeEvent(ctx context.Context, event RuntimeEvent) er
 	if err := s.appendEvent(ctx, task.TaskID, "server_request_received", string(req.RequestType)); err != nil {
 		return err
 	}
-	return s.handlePendingRequest(ctx, task.TaskID, req.RequestID)
+	if err := s.handlePendingRequest(ctx, task.TaskID, req.RequestID); err != nil {
+		return err
+	}
+	s.notifyChanged(task.TaskID)
+	return nil
 }
 
 func (s *Service) Reply(ctx context.Context, taskID, text string) error {
@@ -264,6 +293,7 @@ func (s *Service) Reply(ctx context.Context, taskID, text string) error {
 	if err := s.appendEvent(ctx, task.TaskID, "user_input_applied", "user input applied to task"); err != nil {
 		return err
 	}
+	s.notifyChanged(task.TaskID)
 
 	return nil
 }
@@ -286,7 +316,11 @@ func (s *Service) Stop(ctx context.Context, taskID string) error {
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return fmt.Errorf("persist stopped task %q: %w", taskID, err)
 	}
-	return s.appendEvent(ctx, task.TaskID, "task_stopped", "task stopped by operator")
+	if err := s.appendEvent(ctx, task.TaskID, "task_stopped", "task stopped by operator"); err != nil {
+		return err
+	}
+	s.notifyChanged(task.TaskID)
+	return nil
 }
 
 func (s *Service) Complete(ctx context.Context, taskID string) error {
@@ -321,7 +355,11 @@ func (s *Service) Complete(ctx context.Context, taskID string) error {
 	if err := s.markAnsweredQuestion(ctx, task.TaskID, question, "task complete"); err != nil {
 		return err
 	}
-	return s.appendEvent(ctx, task.TaskID, "task_completed", "task marked completed by operator")
+	if err := s.appendEvent(ctx, task.TaskID, "task_completed", "task marked completed by operator"); err != nil {
+		return err
+	}
+	s.notifyChanged(task.TaskID)
+	return nil
 }
 
 func (s *Service) Reopen(ctx context.Context, taskID, extraRequirement string) error {
@@ -358,7 +396,11 @@ func (s *Service) Reopen(ctx context.Context, taskID, extraRequirement string) e
 	if err := s.store.UpdateTask(ctx, task); err != nil {
 		return fmt.Errorf("persist reopened task %q: %w", taskID, err)
 	}
-	return s.appendEvent(ctx, task.TaskID, "task_reopened", "task reopened with additional requirement")
+	if err := s.appendEvent(ctx, task.TaskID, "task_reopened", "task reopened with additional requirement"); err != nil {
+		return err
+	}
+	s.notifyChanged(task.TaskID)
+	return nil
 }
 
 func (s *Service) List(ctx context.Context) ([]TaskRun, error) {
@@ -525,6 +567,7 @@ func (s *Service) Delete(ctx context.Context, taskID string) error {
 	if err := s.deleteTaskWorkspace(ctx, task); err != nil {
 		return err
 	}
+	s.notifyChanged(taskID)
 	return nil
 }
 

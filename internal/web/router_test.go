@@ -20,13 +20,20 @@ func TestRouterServesCallbackAndLoginRoutes(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, &stubDataProvider{}), callback)
+	}, stubOAuthClient{}, &stubDataProvider{}, nil), callback)
 
 	loginReq := httptest.NewRequest(http.MethodGet, "/login", nil)
 	loginRecorder := httptest.NewRecorder()
 	router.ServeHTTP(loginRecorder, loginReq)
 	if loginRecorder.Code != http.StatusOK {
 		t.Fatalf("login code = %d, want 200", loginRecorder.Code)
+	}
+
+	eventsReq := httptest.NewRequest(http.MethodGet, "/api/web/events", nil)
+	eventsRecorder := httptest.NewRecorder()
+	router.ServeHTTP(eventsRecorder, eventsReq)
+	if eventsRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("events code = %d, want 401", eventsRecorder.Code)
 	}
 
 	callbackReq := httptest.NewRequest(http.MethodPost, "/lark/card/callback", nil)

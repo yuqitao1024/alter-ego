@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProtectedRootRedirectsToLoginWhenLoggedOut(t *testing.T) {
@@ -17,7 +18,7 @@ func TestProtectedRootRedirectsToLoginWhenLoggedOut(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, &stubDataProvider{})
+	}, stubOAuthClient{}, &stubDataProvider{}, nil)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	recorder := httptest.NewRecorder()
@@ -39,7 +40,7 @@ func TestProtectedSessionEndpointReturnsSessionMetadata(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, &stubDataProvider{})
+	}, stubOAuthClient{}, &stubDataProvider{}, nil)
 
 	recorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(recorder, Session{OpenID: "ou_allowed_1"}); err != nil {
@@ -74,7 +75,7 @@ func TestProtectedDashboardEndpointRequiresSession(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, &stubDataProvider{})
+	}, stubOAuthClient{}, &stubDataProvider{}, nil)
 
 	req := httptest.NewRequest("GET", "/api/web/dashboard", nil)
 	recorder := httptest.NewRecorder()
@@ -93,7 +94,7 @@ func TestProtectedDashboardEndpointReturnsPayload(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, &stubDataProvider{})
+	}, stubOAuthClient{}, &stubDataProvider{}, nil)
 
 	loginRecorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
@@ -132,7 +133,7 @@ func TestProtectedTemplatesEndpointReturnsPayload(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, provider)
+	}, stubOAuthClient{}, provider, nil)
 
 	loginRecorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
@@ -163,6 +164,72 @@ func TestProtectedTemplatesEndpointReturnsPayload(t *testing.T) {
 	}
 }
 
+func TestEventsRequiresSession(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, &stubDataProvider{}, NewStreamBroker())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/web/events", nil)
+	recorder := httptest.NewRecorder()
+	handler.Events(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("Code = %d, want 401", recorder.Code)
+	}
+}
+
+func TestEventsStreamsPublishedMessages(t *testing.T) {
+	t.Parallel()
+
+	streams := NewStreamBroker()
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, &stubDataProvider{}, streams)
+
+	loginRecorder := httptest.NewRecorder()
+	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
+		t.Fatalf("SetSession returned error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/web/events", nil).WithContext(ctx)
+	for _, cookie := range loginRecorder.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.Events(recorder, req)
+		close(done)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	streams.Publish(StreamEvent{Type: "task_updated", TaskID: "task-1"})
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: ready") {
+		t.Fatalf("body = %q, want ready event", body)
+	}
+	if !strings.Contains(body, "\"type\":\"task_updated\"") {
+		t.Fatalf("body = %q, want task_updated payload", body)
+	}
+	if !strings.Contains(body, "\"task_id\":\"task-1\"") {
+		t.Fatalf("body = %q, want task_id payload", body)
+	}
+}
+
 func TestTaskDetailRequiresSession(t *testing.T) {
 	t.Parallel()
 
@@ -171,7 +238,7 @@ func TestTaskDetailRequiresSession(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, &stubDataProvider{})
+	}, stubOAuthClient{}, &stubDataProvider{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/web/tasks/task-1", nil)
 	recorder := httptest.NewRecorder()
@@ -191,7 +258,7 @@ func TestTaskDetailReturnsPayload(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, provider)
+	}, stubOAuthClient{}, provider, nil)
 
 	loginRecorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
@@ -239,7 +306,7 @@ func TestTaskDetailPropagatesNotFound(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, provider)
+	}, stubOAuthClient{}, provider, nil)
 
 	loginRecorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
@@ -271,7 +338,7 @@ func TestTaskCreateReadsTemplateAndRequirement(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, provider)
+	}, stubOAuthClient{}, provider, nil)
 
 	loginRecorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1", Name: "Tester"}); err != nil {
@@ -303,7 +370,7 @@ func TestTaskStopRequiresSession(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, &stubDataProvider{})
+	}, stubOAuthClient{}, &stubDataProvider{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/web/tasks/task-1/stop", nil)
 	recorder := httptest.NewRecorder()
@@ -323,7 +390,7 @@ func TestTaskStopCallsProvider(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, provider)
+	}, stubOAuthClient{}, provider, nil)
 
 	loginRecorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
@@ -355,7 +422,7 @@ func TestTaskReplyReadsJSONBody(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, provider)
+	}, stubOAuthClient{}, provider, nil)
 
 	loginRecorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
@@ -388,7 +455,7 @@ func TestTaskActionReturnsProviderErrorMessage(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, provider)
+	}, stubOAuthClient{}, provider, nil)
 
 	loginRecorder := httptest.NewRecorder()
 	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {

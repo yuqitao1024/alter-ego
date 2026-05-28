@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -29,15 +30,17 @@ type Handler struct {
 	sessions *CookieSessionManager
 	states   *StateStore
 	data     DataProvider
+	streams  *StreamBroker
 }
 
-func NewHandler(cfg Config, oauth OAuthClient, data DataProvider) *Handler {
+func NewHandler(cfg Config, oauth OAuthClient, data DataProvider, streams *StreamBroker) *Handler {
 	return &Handler{
 		cfg:      cfg,
 		oauth:    oauth,
 		sessions: NewCookieSessionManager([]byte(cfg.SessionSecret), 12*time.Hour),
 		states:   NewStateStore(5 * time.Minute),
 		data:     data,
+		streams:  streams,
 	}
 }
 
@@ -143,6 +146,63 @@ func (h *Handler) Templates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.sessions.ReadSession(r); !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	if h.streams == nil {
+		_, _ = io.WriteString(w, "event: ready\ndata: {}\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+		return
+	}
+
+	subID, ch := h.streams.Subscribe()
+	defer h.streams.Unsubscribe(subID)
+
+	_, _ = io.WriteString(w, "event: ready\ndata: {}\n\n")
+	flusher.Flush()
+
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			_, _ = io.WriteString(w, ": ping\n\n")
+			flusher.Flush()
+		case event, ok := <-ch:
+			if !ok {
+				return
+			}
+			if _, err := io.WriteString(w, "event: task_updated\ndata: "); err != nil {
+				return
+			}
+			if _, err := w.Write(event.JSON()); err != nil {
+				return
+			}
+			if _, err := io.WriteString(w, "\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {

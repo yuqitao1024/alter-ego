@@ -67,7 +67,7 @@ func TestCallbackRejectsMismatchedState(t *testing.T) {
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "secret",
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
-	}, stubOAuthClient{}, &stubDataProvider{})
+	}, stubOAuthClient{}, &stubDataProvider{}, nil)
 
 	req := httptest.NewRequest("GET", "/auth/lark/callback?code=code-1&state=bad-state", nil)
 	recorder := httptest.NewRecorder()

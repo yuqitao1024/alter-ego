@@ -38,6 +38,10 @@ func run() error {
 		return err
 	}
 	agentCfg := agent.ConfigFromEnv()
+	var streamBroker *web.StreamBroker
+	if webEnabled {
+		streamBroker = web.NewStreamBroker()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -54,6 +58,14 @@ func run() error {
 		return err
 	}
 	defer taskSubsystem.Close()
+	if streamBroker != nil {
+		taskSubsystem.Service.SetChangeHook(func(taskID string) {
+			streamBroker.Publish(web.StreamEvent{
+				Type:   "task_updated",
+				TaskID: taskID,
+			})
+		})
+	}
 	go taskSubsystem.Run(ctx)
 
 	commandHandler := agent.NewCommandHandler(agentCfg, sessions, taskSubsystem.MachineInstaller)
@@ -63,7 +75,7 @@ func run() error {
 
 	adapter := lark.NewAdapter(larkCfg, handler)
 	callbackHandler := lark.NewCallbackHandler(adapter)
-	httpHandler, listenAddr, err := buildHTTPHandler(larkCfg, webCfg, webEnabled, callbackHandler, taskSubsystem.Service, taskSubsystem.Registry)
+	httpHandler, listenAddr, err := buildHTTPHandler(larkCfg, webCfg, webEnabled, callbackHandler, taskSubsystem.Service, taskSubsystem.Registry, streamBroker)
 	if err != nil {
 		return err
 	}
@@ -81,7 +93,7 @@ func run() error {
 	return err
 }
 
-func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, callbackHandler http.Handler, taskService web.TaskDashboardService, registry *orchestrator.Registry) (http.Handler, string, error) {
+func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, callbackHandler http.Handler, taskService web.TaskDashboardService, registry *orchestrator.Registry, streamBroker *web.StreamBroker) (http.Handler, string, error) {
 	if !webEnabled {
 		mux := http.NewServeMux()
 		if callbackHandler != nil {
@@ -104,7 +116,7 @@ func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, c
 	webHandler := web.NewHandler(webCfg, oauth, web.OrchestratorDashboardProvider{
 		Service: taskService,
 		Catalog: web.RegistryTemplateCatalog{Registry: registry},
-	})
+	}, streamBroker)
 	return web.NewRouter(webHandler, callbackHandler), listenAddr, nil
 }
 
