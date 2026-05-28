@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -22,8 +23,13 @@ func TestCommandHandlerHelpListsSupportedCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
-	if !strings.Contains(reply.Text, "/help") || !strings.Contains(reply.Text, "/status") || !strings.Contains(reply.Text, "/reset") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	for _, part := range []string{"/help", "/status", "/reset"} {
+		if !cardPayloadContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
+		}
 	}
 }
 
@@ -46,8 +52,8 @@ func TestCommandHandlerStatusReportsModelAndHistoryCount(t *testing.T) {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
 	for _, part := range []string{"platform: lark", "conversation: direct", "conversation_id: oc_1", "sender_id: ou_1", "provider: dashscope", "model: glm-5.1", "history_messages: 2"} {
-		if !strings.Contains(reply.Text, part) {
-			t.Fatalf("reply.Text = %q, missing %q", reply.Text, part)
+		if !cardPayloadContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
 		}
 	}
 }
@@ -69,8 +75,11 @@ func TestCommandHandlerResetClearsCurrentSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
-	if reply.Text != "Conversation context cleared." {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	if !cardPayloadContains(reply.Card.Payload, "Conversation context cleared.") {
+		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
 	}
 	if store.Count("lark:oc_1") != 0 {
 		t.Fatalf("Count = %d, want 0", store.Count("lark:oc_1"))
@@ -91,8 +100,13 @@ func TestCommandHandlerUnknownCommandPointsToHelp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
-	if !strings.Contains(reply.Text, "Unknown command") || !strings.Contains(reply.Text, "/help") {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
+	}
+	for _, part := range []string{"Unknown command", "/help"} {
+		if !cardPayloadContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
+		}
 	}
 }
 
@@ -110,9 +124,20 @@ func TestCommandHandlerMachineInitInvokesService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleCommand returned error: %v", err)
 	}
-	if reply.Text != "Machine machine_a initialized for Codex App Server." {
-		t.Fatalf("reply.Text = %q", reply.Text)
+	if reply.Card == nil {
+		t.Fatal("reply.Card is nil")
 	}
+	if !cardPayloadContains(reply.Card.Payload, "Machine machine_a initialized for Codex App Server.") {
+		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
+	}
+}
+
+func cardPayloadContains(payload interface{}, needle string) bool {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(b), needle)
 }
 
 type fakeMachineInitService struct {

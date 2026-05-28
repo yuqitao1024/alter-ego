@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	larkcard "github.com/larksuite/oapi-sdk-go/v3/card"
+
 	"github.com/yuqitao1024/alter-ego/internal/channel"
 )
 
@@ -46,21 +48,25 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, event channel.Messag
 
 	switch command {
 	case "/help":
-		reply.Text = "/help - show supported commands\n/status - show handler status\n/reset - clear current conversation context\n/machine init <machine-id> - install and enable Codex App Server on a machine"
+		reply.Card = &channel.CardMessage{Payload: buildCommandCard(
+			"Command Help",
+			larkcard.TemplateBlue,
+			"/help - show supported commands\n/status - show handler status\n/reset - clear current conversation context\n/machine init <machine-id> - install and enable Codex App Server on a machine",
+		)}
 	case "/machine":
 		if len(fields) != 3 || fields[1] != "init" {
-			reply.Text = "Usage: /machine init <machine-id>"
+			reply.Card = &channel.CardMessage{Payload: buildCommandCard("Machine Command Usage", larkcard.TemplateGrey, "Usage: /machine init <machine-id>")}
 			return reply, nil
 		}
 		if h.machineInit == nil {
-			reply.Text = "Machine init service is not configured."
+			reply.Card = &channel.CardMessage{Payload: buildCommandCard("Machine Init", larkcard.TemplateRed, "Machine init service is not configured.")}
 			return reply, nil
 		}
 		machineID := fields[2]
 		if err := h.machineInit.InitMachine(ctx, machineID); err != nil {
 			return reply, err
 		}
-		reply.Text = fmt.Sprintf("Machine %s initialized for Codex App Server.", machineID)
+		reply.Card = &channel.CardMessage{Payload: buildCommandCard("Machine Initialized", larkcard.TemplateGreen, fmt.Sprintf("Machine %s initialized for Codex App Server.", machineID))}
 	case "/status":
 		provider := h.cfg.Provider
 		if provider == "" {
@@ -70,7 +76,7 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, event channel.Messag
 		if model == "" {
 			model = "not configured"
 		}
-		reply.Text = fmt.Sprintf(
+		reply.Card = &channel.CardMessage{Payload: buildCommandCard("Handler Status", larkcard.TemplateBlue, fmt.Sprintf(
 			"platform: %s\nconversation: %s\nconversation_id: %s\nsender_id: %s\nprovider: %s\nmodel: %s\nhistory_messages: %d",
 			event.Platform,
 			event.Conversation.Kind,
@@ -79,15 +85,30 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, event channel.Messag
 			provider,
 			model,
 			h.sessions.Count(sessionKey(event)),
-		)
+		))}
 	case "/reset":
 		h.sessions.Reset(sessionKey(event))
-		reply.Text = "Conversation context cleared."
+		reply.Card = &channel.CardMessage{Payload: buildCommandCard("Conversation Reset", larkcard.TemplateGreen, "Conversation context cleared.")}
 	default:
-		reply.Text = fmt.Sprintf("Unknown command: %s. Use /help.", command)
+		reply.Card = &channel.CardMessage{Payload: buildCommandCard("Unknown Command", larkcard.TemplateGrey, fmt.Sprintf("Unknown command: %s. Use /help.", command))}
 	}
 
 	return reply, nil
+}
+
+func buildCommandCard(title string, template string, message string) interface{} {
+	return larkcard.NewMessageCard().
+		Config(larkcard.NewMessageCardConfig().WideScreenMode(true).Build()).
+		Header(larkcard.NewMessageCardHeader().
+			Template(template).
+			Title(larkcard.NewMessageCardPlainText().Content(title).Build()).
+			Build()).
+		Elements([]larkcard.MessageCardElement{
+			larkcard.NewMessageCardMarkdown().
+				Content(strings.TrimSpace(message)).
+				Build(),
+		}).
+		Build()
 }
 
 func sessionKey(event channel.MessageEvent) string {
