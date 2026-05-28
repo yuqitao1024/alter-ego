@@ -373,6 +373,79 @@ func (s *Service) Status(ctx context.Context, taskID string) (TaskRun, error) {
 	return s.store.GetTask(ctx, taskID)
 }
 
+func (s *Service) Dashboard(ctx context.Context) (DashboardSnapshot, error) {
+	tasks, err := s.store.ListTasks(ctx)
+	if err != nil {
+		return DashboardSnapshot{}, err
+	}
+
+	snapshot := DashboardSnapshot{
+		Tasks: make([]DashboardTask, 0, len(tasks)),
+	}
+	for i := len(tasks) - 1; i >= 0; i-- {
+		task := tasks[i]
+		snapshot.Summary.Total++
+		switch task.Status {
+		case StatusPending:
+			snapshot.Summary.Pending++
+		case StatusStarting:
+			snapshot.Summary.Starting++
+		case StatusRunning:
+			snapshot.Summary.Running++
+		case StatusWaitingUserInput:
+			snapshot.Summary.WaitingUserInput++
+		case StatusRecovering:
+			snapshot.Summary.Recovering++
+		case StatusCompleted:
+			snapshot.Summary.Completed++
+		case StatusFailed:
+			snapshot.Summary.Failed++
+		case StatusStopped:
+			snapshot.Summary.Stopped++
+		}
+
+		events, err := s.store.ListEvents(ctx, task.TaskID)
+		if err != nil {
+			return DashboardSnapshot{}, err
+		}
+
+		dashboardTask := DashboardTask{
+			ID:            task.TaskID,
+			Title:         firstNonEmpty(task.UserRequest, task.TemplateID, task.TaskID),
+			Status:        task.Status,
+			TemplateID:    task.TemplateID,
+			RepositoryID:  task.RepositoryID,
+			MachineID:     task.MachineID,
+			ThreadID:      task.ThreadID,
+			Summary:       task.LastOutputSummary,
+			LastInput:     task.LastInput,
+			LastUpdatedAt: task.UpdatedAt,
+			CreatedAt:     task.CreatedAt,
+			RecentEvents:  make([]DashboardTaskEvent, 0, minInt(3, len(events))),
+		}
+		if task.AwaitingQuestion != nil {
+			dashboardTask.AwaitingQuestion = &DashboardQuestion{
+				QuestionType:   task.AwaitingQuestion.QuestionType,
+				QuestionText:   task.AwaitingQuestion.QuestionText,
+				OptionsSummary: task.AwaitingQuestion.OptionsSummary,
+				ContextExcerpt: task.AwaitingQuestion.ContextExcerpt,
+				AskedAt:        task.AwaitingQuestion.AskedAt,
+			}
+		}
+		for idx := len(events) - 1; idx >= 0 && len(dashboardTask.RecentEvents) < 3; idx-- {
+			event := events[idx]
+			dashboardTask.RecentEvents = append(dashboardTask.RecentEvents, DashboardTaskEvent{
+				EventType: event.EventType,
+				Message:   event.Message,
+				CreatedAt: event.CreatedAt,
+			})
+		}
+		snapshot.Tasks = append(snapshot.Tasks, dashboardTask)
+	}
+
+	return snapshot, nil
+}
+
 func (s *Service) Delete(ctx context.Context, taskID string) error {
 	task, err := s.store.GetTask(ctx, taskID)
 	if err != nil {
@@ -391,6 +464,13 @@ func (s *Service) Delete(ctx context.Context, taskID string) error {
 		return err
 	}
 	return nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (s *Service) DeleteTerminalTasks(ctx context.Context) (int, error) {

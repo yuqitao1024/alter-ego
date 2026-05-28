@@ -59,18 +59,18 @@ Supported commands:
 - `/task delete <task-id>`
 - `/task delete -a`
 
-## Browser Dashboard Phase 1
+## Browser Dashboard
 
-Phase 1 adds a browser dashboard entrypoint that borrows the visual direction of Mission Control, while keeping Alter Ego's Go service as the only authoritative backend.
+The browser dashboard borrows the visual direction of Mission Control while keeping Alter Ego's Go service as the only authoritative backend.
 
-Current phase 1 boundaries:
+Current boundaries:
 
 - the frontend is vendored under `web/mission-control/` for UI reuse only;
 - browser access requires Lark OAuth;
-- dashboard data is mock-only in phase 1;
+- dashboard data comes from the live task store and orchestration state;
 - task orchestration, Lark bot handling, and browser auth/session state all remain owned by the Go backend.
 
-Browser routes in phase 1:
+Browser routes:
 
 - `GET /` protected dashboard shell
 - `GET /login` login page
@@ -78,9 +78,9 @@ Browser routes in phase 1:
 - `GET /auth/lark/callback`
 - `POST /auth/logout`
 - `GET /api/web/session`
-- `GET /api/web/mock/tasks`
+- `GET /api/web/dashboard`
 
-Runtime topology in phase 1:
+Runtime topology:
 
 - `caddy` is the public entrypoint on a configurable browser port
 - the Go service serves `/api/*`, `/auth/*`, and `/lark/*`

@@ -65,7 +65,7 @@ func TestProtectedSessionEndpointReturnsSessionMetadata(t *testing.T) {
 	}
 }
 
-func TestProtectedMockTasksEndpointRequiresSession(t *testing.T) {
+func TestProtectedDashboardEndpointRequiresSession(t *testing.T) {
 	t.Parallel()
 
 	handler := NewHandler(Config{
@@ -75,12 +75,50 @@ func TestProtectedMockTasksEndpointRequiresSession(t *testing.T) {
 		AllowUsers:    map[string]bool{"ou_allowed_1": true},
 	}, stubOAuthClient{}, stubDataProvider{})
 
-	req := httptest.NewRequest("GET", "/api/web/mock/tasks", nil)
+	req := httptest.NewRequest("GET", "/api/web/dashboard", nil)
 	recorder := httptest.NewRecorder()
-	handler.MockTasks(recorder, req)
+	handler.Dashboard(recorder, req)
 
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("Code = %d, want 401", recorder.Code)
+	}
+}
+
+func TestProtectedDashboardEndpointReturnsPayload(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, stubDataProvider{})
+
+	loginRecorder := httptest.NewRecorder()
+	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
+		t.Fatalf("SetSession returned error: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/web/dashboard", nil)
+	for _, cookie := range loginRecorder.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.Dashboard(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("Code = %d, want 200", recorder.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	tasks, ok := payload["tasks"].([]any)
+	if !ok || len(tasks) != 1 {
+		t.Fatalf("tasks = %#v, want one task", payload["tasks"])
 	}
 }
 
@@ -100,10 +138,10 @@ func (stubOAuthClient) FetchUser(context.Context, string) (OAuthUser, error) {
 
 type stubDataProvider struct{}
 
-func (stubDataProvider) MockDashboard(context.Context) any {
+func (stubDataProvider) Dashboard(context.Context) (any, error) {
 	return map[string]any{
 		"tasks": []map[string]any{
 			{"id": "task-1", "status": "running"},
 		},
-	}
+	}, nil
 }

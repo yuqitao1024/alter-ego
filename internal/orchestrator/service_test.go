@@ -358,6 +358,130 @@ func TestCompleteMarksWaitingTaskCompleted(t *testing.T) {
 	}
 }
 
+func TestDashboardBuildsRealTaskSnapshot(t *testing.T) {
+	t.Parallel()
+
+	service, store, cleanup := newTestService(t)
+	defer cleanup()
+
+	now := time.Date(2026, 5, 28, 10, 0, 0, 0, time.UTC)
+
+	running := sampleTaskRun("task-running", StatusRunning)
+	running.TemplateID = "feature_dev"
+	running.RepositoryID = "repo_backend"
+	running.MachineID = "machine_a"
+	running.UserRequest = "Fix websocket reconnect handling"
+	running.LastOutputSummary = "Applied reconnect retry logic and running tests."
+	running.CreatedAt = now.Add(-10 * time.Minute)
+	running.UpdatedAt = now.Add(-2 * time.Minute)
+	seedTask(t, store, running)
+	if err := store.AppendEvent(context.Background(), TaskEvent{
+		TaskID:    running.TaskID,
+		EventType: "turn_completed_replied",
+		Message:   "continue",
+		CreatedAt: now.Add(-90 * time.Second),
+	}); err != nil {
+		t.Fatalf("AppendEvent(running) returned error: %v", err)
+	}
+
+	waiting := sampleTaskRun("task-waiting", StatusWaitingUserInput)
+	waiting.TemplateID = "simt-stl-research"
+	waiting.RepositoryID = "repo_backend"
+	waiting.MachineID = "machine_b"
+	waiting.UserRequest = "Compare three paper directions and pick one."
+	waiting.LastOutputSummary = "Codex finished the first pass and needs operator direction."
+	waiting.CreatedAt = now.Add(-8 * time.Minute)
+	waiting.UpdatedAt = now.Add(-time.Minute)
+	waiting.AwaitingQuestion = &AwaitingQuestion{
+		QuestionText:   "Which research direction should proceed to full report drafting?",
+		ContextExcerpt: "Option A has better benchmarks, option B has cleaner implementation cost.",
+		QuestionType:   "plan_decision",
+		AskedAt:        now.Add(-75 * time.Second),
+	}
+	seedTask(t, store, waiting)
+	if err := store.AppendQuestion(context.Background(), TaskQuestion{
+		TaskID:         waiting.TaskID,
+		QuestionType:   "plan_decision",
+		QuestionText:   waiting.AwaitingQuestion.QuestionText,
+		OptionsSummary: "",
+		ContextExcerpt: waiting.AwaitingQuestion.ContextExcerpt,
+		AskedAt:        waiting.AwaitingQuestion.AskedAt,
+	}); err != nil {
+		t.Fatalf("AppendQuestion(waiting) returned error: %v", err)
+	}
+	if err := store.AppendEvent(context.Background(), TaskEvent{
+		TaskID:    waiting.TaskID,
+		EventType: "waiting_user_input",
+		Message:   "waiting for plan_decision",
+		CreatedAt: now.Add(-70 * time.Second),
+	}); err != nil {
+		t.Fatalf("AppendEvent(waiting) returned error: %v", err)
+	}
+
+	completed := sampleTaskRun("task-completed", StatusCompleted)
+	completed.TemplateID = "feature_dev"
+	completed.RepositoryID = "repo_backend"
+	completed.MachineID = "machine_a"
+	completed.UserRequest = "Ship dashboard phase 1."
+	completed.LastOutputSummary = "Feature merged and validated."
+	completed.CreatedAt = now.Add(-20 * time.Minute)
+	completed.UpdatedAt = now.Add(-15 * time.Minute)
+	seedTask(t, store, completed)
+
+	snapshot, err := service.Dashboard(context.Background())
+	if err != nil {
+		t.Fatalf("Dashboard returned error: %v", err)
+	}
+
+	if snapshot.Summary.Total != 3 {
+		t.Fatalf("Summary.Total = %d, want 3", snapshot.Summary.Total)
+	}
+	if snapshot.Summary.Running != 1 {
+		t.Fatalf("Summary.Running = %d, want 1", snapshot.Summary.Running)
+	}
+	if snapshot.Summary.WaitingUserInput != 1 {
+		t.Fatalf("Summary.WaitingUserInput = %d, want 1", snapshot.Summary.WaitingUserInput)
+	}
+	if snapshot.Summary.Completed != 1 {
+		t.Fatalf("Summary.Completed = %d, want 1", snapshot.Summary.Completed)
+	}
+	if len(snapshot.Tasks) != 3 {
+		t.Fatalf("len(Tasks) = %d, want 3", len(snapshot.Tasks))
+	}
+
+	if snapshot.Tasks[0].ID != waiting.TaskID {
+		t.Fatalf("Tasks[0].ID = %q, want %q", snapshot.Tasks[0].ID, waiting.TaskID)
+	}
+	if snapshot.Tasks[0].Title != waiting.UserRequest {
+		t.Fatalf("Tasks[0].Title = %q, want %q", snapshot.Tasks[0].Title, waiting.UserRequest)
+	}
+	if snapshot.Tasks[0].AwaitingQuestion == nil {
+		t.Fatal("Tasks[0].AwaitingQuestion = nil, want question")
+	}
+	if snapshot.Tasks[0].AwaitingQuestion.QuestionText != waiting.AwaitingQuestion.QuestionText {
+		t.Fatalf("Tasks[0].AwaitingQuestion.QuestionText = %q, want %q", snapshot.Tasks[0].AwaitingQuestion.QuestionText, waiting.AwaitingQuestion.QuestionText)
+	}
+	if len(snapshot.Tasks[0].RecentEvents) != 1 {
+		t.Fatalf("len(Tasks[0].RecentEvents) = %d, want 1", len(snapshot.Tasks[0].RecentEvents))
+	}
+	if snapshot.Tasks[0].RecentEvents[0].EventType != "waiting_user_input" {
+		t.Fatalf("Tasks[0].RecentEvents[0].EventType = %q, want waiting_user_input", snapshot.Tasks[0].RecentEvents[0].EventType)
+	}
+
+	if snapshot.Tasks[1].ID != running.TaskID {
+		t.Fatalf("Tasks[1].ID = %q, want %q", snapshot.Tasks[1].ID, running.TaskID)
+	}
+	if snapshot.Tasks[1].Summary != running.LastOutputSummary {
+		t.Fatalf("Tasks[1].Summary = %q, want %q", snapshot.Tasks[1].Summary, running.LastOutputSummary)
+	}
+	if len(snapshot.Tasks[1].RecentEvents) != 1 {
+		t.Fatalf("len(Tasks[1].RecentEvents) = %d, want 1", len(snapshot.Tasks[1].RecentEvents))
+	}
+	if snapshot.Tasks[1].RecentEvents[0].Message != "continue" {
+		t.Fatalf("Tasks[1].RecentEvents[0].Message = %q, want continue", snapshot.Tasks[1].RecentEvents[0].Message)
+	}
+}
+
 func TestCompleteIgnoresStopErrorsAndStillMarksTaskCompleted(t *testing.T) {
 	t.Parallel()
 

@@ -122,3 +122,50 @@ type TaskQuestion struct {
 	AnsweredAt     *time.Time
 	AnswerText     string
 }
+
+type DashboardSnapshot struct {
+	Summary DashboardSummary `json:"summary"`
+	Tasks   []DashboardTask  `json:"tasks"`
+}
+
+type DashboardSummary struct {
+	Total            int `json:"total"`
+	Pending          int `json:"pending"`
+	Starting         int `json:"starting"`
+	Running          int `json:"running"`
+	WaitingUserInput int `json:"waiting_user_input"`
+	Recovering       int `json:"recovering"`
+	Completed        int `json:"completed"`
+	Failed           int `json:"failed"`
+	Stopped          int `json:"stopped"`
+}
+
+type DashboardTask struct {
+	ID               string                `json:"id"`
+	Title            string                `json:"title"`
+	Status           TaskStatus            `json:"status"`
+	TemplateID       string                `json:"template_id"`
+	RepositoryID     string                `json:"repository_id"`
+	MachineID        string                `json:"machine_id"`
+	ThreadID         string                `json:"thread_id"`
+	Summary          string                `json:"summary"`
+	LastInput        string                `json:"last_input"`
+	LastUpdatedAt    time.Time             `json:"last_updated_at"`
+	CreatedAt        time.Time             `json:"created_at"`
+	AwaitingQuestion *DashboardQuestion    `json:"awaiting_question,omitempty"`
+	RecentEvents     []DashboardTaskEvent  `json:"recent_events"`
+}
+
+type DashboardQuestion struct {
+	QuestionType   string    `json:"question_type"`
+	QuestionText   string    `json:"question_text"`
+	OptionsSummary string    `json:"options_summary"`
+	ContextExcerpt string    `json:"context_excerpt"`
+	AskedAt        time.Time `json:"asked_at"`
+}
+
+type DashboardTaskEvent struct {
+	EventType string    `json:"event_type"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+}

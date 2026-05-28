@@ -9,7 +9,7 @@ import (
 )
 
 type DataProvider interface {
-	MockDashboard(ctx context.Context) any
+	Dashboard(ctx context.Context) (any, error)
 }
 
 type Handler struct {
@@ -108,12 +108,17 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) MockTasks(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.sessions.ReadSession(r); !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.data.MockDashboard(r.Context()))
+	payload, err := h.data.Dashboard(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

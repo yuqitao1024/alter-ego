@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { MockDashboardPayload, MockTask, WebSession } from '@/lib/types'
+import type { DashboardPayload, DashboardTask, WebSession } from '@/lib/types'
 
 type DashboardShellProps = {
   initialSession: WebSession
@@ -14,20 +14,20 @@ const statusTone: Record<string, string> = {
 }
 
 export function DashboardShell({ initialSession }: DashboardShellProps) {
-  const [payload, setPayload] = useState<MockDashboardPayload | null>(null)
-  const [selectedTask, setSelectedTask] = useState<MockTask | null>(null)
+  const [payload, setPayload] = useState<DashboardPayload | null>(null)
+  const [selectedTask, setSelectedTask] = useState<DashboardTask | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let active = true
-    fetch('/api/web/mock/tasks', { credentials: 'include' })
+    fetch('/api/web/dashboard', { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) {
-          throw new Error('mock tasks unavailable')
+          throw new Error('dashboard unavailable')
         }
         return res.json()
       })
-      .then((data: MockDashboardPayload) => {
+      .then((data: DashboardPayload) => {
         if (!active) {
           return
         }
@@ -38,7 +38,20 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
         if (!active) {
           return
         }
-        setPayload({ summary: { running: 0, waiting: 0, failed: 0 }, tasks: [] })
+        setPayload({
+          summary: {
+            total: 0,
+            pending: 0,
+            starting: 0,
+            running: 0,
+            waiting_user_input: 0,
+            recovering: 0,
+            completed: 0,
+            failed: 0,
+            stopped: 0
+          },
+          tasks: []
+        })
       })
       .finally(() => {
         if (active) {
@@ -84,7 +97,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                 <p className="text-xs uppercase tracking-[0.32em] text-[rgba(148,186,179,0.76)]">Alter Ego Mission Control</p>
                 <h1 className="text-4xl font-semibold text-white lg:text-5xl">Task Overview Dashboard</h1>
                 <p className="max-w-2xl text-sm leading-7 text-[rgba(177,193,208,0.78)]">
-                  Phase 1 browser cockpit. The Go backend stays authoritative; this shell reads same-origin session and mock task APIs only.
+                  Browser cockpit backed by the live Alter Ego task store. Same-origin auth stays in Go; this shell reads real orchestration state.
                 </p>
               </div>
               <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-5 py-4 text-right">
@@ -99,18 +112,18 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
             <div className="space-y-6">
               <div className="grid gap-4 md:grid-cols-3">
                 <MetricCard label="Running" value={loading ? '...' : String(payload?.summary.running ?? 0)} accent="rgba(75, 226, 177, 0.75)" />
-                <MetricCard label="Waiting" value={loading ? '...' : String(payload?.summary.waiting ?? 0)} accent="rgba(255, 199, 97, 0.78)" />
-                <MetricCard label="Failed" value={loading ? '...' : String(payload?.summary.failed ?? 0)} accent="rgba(255, 118, 118, 0.78)" />
+                <MetricCard label="Waiting" value={loading ? '...' : String(payload?.summary.waiting_user_input ?? 0)} accent="rgba(255, 199, 97, 0.78)" />
+                <MetricCard label="Completed" value={loading ? '...' : String(payload?.summary.completed ?? 0)} accent="rgba(133, 163, 255, 0.78)" />
               </div>
 
               <section className="rounded-[28px] border border-white/10 bg-[rgba(5,11,18,0.68)] p-5">
                 <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.28em] text-[rgba(143,166,183,0.74)]">Mock task feed</p>
+                    <p className="text-xs uppercase tracking-[0.28em] text-[rgba(143,166,183,0.74)]">Live task feed</p>
                     <h2 className="mt-2 text-2xl font-semibold text-white">Live queue snapshot</h2>
                   </div>
                   <div className="rounded-full border border-[rgba(87,224,172,0.24)] bg-[rgba(63,208,170,0.1)] px-3 py-1 text-xs uppercase tracking-[0.22em] text-[rgba(147,241,213,0.84)]">
-                    phase 1
+                    real data
                   </div>
                 </div>
 
@@ -130,7 +143,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                       >
                         <span>
                           <span className="block text-sm font-semibold text-white">{task.title}</span>
-                          <span className="mt-1 block text-xs text-[rgba(143,165,184,0.72)]">{task.id}</span>
+                          <span className="mt-1 block text-xs text-[rgba(143,165,184,0.72)]">{task.id} · {task.machine_id}</span>
                         </span>
                         <span>
                           <span className={`inline-flex rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em] ${statusTone[task.status] || 'text-[rgba(201,213,224,0.82)] border-white/10 bg-white/[0.04]'}`}>
@@ -141,7 +154,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                       </button>
                     ))}
                     {!loading && tasks.length === 0 ? (
-                      <div className="px-4 py-8 text-sm text-[rgba(143,165,184,0.74)]">No mock tasks available.</div>
+                      <div className="px-4 py-8 text-sm text-[rgba(143,165,184,0.74)]">No tasks available.</div>
                     ) : null}
                   </div>
                 </div>
@@ -156,13 +169,24 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
               <div className="mt-6 space-y-4">
                 <DetailBlock label="Task ID" value={selectedTask?.id || 'No selection'} />
                 <DetailBlock label="Status" value={selectedTask?.status || 'No selection'} />
-                <DetailBlock label="Latest summary" value={selectedTask?.summary || 'Choose a task row to inspect the phase 1 mock payload.'} multiline />
+                <DetailBlock label="Repository / Template" value={selectedTask ? `${selectedTask.repository_id} / ${selectedTask.template_id}` : 'No selection'} />
+                <DetailBlock label="Latest summary" value={selectedTask?.summary || 'Choose a task row to inspect the live task payload.'} multiline />
+                <DetailBlock label="Awaiting operator input" value={selectedTask?.awaiting_question?.question_text || 'No explicit operator question is pending.'} multiline />
+                <DetailBlock
+                  label="Recent signals"
+                  value={
+                    selectedTask?.recent_events?.length
+                      ? selectedTask.recent_events.map((event) => `${event.event_type}: ${event.message}`).join('\n')
+                      : 'No recent signals.'
+                  }
+                  multiline
+                />
               </div>
 
               <div className="mt-8 rounded-[24px] border border-[rgba(92,112,255,0.18)] bg-[linear-gradient(180deg,rgba(70,94,245,0.12),rgba(14,22,41,0.02))] p-5">
-                <p className="text-xs uppercase tracking-[0.24em] text-[rgba(162,176,255,0.76)]">Next phase</p>
+                <p className="text-xs uppercase tracking-[0.24em] text-[rgba(162,176,255,0.76)]">Next slice</p>
                 <p className="mt-3 text-sm leading-7 text-[rgba(185,197,223,0.8)]">
-                  Replace the mock JSON with real task APIs, preserve same-origin auth, and keep Feishu bot supervision as the out-of-browser control plane.
+                  The next slice can add in-browser actions for stop, reply, reopen, and task completion without changing the data model again.
                 </p>
               </div>
             </aside>

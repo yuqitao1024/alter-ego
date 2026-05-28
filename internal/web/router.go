@@ -16,6 +16,6 @@ func NewRouter(handler *Handler, callback http.Handler) http.Handler {
 	mux.HandleFunc("/auth/lark/callback", handler.Callback)
 	mux.HandleFunc("/auth/logout", handler.Logout)
 	mux.HandleFunc("/api/web/session", handler.Session)
-	mux.HandleFunc("/api/web/mock/tasks", handler.MockTasks)
+	mux.HandleFunc("/api/web/dashboard", handler.Dashboard)
 	return mux
 }

@@ -18,8 +18,8 @@ export function LoginShell() {
                     Command your Codex fleet without losing the operator thread.
                   </h1>
                   <p className="max-w-xl text-base leading-7 text-[rgba(184,200,214,0.82)] lg:text-lg">
-                    Phase 1 keeps the Go backend authoritative and opens a browser cockpit for authenticated operators only.
-                    Sign in with Lark to enter the dashboard shell.
+                    The Go backend stays authoritative and exposes a live browser cockpit for authenticated operators only.
+                    Sign in with Lark to inspect active tasks and supervision state.
                   </p>
                 </div>
               </div>
@@ -35,7 +35,7 @@ export function LoginShell() {
                 </div>
                 <div className="animate-rise rounded-3xl border border-white/10 bg-white/5 p-5 [animation-delay:240ms]">
                   <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Data</p>
-                  <p className="mt-3 text-2xl font-semibold text-white">Mock Slice</p>
+                  <p className="mt-3 text-2xl font-semibold text-white">Live Tasks</p>
                 </div>
               </div>
             </div>

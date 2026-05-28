@@ -15,6 +15,12 @@ import (
 	"github.com/yuqitao1024/alter-ego/internal/web"
 )
 
+type stubDashboardService struct{}
+
+func (stubDashboardService) Dashboard(context.Context) (orchestrator.DashboardSnapshot, error) {
+	return orchestrator.DashboardSnapshot{}, nil
+}
+
 func TestBuildTaskSubsystemRequiresConfigRoot(t *testing.T) {
 	t.Parallel()
 
@@ -115,7 +121,7 @@ func TestBuildHTTPHandlerWithoutWebConfigServesOnlyCallback(t *testing.T) {
 		CallbackListenAddr: ":8080",
 	}, web.Config{}, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}))
+	}), stubDashboardService{})
 	if err != nil {
 		t.Fatalf("buildHTTPHandler returned error: %v", err)
 	}
@@ -153,7 +159,7 @@ func TestBuildHTTPHandlerWithWebConfigServesLoginAndCallback(t *testing.T) {
 		AllowUsers:    map[string]bool{"ou_1": true},
 	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}))
+	}), stubDashboardService{})
 	if err != nil {
 		t.Fatalf("buildHTTPHandler returned error: %v", err)
 	}
@@ -186,7 +192,7 @@ func TestBuildHTTPHandlerRejectsMismatchedListenAddrWhenWebEnabled(t *testing.T)
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "web-secret",
 		AllowUsers:    map[string]bool{"ou_1": true},
-	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), stubDashboardService{})
 	if err == nil {
 		t.Fatal("buildHTTPHandler returned nil error, want mismatch error")
 	}
@@ -205,7 +211,7 @@ func TestBuildHTTPHandlerAllowsEquivalentListenAddrWhenWebEnabled(t *testing.T) 
 		ListenAddr:    "127.0.0.1:8080",
 		SessionSecret: "web-secret",
 		AllowUsers:    map[string]bool{"ou_1": true},
-	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), stubDashboardService{})
 	if err != nil {
 		t.Fatalf("buildHTTPHandler returned error: %v", err)
 	}
