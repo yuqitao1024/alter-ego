@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { DashboardPayload, DashboardTask, WebSession } from '@/lib/types'
+import type { DashboardPayload, DashboardTask, TaskTemplate, WebSession } from '@/lib/types'
 
 type DashboardShellProps = {
   initialSession: WebSession
@@ -15,6 +15,7 @@ const statusTone: Record<string, string> = {
 
 export function DashboardShell({ initialSession }: DashboardShellProps) {
   const [payload, setPayload] = useState<DashboardPayload | null>(null)
+  const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [selectedTask, setSelectedTask] = useState<DashboardTask | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionText, setActionText] = useState('')
@@ -22,6 +23,11 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   const [actionSuccess, setActionSuccess] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
   const [busyTaskID, setBusyTaskID] = useState('')
+  const [createTemplateID, setCreateTemplateID] = useState('')
+  const [createRequirement, setCreateRequirement] = useState('')
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [createSuccess, setCreateSuccess] = useState('')
 
   async function loadDashboard() {
     let active = true
@@ -70,9 +76,26 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
       })
   }
 
+  async function loadTemplates() {
+    return fetch('/api/web/templates', { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error('templates unavailable')
+        }
+        return res.json()
+      })
+      .then((data: TaskTemplate[]) => {
+        setTemplates(data)
+        setCreateTemplateID((current) => current || data[0]?.id || '')
+      })
+      .catch(() => {
+        setTemplates([])
+      })
+  }
+
   useEffect(() => {
     let cancelled = false
-    loadDashboard().finally(() => {
+    Promise.all([loadDashboard(), loadTemplates()]).finally(() => {
       if (cancelled) {
         return
       }
@@ -89,6 +112,45 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   }, [selectedTask?.id])
 
   const tasks = payload?.tasks ?? []
+
+  async function createTask() {
+    if (createBusy) {
+      return
+    }
+    if (!createTemplateID.trim() || !createRequirement.trim()) {
+      setCreateError('Select a template and enter a requirement first.')
+      return
+    }
+
+    setCreateBusy(true)
+    setCreateError('')
+    setCreateSuccess('')
+    try {
+      const response = await fetch('/api/web/tasks', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          template_id: createTemplateID.trim(),
+          requirement: createRequirement.trim()
+        })
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || 'Task creation failed')
+      }
+      const created = await response.json()
+      await loadDashboard()
+      setCreateRequirement('')
+      setCreateSuccess(`Started ${created.task_id || 'task'} successfully.`)
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Task creation failed')
+    } finally {
+      setCreateBusy(false)
+    }
+  }
 
   async function runAction(action: 'stop' | 'complete' | 'delete' | 'reply' | 'reopen', taskOverride?: DashboardTask | null) {
     const task = taskOverride ?? selectedTask
@@ -173,6 +235,18 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
 
           <div className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] lg:p-8">
             <div className="space-y-6">
+              <TaskLaunchPanel
+                templates={templates}
+                createTemplateID={createTemplateID}
+                createRequirement={createRequirement}
+                createBusy={createBusy}
+                createError={createError}
+                createSuccess={createSuccess}
+                onTemplateChange={setCreateTemplateID}
+                onRequirementChange={setCreateRequirement}
+                onCreate={createTask}
+              />
+
               <div className="grid gap-4 md:grid-cols-3">
                 <MetricCard label="Running" value={loading ? '...' : String(payload?.summary.running ?? 0)} accent="rgba(75, 226, 177, 0.75)" />
                 <MetricCard label="Waiting" value={loading ? '...' : String(payload?.summary.waiting_user_input ?? 0)} accent="rgba(255, 199, 97, 0.78)" />
@@ -280,6 +354,92 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
         </section>
       </div>
     </main>
+  )
+}
+
+function TaskLaunchPanel({
+  templates,
+  createTemplateID,
+  createRequirement,
+  createBusy,
+  createError,
+  createSuccess,
+  onTemplateChange,
+  onRequirementChange,
+  onCreate
+}: {
+  templates: TaskTemplate[]
+  createTemplateID: string
+  createRequirement: string
+  createBusy: boolean
+  createError: string
+  createSuccess: string
+  onTemplateChange: (value: string) => void
+  onRequirementChange: (value: string) => void
+  onCreate: () => void
+}) {
+  return (
+    <section className="rounded-[28px] border border-white/10 bg-[rgba(5,11,18,0.68)] p-5">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-[0.28em] text-[rgba(143,166,183,0.74)]">Task Launch</p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">Start a new task</h2>
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-[rgba(177,193,208,0.78)]">
+            Launch a new Codex task directly from the dashboard by selecting a template and writing the operator requirement.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCreate}
+          disabled={createBusy}
+          className="rounded-2xl border border-[rgba(87,224,172,0.24)] bg-[rgba(53,158,127,0.14)] px-5 py-3 text-sm font-medium text-[rgba(206,255,236,0.94)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {createBusy ? 'Starting task...' : 'Start task'}
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <label className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
+          <span className="text-xs uppercase tracking-[0.22em] text-[rgba(144,165,183,0.72)]">Template</span>
+          <select
+            value={createTemplateID}
+            onChange={(event) => onTemplateChange(event.target.value)}
+            className="mt-3 w-full rounded-2xl border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none"
+          >
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.display_name || template.id}
+              </option>
+            ))}
+          </select>
+          <p className="mt-3 text-sm leading-6 text-[rgba(154,176,194,0.74)]">
+            {templates.find((item) => item.id === createTemplateID)?.description || 'No template description available.'}
+          </p>
+        </label>
+
+        <label className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
+          <span className="text-xs uppercase tracking-[0.22em] text-[rgba(144,165,183,0.72)]">Requirement</span>
+          <textarea
+            value={createRequirement}
+            onChange={(event) => onRequirementChange(event.target.value)}
+            placeholder="Describe what Codex should do next."
+            className="mt-3 min-h-[126px] w-full rounded-[20px] border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none transition placeholder:text-[rgba(135,154,170,0.72)] focus:border-[rgba(91,208,180,0.42)]"
+          />
+        </label>
+      </div>
+
+      {createError ? (
+        <p className="mt-4 rounded-2xl border border-[rgba(255,122,122,0.18)] bg-[rgba(160,45,45,0.1)] px-4 py-3 text-sm text-[rgba(255,185,185,0.92)]">
+          {createError}
+        </p>
+      ) : null}
+
+      {createSuccess ? (
+        <p className="mt-4 rounded-2xl border border-[rgba(87,224,172,0.18)] bg-[rgba(53,158,127,0.12)] px-4 py-3 text-sm text-[rgba(206,255,236,0.94)]">
+          {createSuccess}
+        </p>
+      ) : null}
+    </section>
   )
 }
 

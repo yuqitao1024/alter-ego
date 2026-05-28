@@ -123,6 +123,79 @@ func TestProtectedDashboardEndpointReturnsPayload(t *testing.T) {
 	}
 }
 
+func TestProtectedTemplatesEndpointReturnsPayload(t *testing.T) {
+	t.Parallel()
+
+	provider := &stubDataProvider{}
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, provider)
+
+	loginRecorder := httptest.NewRecorder()
+	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
+		t.Fatalf("SetSession returned error: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/web/templates", nil)
+	for _, cookie := range loginRecorder.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.Templates(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("Code = %d, want 200", recorder.Code)
+	}
+
+	var payload []map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if len(payload) != 2 {
+		t.Fatalf("len(payload) = %d, want 2", len(payload))
+	}
+	if payload[0]["id"] != "feature_dev" {
+		t.Fatalf("payload[0].id = %#v, want feature_dev", payload[0]["id"])
+	}
+}
+
+func TestTaskCreateReadsTemplateAndRequirement(t *testing.T) {
+	t.Parallel()
+
+	provider := &stubDataProvider{}
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, provider)
+
+	loginRecorder := httptest.NewRecorder()
+	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1", Name: "Tester"}); err != nil {
+		t.Fatalf("SetSession returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/web/tasks", strings.NewReader(`{"template_id":"feature_dev","requirement":"Fix websocket reconnect handling"}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginRecorder.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.CreateTask(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("Code = %d, want 200", recorder.Code)
+	}
+	if provider.startedTemplateID != "feature_dev" || provider.startedRequirement != "Fix websocket reconnect handling" || provider.startedBy != "ou_allowed_1" {
+		t.Fatalf("provider start state = %#v", provider)
+	}
+}
+
 func TestTaskStopRequiresSession(t *testing.T) {
 	t.Parallel()
 
@@ -254,10 +327,13 @@ func (stubOAuthClient) FetchUser(context.Context, string) (OAuthUser, error) {
 }
 
 type stubDataProvider struct {
-	lastAction string
-	lastTaskID string
-	lastText   string
-	stopErr    string
+	lastAction         string
+	lastTaskID         string
+	lastText           string
+	stopErr            string
+	startedTemplateID  string
+	startedRequirement string
+	startedBy          string
 }
 
 func (*stubDataProvider) Dashboard(context.Context) (any, error) {
@@ -265,6 +341,23 @@ func (*stubDataProvider) Dashboard(context.Context) (any, error) {
 		"tasks": []map[string]any{
 			{"id": "task-1", "status": "running"},
 		},
+	}, nil
+}
+
+func (*stubDataProvider) Templates(context.Context) (any, error) {
+	return []map[string]any{
+		{"id": "feature_dev", "display_name": "Feature Development", "description": "Default feature workflow"},
+		{"id": "simt-stl-research", "display_name": "Research", "description": "Research workflow"},
+	}, nil
+}
+
+func (s *stubDataProvider) StartTask(_ context.Context, templateID, createdBy, requirement string) (any, error) {
+	s.startedTemplateID = templateID
+	s.startedBy = createdBy
+	s.startedRequirement = requirement
+	return map[string]any{
+		"task_id": "task-new",
+		"status":  "running",
 	}, nil
 }
 

@@ -8,6 +8,7 @@ import (
 
 type TaskDashboardService interface {
 	Dashboard(ctx context.Context) (orchestrator.DashboardSnapshot, error)
+	StartTask(ctx context.Context, templateID, createdBy, userRequest string) (orchestrator.TaskRun, error)
 	Reply(ctx context.Context, taskID, text string) error
 	Reopen(ctx context.Context, taskID, text string) error
 	Complete(ctx context.Context, taskID string) error
@@ -15,8 +16,20 @@ type TaskDashboardService interface {
 	Delete(ctx context.Context, taskID string) error
 }
 
+type TemplateCatalogService interface {
+	ListTemplates(ctx context.Context) ([]TemplateSummary, error)
+}
+
+type TemplateSummary struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
+	RepositoryID string `json:"repository_id"`
+}
+
 type OrchestratorDashboardProvider struct {
-	Service TaskDashboardService
+	Service  TaskDashboardService
+	Catalog  TemplateCatalogService
 }
 
 func (p OrchestratorDashboardProvider) Dashboard(ctx context.Context) (any, error) {
@@ -24,6 +37,20 @@ func (p OrchestratorDashboardProvider) Dashboard(ctx context.Context) (any, erro
 		return orchestrator.DashboardSnapshot{}, nil
 	}
 	return p.Service.Dashboard(ctx)
+}
+
+func (p OrchestratorDashboardProvider) Templates(ctx context.Context) (any, error) {
+	if p.Catalog == nil {
+		return []TemplateSummary{}, nil
+	}
+	return p.Catalog.ListTemplates(ctx)
+}
+
+func (p OrchestratorDashboardProvider) StartTask(ctx context.Context, templateID, createdBy, requirement string) (any, error) {
+	if p.Service == nil {
+		return map[string]any{}, nil
+	}
+	return p.Service.StartTask(ctx, templateID, createdBy, requirement)
 }
 
 func (p OrchestratorDashboardProvider) StopTask(ctx context.Context, taskID string) error {

@@ -11,6 +11,8 @@ import (
 
 type DataProvider interface {
 	Dashboard(ctx context.Context) (any, error)
+	Templates(ctx context.Context) (any, error)
+	StartTask(ctx context.Context, templateID, createdBy, requirement string) (any, error)
 	StopTask(ctx context.Context, taskID string) error
 	CompleteTask(ctx context.Context, taskID string) error
 	DeleteTask(ctx context.Context, taskID string) error
@@ -122,6 +124,53 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	payload, err := h.data.Dashboard(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (h *Handler) Templates(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.sessions.ReadSession(r); !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	payload, err := h.data.Templates(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
+	session, ok := h.sessions.ReadSession(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		TemplateID  string `json:"template_id"`
+		Requirement string `json:"requirement"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	body.TemplateID = strings.TrimSpace(body.TemplateID)
+	body.Requirement = strings.TrimSpace(body.Requirement)
+	if body.TemplateID == "" || body.Requirement == "" {
+		http.Error(w, "template_id and requirement are required", http.StatusBadRequest)
+		return
+	}
+
+	payload, err := h.data.StartTask(r.Context(), body.TemplateID, session.OpenID, body.Requirement)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)

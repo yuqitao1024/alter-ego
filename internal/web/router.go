@@ -17,6 +17,8 @@ func NewRouter(handler *Handler, callback http.Handler) http.Handler {
 	mux.HandleFunc("/auth/logout", handler.Logout)
 	mux.HandleFunc("/api/web/session", handler.Session)
 	mux.HandleFunc("/api/web/dashboard", handler.Dashboard)
+	mux.HandleFunc("/api/web/templates", handler.Templates)
+	mux.HandleFunc("/api/web/tasks", handler.CreateTask)
 	mux.HandleFunc("/api/web/tasks/", handler.TaskAction)
 	return mux
 }

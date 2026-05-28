@@ -4,6 +4,13 @@ export type WebSession = {
   name?: string
 }
 
+export type TaskTemplate = {
+  id: string
+  display_name: string
+  description: string
+  repository_id: string
+}
+
 export type DashboardTaskEvent = {
   event_type: string
   message: string

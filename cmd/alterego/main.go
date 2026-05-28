@@ -63,7 +63,7 @@ func run() error {
 
 	adapter := lark.NewAdapter(larkCfg, handler)
 	callbackHandler := lark.NewCallbackHandler(adapter)
-	httpHandler, listenAddr, err := buildHTTPHandler(larkCfg, webCfg, webEnabled, callbackHandler, taskSubsystem.Service)
+	httpHandler, listenAddr, err := buildHTTPHandler(larkCfg, webCfg, webEnabled, callbackHandler, taskSubsystem.Service, taskSubsystem.Registry)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func run() error {
 	return err
 }
 
-func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, callbackHandler http.Handler, taskService web.TaskDashboardService) (http.Handler, string, error) {
+func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, callbackHandler http.Handler, taskService web.TaskDashboardService, registry *orchestrator.Registry) (http.Handler, string, error) {
 	if !webEnabled {
 		mux := http.NewServeMux()
 		if callbackHandler != nil {
@@ -101,7 +101,10 @@ func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, c
 		BaseURL:     lark.OpenBaseURL(larkCfg.Domain),
 		RedirectURI: strings.TrimRight(webCfg.PublicBaseURL, "/") + "/auth/lark/callback",
 	}
-	webHandler := web.NewHandler(webCfg, oauth, web.OrchestratorDashboardProvider{Service: taskService})
+	webHandler := web.NewHandler(webCfg, oauth, web.OrchestratorDashboardProvider{
+		Service: taskService,
+		Catalog: web.RegistryTemplateCatalog{Registry: registry},
+	})
 	return web.NewRouter(webHandler, callbackHandler), listenAddr, nil
 }
 
