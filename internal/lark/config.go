@@ -7,39 +7,39 @@ import (
 )
 
 type Config struct {
-	AppID          string
-	AppSecret      string
-	Domain         string
+	AppID              string
+	AppSecret          string
+	Domain             string
 	CallbackListenAddr string
 	CallbackPublicURL  string
-	AllowUsers     map[string]bool
-	AllowGroups    map[string]bool
-	RequireMention bool
+	AllowUsers         map[string]bool
+	AllowGroups        map[string]bool
+	RequireMention     bool
 }
 
 func ConfigFromEnv() (Config, error) {
 	return ConfigFromMap(map[string]string{
-		"ALTER_EGO_LARK_APP_ID":          os.Getenv("ALTER_EGO_LARK_APP_ID"),
-		"ALTER_EGO_LARK_APP_SECRET":      os.Getenv("ALTER_EGO_LARK_APP_SECRET"),
-		"ALTER_EGO_LARK_DOMAIN":          os.Getenv("ALTER_EGO_LARK_DOMAIN"),
+		"ALTER_EGO_LARK_APP_ID":               os.Getenv("ALTER_EGO_LARK_APP_ID"),
+		"ALTER_EGO_LARK_APP_SECRET":           os.Getenv("ALTER_EGO_LARK_APP_SECRET"),
+		"ALTER_EGO_LARK_DOMAIN":               os.Getenv("ALTER_EGO_LARK_DOMAIN"),
 		"ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR": os.Getenv("ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR"),
 		"ALTER_EGO_LARK_CALLBACK_PUBLIC_URL":  os.Getenv("ALTER_EGO_LARK_CALLBACK_PUBLIC_URL"),
-		"ALTER_EGO_LARK_ALLOW_USERS":     os.Getenv("ALTER_EGO_LARK_ALLOW_USERS"),
-		"ALTER_EGO_LARK_ALLOW_GROUPS":    os.Getenv("ALTER_EGO_LARK_ALLOW_GROUPS"),
-		"ALTER_EGO_LARK_REQUIRE_MENTION": os.Getenv("ALTER_EGO_LARK_REQUIRE_MENTION"),
+		"ALTER_EGO_LARK_ALLOW_USERS":          os.Getenv("ALTER_EGO_LARK_ALLOW_USERS"),
+		"ALTER_EGO_LARK_ALLOW_GROUPS":         os.Getenv("ALTER_EGO_LARK_ALLOW_GROUPS"),
+		"ALTER_EGO_LARK_REQUIRE_MENTION":      os.Getenv("ALTER_EGO_LARK_REQUIRE_MENTION"),
 	})
 }
 
 func ConfigFromMap(values map[string]string) (Config, error) {
 	cfg := Config{
-		AppID:          strings.TrimSpace(values["ALTER_EGO_LARK_APP_ID"]),
-		AppSecret:      strings.TrimSpace(values["ALTER_EGO_LARK_APP_SECRET"]),
-		Domain:         strings.TrimSpace(values["ALTER_EGO_LARK_DOMAIN"]),
+		AppID:              strings.TrimSpace(values["ALTER_EGO_LARK_APP_ID"]),
+		AppSecret:          strings.TrimSpace(values["ALTER_EGO_LARK_APP_SECRET"]),
+		Domain:             strings.TrimSpace(values["ALTER_EGO_LARK_DOMAIN"]),
 		CallbackListenAddr: strings.TrimSpace(values["ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR"]),
 		CallbackPublicURL:  strings.TrimSpace(values["ALTER_EGO_LARK_CALLBACK_PUBLIC_URL"]),
-		AllowUsers:     parseCSVSet(values["ALTER_EGO_LARK_ALLOW_USERS"]),
-		AllowGroups:    parseCSVSet(values["ALTER_EGO_LARK_ALLOW_GROUPS"]),
-		RequireMention: true,
+		AllowUsers:         parseCSVSet(values["ALTER_EGO_LARK_ALLOW_USERS"]),
+		AllowGroups:        parseCSVSet(values["ALTER_EGO_LARK_ALLOW_GROUPS"]),
+		RequireMention:     true,
 	}
 
 	if cfg.AppID == "" {
@@ -65,6 +65,13 @@ func ConfigFromMap(values map[string]string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func OpenBaseURL(domain string) string {
+	if domain == "" || strings.EqualFold(domain, "lark") {
+		return "https://open.larksuite.com"
+	}
+	return domain
 }
 
 func parseCSVSet(raw string) map[string]bool {

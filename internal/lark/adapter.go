@@ -48,7 +48,7 @@ type wsStarter interface {
 }
 
 func NewAdapter(cfg Config, handler channel.Handler) *Adapter {
-	apiClient := larkapi.NewClient(cfg.AppID, cfg.AppSecret, larkapi.WithOpenBaseUrl(baseURL(cfg.Domain)))
+	apiClient := larkapi.NewClient(cfg.AppID, cfg.AppSecret, larkapi.WithOpenBaseUrl(OpenBaseURL(cfg.Domain)))
 	sender := NewSender(NewSDKMessageCreator(apiClient.Im))
 
 	adapter := &Adapter{
@@ -70,7 +70,7 @@ func NewAdapter(cfg Config, handler channel.Handler) *Adapter {
 	adapter.wsClient = ws.NewClient(
 		cfg.AppID,
 		cfg.AppSecret,
-		ws.WithDomain(baseURL(cfg.Domain)),
+		ws.WithDomain(OpenBaseURL(cfg.Domain)),
 		ws.WithEventHandler(eventHandler),
 		ws.WithLogLevel(larkcore.LogLevelInfo),
 	)
@@ -270,11 +270,4 @@ func value(ptr *string) string {
 		return ""
 	}
 	return *ptr
-}
-
-func baseURL(domain string) string {
-	if domain == "" || strings.EqualFold(domain, "lark") {
-		return larkapi.LarkBaseUrl
-	}
-	return domain
 }

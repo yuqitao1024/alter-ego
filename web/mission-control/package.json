@@ -1,0 +1,28 @@
+{
+  "name": "alterego-mission-control",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Alter Ego browser dashboard phase 1",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1 --port ${PORT:-3000}",
+    "build": "next build --webpack",
+    "start": "next start --hostname 0.0.0.0 --port ${PORT:-3000}"
+  },
+  "dependencies": {
+    "next": "^16.1.6",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.6",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

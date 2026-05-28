@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 214 39% 7%;
+  --foreground: 210 22% 94%;
+  --card: 221 35% 11%;
+  --border: 214 28% 20%;
+  --muted: 215 19% 65%;
+  --accent: 169 84% 68%;
+  --success: 154 64% 52%;
+  --warning: 38 92% 58%;
+  --danger: 0 80% 62%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: hsl(var(--foreground));
+  background:
+    radial-gradient(circle at top left, rgba(76, 222, 196, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(91, 117, 255, 0.18), transparent 22%),
+    linear-gradient(180deg, #07101c 0%, #0b1423 34%, #09111a 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(140, 160, 184, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(140, 160, 184, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(circle at center, black, transparent 82%);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font: inherit;
+}

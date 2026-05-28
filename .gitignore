@@ -1,3 +1,5 @@
 .worktrees/
 dist/
 packaging/local/
+web/mission-control/node_modules/
+web/mission-control/.next/

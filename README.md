@@ -59,6 +59,41 @@ Supported commands:
 - `/task delete <task-id>`
 - `/task delete -a`
 
+## Browser Dashboard Phase 1
+
+Phase 1 adds a browser dashboard entrypoint that borrows the visual direction of Mission Control, while keeping Alter Ego's Go service as the only authoritative backend.
+
+Current phase 1 boundaries:
+
+- the frontend is vendored under `web/mission-control/` for UI reuse only;
+- browser access requires Lark OAuth;
+- dashboard data is mock-only in phase 1;
+- task orchestration, Lark bot handling, and browser auth/session state all remain owned by the Go backend.
+
+Browser routes in phase 1:
+
+- `GET /` protected dashboard shell
+- `GET /login` login page
+- `GET /auth/lark/start`
+- `GET /auth/lark/callback`
+- `POST /auth/logout`
+- `GET /api/web/session`
+- `GET /api/web/mock/tasks`
+
+Runtime topology in phase 1:
+
+- `caddy` is the public entrypoint on a configurable browser port
+- the Go service serves `/api/*`, `/auth/*`, and `/lark/*`
+- the Next.js frontend serves the browser shell for all other paths
+
+Required browser auth environment variables:
+
+```sh
+export ALTER_EGO_WEB_PUBLIC_BASE_URL="https://dashboard.example.com"
+export ALTER_EGO_WEB_LISTEN_ADDR="127.0.0.1:8080"
+export ALTER_EGO_WEB_SESSION_SECRET="change-me"
+```
+
 ## Remote Codex Tasks
 
 Remote Codex orchestration is configured from repository files and persisted in SQLite. Each task runs against a long-lived remote `codex app-server` thread, and Alter Ego drives Codex through the structured app-server protocol instead of scraping terminal output. SSH is still used to bootstrap and proxy the remote app-server process, but the task state source is the app-server thread and turn model.

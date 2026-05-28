@@ -55,10 +55,10 @@ func TestConfigFromEnvParsesRequireMentionFalse(t *testing.T) {
 
 func TestConfigFromEnvParsesCallbackEndpoints(t *testing.T) {
 	cfg, err := ConfigFromMap(map[string]string{
-		"ALTER_EGO_LARK_APP_ID":                 "cli_test",
-		"ALTER_EGO_LARK_APP_SECRET":             "secret",
-		"ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR":   ":8080",
-		"ALTER_EGO_LARK_CALLBACK_PUBLIC_URL":    "https://example.com",
+		"ALTER_EGO_LARK_APP_ID":               "cli_test",
+		"ALTER_EGO_LARK_APP_SECRET":           "secret",
+		"ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR": ":8080",
+		"ALTER_EGO_LARK_CALLBACK_PUBLIC_URL":  "https://example.com",
 	})
 	if err != nil {
 		t.Fatalf("ConfigFromMap returned error: %v", err)
@@ -68,5 +68,17 @@ func TestConfigFromEnvParsesCallbackEndpoints(t *testing.T) {
 	}
 	if cfg.CallbackPublicURL != "https://example.com" {
 		t.Fatalf("CallbackPublicURL = %q", cfg.CallbackPublicURL)
+	}
+}
+
+func TestOpenBaseURLDefaultsAndCustomDomain(t *testing.T) {
+	if got := OpenBaseURL(""); got != "https://open.larksuite.com" {
+		t.Fatalf("OpenBaseURL(\"\") = %q", got)
+	}
+	if got := OpenBaseURL("lark"); got != "https://open.larksuite.com" {
+		t.Fatalf("OpenBaseURL(\"lark\") = %q", got)
+	}
+	if got := OpenBaseURL("https://open.feishu.cn"); got != "https://open.feishu.cn" {
+		t.Fatalf("OpenBaseURL(custom) = %q", got)
 	}
 }

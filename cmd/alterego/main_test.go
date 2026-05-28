@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/yuqitao1024/alter-ego/internal/agent"
+	"github.com/yuqitao1024/alter-ego/internal/lark"
 	"github.com/yuqitao1024/alter-ego/internal/orchestrator"
+	"github.com/yuqitao1024/alter-ego/internal/web"
 )
 
 func TestBuildTaskSubsystemRequiresConfigRoot(t *testing.T) {
@@ -101,6 +105,112 @@ func TestBuildTaskSubsystemRequiresMachineAppServerFields(t *testing.T) {
 		if !strings.Contains(err.Error(), part) {
 			t.Fatalf("buildTaskSubsystem error = %q, want substring %q", err, part)
 		}
+	}
+}
+
+func TestBuildHTTPHandlerWithoutWebConfigServesOnlyCallback(t *testing.T) {
+	t.Parallel()
+
+	handler, listenAddr, err := buildHTTPHandler(lark.Config{
+		CallbackListenAddr: ":8080",
+	}, web.Config{}, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if err != nil {
+		t.Fatalf("buildHTTPHandler returned error: %v", err)
+	}
+	if listenAddr != ":8080" {
+		t.Fatalf("listenAddr = %q, want :8080", listenAddr)
+	}
+
+	callbackReq := httptest.NewRequest(http.MethodPost, "/lark/card/callback", nil)
+	callbackRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRecorder, callbackReq)
+	if callbackRecorder.Code != http.StatusNoContent {
+		t.Fatalf("callback code = %d, want 204", callbackRecorder.Code)
+	}
+
+	loginReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	loginRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(loginRecorder, loginReq)
+	if loginRecorder.Code != http.StatusNotFound {
+		t.Fatalf("login code = %d, want 404", loginRecorder.Code)
+	}
+}
+
+func TestBuildHTTPHandlerWithWebConfigServesLoginAndCallback(t *testing.T) {
+	t.Parallel()
+
+	handler, listenAddr, err := buildHTTPHandler(lark.Config{
+		AppID:              "cli_test",
+		AppSecret:          "secret",
+		Domain:             "https://open.feishu.cn",
+		CallbackListenAddr: "127.0.0.1:18080",
+	}, web.Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "web-secret",
+		AllowUsers:    map[string]bool{"ou_1": true},
+	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if err != nil {
+		t.Fatalf("buildHTTPHandler returned error: %v", err)
+	}
+	if listenAddr != "127.0.0.1:18080" {
+		t.Fatalf("listenAddr = %q", listenAddr)
+	}
+
+	loginReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	loginRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(loginRecorder, loginReq)
+	if loginRecorder.Code != http.StatusOK {
+		t.Fatalf("login code = %d, want 200", loginRecorder.Code)
+	}
+
+	callbackReq := httptest.NewRequest(http.MethodPost, "/lark/card/callback", nil)
+	callbackRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRecorder, callbackReq)
+	if callbackRecorder.Code != http.StatusNoContent {
+		t.Fatalf("callback code = %d, want 204", callbackRecorder.Code)
+	}
+}
+
+func TestBuildHTTPHandlerRejectsMismatchedListenAddrWhenWebEnabled(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := buildHTTPHandler(lark.Config{
+		CallbackListenAddr: ":8080",
+	}, web.Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "web-secret",
+		AllowUsers:    map[string]bool{"ou_1": true},
+	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	if err == nil {
+		t.Fatal("buildHTTPHandler returned nil error, want mismatch error")
+	}
+}
+
+func TestBuildHTTPHandlerAllowsEquivalentListenAddrWhenWebEnabled(t *testing.T) {
+	t.Parallel()
+
+	_, listenAddr, err := buildHTTPHandler(lark.Config{
+		CallbackListenAddr: ":8080",
+		AppID:              "cli_test",
+		AppSecret:          "secret",
+		Domain:             "https://open.feishu.cn",
+	}, web.Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:8080",
+		SessionSecret: "web-secret",
+		AllowUsers:    map[string]bool{"ou_1": true},
+	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	if err != nil {
+		t.Fatalf("buildHTTPHandler returned error: %v", err)
+	}
+	if listenAddr != "127.0.0.1:8080" {
+		t.Fatalf("listenAddr = %q", listenAddr)
 	}
 }
 

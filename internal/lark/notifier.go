@@ -15,7 +15,7 @@ type TaskNotifier struct {
 }
 
 func NewTaskNotifier(cfg Config) *TaskNotifier {
-	apiClient := larkapi.NewClient(cfg.AppID, cfg.AppSecret, larkapi.WithOpenBaseUrl(baseURL(cfg.Domain)))
+	apiClient := larkapi.NewClient(cfg.AppID, cfg.AppSecret, larkapi.WithOpenBaseUrl(OpenBaseURL(cfg.Domain)))
 	return &TaskNotifier{
 		sender: NewSender(NewSDKMessageCreator(apiClient.Im)),
 	}

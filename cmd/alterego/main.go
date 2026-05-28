@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +19,7 @@ import (
 	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
 	"github.com/yuqitao1024/alter-ego/internal/lark"
 	"github.com/yuqitao1024/alter-ego/internal/orchestrator"
+	"github.com/yuqitao1024/alter-ego/internal/web"
 )
 
 func main() {
@@ -30,6 +33,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	webCfg, webEnabled, err := web.ConfigFromEnvOptional()
+	if err != nil {
+		return err
+	}
 	agentCfg := agent.ConfigFromEnv()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -37,11 +44,11 @@ func run() error {
 
 	sessions := agent.NewSessionStore(12)
 	taskSubsystem, err := buildTaskSubsystem(ctx, taskSubsystemConfig{
-		RegistryRoot:            taskRegistryRoot(),
-		DBPath:                  taskDBPath(),
-		Notifier:                lark.NewTaskNotifier(larkCfg),
-		LLMConfig:               agentCfg,
-		ProgressReportsEnabled:  taskProgressReportsEnabled(),
+		RegistryRoot:           taskRegistryRoot(),
+		DBPath:                 taskDBPath(),
+		Notifier:               lark.NewTaskNotifier(larkCfg),
+		LLMConfig:              agentCfg,
+		ProgressReportsEnabled: taskProgressReportsEnabled(),
 	})
 	if err != nil {
 		return err
@@ -55,13 +62,15 @@ func run() error {
 	handler := agent.NewRouter(commandHandler, taskSubsystem.TaskHandler, chatHandler)
 
 	adapter := lark.NewAdapter(larkCfg, handler)
-	if larkCfg.CallbackListenAddr != "" {
-		callbackHandler := lark.NewCallbackHandler(adapter)
-		mux := http.NewServeMux()
-		mux.Handle("/lark/card/callback", callbackHandler)
+	callbackHandler := lark.NewCallbackHandler(adapter)
+	httpHandler, listenAddr, err := buildHTTPHandler(larkCfg, webCfg, webEnabled, callbackHandler)
+	if err != nil {
+		return err
+	}
+	if listenAddr != "" {
 		go func() {
-			if err := http.ListenAndServe(larkCfg.CallbackListenAddr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("lark callback server stopped: %v", err)
+			if err := http.ListenAndServe(listenAddr, httpHandler); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("http server stopped: %v", err)
 			}
 		}()
 	}
@@ -70,6 +79,57 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, callbackHandler http.Handler) (http.Handler, string, error) {
+	if !webEnabled {
+		mux := http.NewServeMux()
+		if callbackHandler != nil {
+			mux.Handle("/lark/card/callback", callbackHandler)
+		}
+		return mux, larkCfg.CallbackListenAddr, nil
+	}
+
+	listenAddr := webCfg.ListenAddr
+	if callbackListen := strings.TrimSpace(larkCfg.CallbackListenAddr); callbackListen != "" && !sameListenTarget(callbackListen, listenAddr) {
+		return nil, "", fmt.Errorf("ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR must match ALTER_EGO_WEB_LISTEN_ADDR when web is enabled")
+	}
+
+	oauth := web.LarkOAuthClient{
+		AppID:       larkCfg.AppID,
+		AppSecret:   larkCfg.AppSecret,
+		BaseURL:     lark.OpenBaseURL(larkCfg.Domain),
+		RedirectURI: strings.TrimRight(webCfg.PublicBaseURL, "/") + "/auth/lark/callback",
+	}
+	webHandler := web.NewHandler(webCfg, oauth, web.MockDataProvider{})
+	return web.NewRouter(webHandler, callbackHandler), listenAddr, nil
+}
+
+func sameListenTarget(a, b string) bool {
+	if strings.TrimSpace(a) == strings.TrimSpace(b) {
+		return true
+	}
+
+	hostA, portA, errA := splitListenAddr(a)
+	hostB, portB, errB := splitListenAddr(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	if portA != portB {
+		return false
+	}
+	return hostA == hostB || hostA == "" || hostB == ""
+}
+
+func splitListenAddr(addr string) (string, string, error) {
+	if strings.HasPrefix(addr, ":") {
+		return "", strings.TrimPrefix(addr, ":"), nil
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", "", err
+	}
+	return host, port, nil
 }
 
 type taskSubsystemConfig struct {
