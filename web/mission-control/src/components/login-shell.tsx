@@ -8,34 +8,33 @@ export function LoginShell() {
             <div className="relative flex h-full flex-col justify-between">
               <div className="space-y-6">
                 <div className="inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.28em] text-[rgba(180,228,222,0.78)]">
-                  Mission Control Shell
+                  Secure Access
                 </div>
                 <div className="space-y-4">
                   <p className="text-sm uppercase tracking-[0.34em] text-[rgba(137,167,186,0.82)]">
-                    Alter Ego Browser Access
+                    Operator Login
                   </p>
                   <h1 className="max-w-2xl text-5xl font-semibold leading-[1.02] text-white lg:text-7xl">
-                    Command your Codex fleet without losing the operator thread.
+                    Sign in to continue.
                   </h1>
                   <p className="max-w-xl text-base leading-7 text-[rgba(184,200,214,0.82)] lg:text-lg">
-                    The Go backend stays authoritative and exposes a live browser cockpit for authenticated operators only.
-                    Sign in with Lark to inspect active tasks and supervision state.
+                    Use Lark to open the dashboard and manage your tasks.
                   </p>
                 </div>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="animate-rise rounded-3xl border border-white/10 bg-white/5 p-5 [animation-delay:80ms]">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Access</p>
-                  <p className="mt-3 text-2xl font-semibold text-white">Lark OAuth</p>
+                  <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Identity</p>
+                  <p className="mt-3 text-2xl font-semibold text-white">Lark</p>
                 </div>
                 <div className="animate-rise rounded-3xl border border-white/10 bg-white/5 p-5 [animation-delay:160ms]">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Backend</p>
-                  <p className="mt-3 text-2xl font-semibold text-white">Go Source</p>
+                  <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Scope</p>
+                  <p className="mt-3 text-2xl font-semibold text-white">Authorized</p>
                 </div>
                 <div className="animate-rise rounded-3xl border border-white/10 bg-white/5 p-5 [animation-delay:240ms]">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Data</p>
-                  <p className="mt-3 text-2xl font-semibold text-white">Live Tasks</p>
+                  <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Session</p>
+                  <p className="mt-3 text-2xl font-semibold text-white">Protected</p>
                 </div>
               </div>
             </div>
@@ -47,7 +46,7 @@ export function LoginShell() {
                 <p className="text-xs uppercase tracking-[0.3em] text-[rgba(145,184,176,0.78)]">Operator Identity</p>
                 <h2 className="text-3xl font-semibold text-white">Sign in with Lark</h2>
                 <p className="text-sm leading-6 text-[rgba(173,190,205,0.82)]">
-                  Access is restricted to configured operator `open_id` values. Sessions are issued by Alter Ego after OAuth callback validation.
+                  Access is restricted to authorized operators.
                 </p>
               </div>
 
@@ -61,10 +60,10 @@ export function LoginShell() {
 
               <div className="mt-8 grid gap-3 text-sm text-[rgba(150,172,188,0.8)]">
                 <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                  Protected routes redirect unauthenticated sessions back to `/login`.
+                  Unauthenticated sessions are redirected back to login.
                 </div>
                 <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                  Caddy exposes one public origin while Go keeps auth, session, and callback ownership.
+                  Sign in to access the dashboard.
                 </div>
               </div>
             </div>

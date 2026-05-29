@@ -1,0 +1,17 @@
+:9527 {
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle /auth/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle /lark/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}

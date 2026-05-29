@@ -46,3 +46,25 @@ func TestRouterServesCallbackAndLoginRoutes(t *testing.T) {
 		t.Fatal("callback handler was not invoked")
 	}
 }
+
+func TestRouterServesAuthStartRoute(t *testing.T) {
+	t.Parallel()
+
+	router := NewRouter(NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, &stubDataProvider{}, nil), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/lark/start", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("auth start code = %d, want 302", recorder.Code)
+	}
+	if got := recorder.Header().Get("Location"); got == "" || got == "/login" || got[:13] != "/oauth?state=" {
+		t.Fatalf("Location = %q, want stub OAuth authorize url", got)
+	}
+}

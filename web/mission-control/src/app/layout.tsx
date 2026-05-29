@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Alter Ego Mission Control',
-  description: 'Browser dashboard for Alter Ego task supervision'
+  title: 'Alter Ego',
+  description: 'Secure operator dashboard'
 }
 
 export default function RootLayout({
