@@ -602,7 +602,7 @@ func TestCompleteIgnoresStopErrorsAndStillMarksTaskCompleted(t *testing.T) {
 func TestReopenStoppedTaskSendsNewInputOnSameThread(t *testing.T) {
 	t.Parallel()
 
-	runner := &fakeServiceRunner{}
+	runner := &fakeServiceRunner{hasSession: true}
 	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
 	defer cleanup()
 
@@ -669,6 +669,9 @@ func TestReopenStoppedTaskSendsNewInputOnSameThread(t *testing.T) {
 	if len(runner.sentInputs) != 1 || runner.sentInputs[0] != "Resolve the git conflict, rerun tests, and report the result." {
 		t.Fatalf("runner.sentInputs = %#v", runner.sentInputs)
 	}
+	if len(runner.calls) < 2 || !reflect.DeepEqual(runner.calls[:2], []string{"has-session", "send"}) {
+		t.Fatalf("runner.calls prefix = %v, want [has-session send]", runner.calls)
+	}
 
 	req, err := store.GetTaskServerRequest(context.Background(), "req-1")
 	if err != nil {
@@ -691,7 +694,7 @@ func TestReopenReturnsExplicitErrorWhenOriginalThreadIsMissing(t *testing.T) {
 	t.Parallel()
 
 	runner := &fakeServiceRunner{
-		sendErr: errors.New("send app-server input: turn/steer: thread not found: thread-1"),
+		hasSession: false,
 	}
 	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
 	defer cleanup()
@@ -712,6 +715,9 @@ func TestReopenReturnsExplicitErrorWhenOriginalThreadIsMissing(t *testing.T) {
 	}
 	if want := `task "task-reopen-missing-thread" cannot be reopened because its original Codex thread is no longer available`; err.Error() != want {
 		t.Fatalf("Reopen error = %q, want %q", err.Error(), want)
+	}
+	if !reflect.DeepEqual(runner.calls, []string{"has-session"}) {
+		t.Fatalf("runner.calls = %v, want [has-session]", runner.calls)
 	}
 }
 
