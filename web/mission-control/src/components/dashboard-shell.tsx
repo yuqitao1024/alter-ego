@@ -19,6 +19,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   const [selectedTask, setSelectedTask] = useState<DashboardTask | null>(null)
   const [selectedTaskDetail, setSelectedTaskDetail] = useState<DashboardTaskDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailSection, setDetailSection] = useState<'overview' | 'timeline' | 'questions'>('overview')
   const [loading, setLoading] = useState(true)
   const [actionText, setActionText] = useState('')
   const [actionError, setActionError] = useState('')
@@ -139,6 +140,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
     setActionText('')
     setActionError('')
     setActionSuccess('')
+    setDetailSection('overview')
   }, [selectedTask?.id])
 
   useEffect(() => {
@@ -255,7 +257,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
 
   return (
     <main className="min-h-screen px-5 py-5 lg:px-8 lg:py-7">
-      <div className="mx-auto grid min-h-[calc(100vh-2.5rem)] max-w-[1540px] grid-cols-1 gap-5 lg:grid-cols-[110px_minmax(0,1fr)_360px]">
+      <div className="mx-auto grid min-h-[calc(100vh-2.5rem)] max-w-[1880px] grid-cols-1 gap-5 xl:grid-cols-[96px_minmax(0,1.24fr)_minmax(430px,0.86fr)]">
         <aside className="overflow-hidden rounded-[28px] border border-white/10 bg-[rgba(7,13,23,0.78)] p-5 shadow-halo backdrop-blur-xl">
           <div className="flex h-full flex-col justify-between">
             <div className="space-y-5">
@@ -279,24 +281,26 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
         </aside>
 
         <section className="overflow-hidden rounded-[30px] border border-white/10 bg-[rgba(8,15,26,0.78)] shadow-halo backdrop-blur-xl">
-          <div className="border-b border-white/10 px-6 py-6 lg:px-8">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div className="space-y-3">
+          <div className="border-b border-white/10 px-6 py-5 lg:px-8">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+              <div className="space-y-2">
                 <p className="text-xs uppercase tracking-[0.32em] text-[rgba(148,186,179,0.76)]">Alter Ego Mission Control</p>
-                <h1 className="text-4xl font-semibold text-white lg:text-5xl">Task Overview Dashboard</h1>
-                <p className="max-w-2xl text-sm leading-7 text-[rgba(177,193,208,0.78)]">
+                <h1 className="text-3xl font-semibold text-white lg:text-[2.8rem]">Task Overview Dashboard</h1>
+                <p className="max-w-3xl text-sm leading-6 text-[rgba(177,193,208,0.78)]">
                   Browser cockpit backed by the live Alter Ego task store. Same-origin auth stays in Go; this shell reads real orchestration state.
                 </p>
               </div>
-              <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-5 py-4 text-right">
-                <p className="text-xs uppercase tracking-[0.28em] text-[rgba(141,160,177,0.76)]">Operator</p>
-                <p className="mt-2 text-xl font-semibold text-white">{initialSession.name || initialSession.open_id}</p>
-                <p className="mt-1 text-xs text-[rgba(140,171,162,0.76)]">{initialSession.open_id}</p>
+              <div className="grid gap-3 sm:grid-cols-[minmax(260px,340px)]">
+                <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-5 py-4 text-right">
+                  <p className="text-xs uppercase tracking-[0.28em] text-[rgba(141,160,177,0.76)]">Operator</p>
+                  <p className="mt-2 text-xl font-semibold text-white">{initialSession.name || initialSession.open_id}</p>
+                  <p className="mt-1 text-xs text-[rgba(140,171,162,0.76)]">{initialSession.open_id}</p>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] lg:p-8">
+          <div className="grid gap-6 p-6 2xl:grid-cols-[minmax(0,1.2fr)_minmax(470px,0.9fr)] lg:p-8">
             <div className="space-y-6">
               <TaskLaunchPanel
                 templates={templates}
@@ -328,16 +332,17 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                 </div>
 
                 <div className="overflow-hidden rounded-[22px] border border-white/8">
-                  <div className="grid grid-cols-[1.2fr_0.8fr_2fr] bg-white/[0.03] px-4 py-3 text-[11px] uppercase tracking-[0.26em] text-[rgba(144,166,184,0.72)]">
+                  <div className="hidden grid-cols-[1.15fr_0.72fr_1.9fr_0.95fr] bg-white/[0.03] px-4 py-3 text-[11px] uppercase tracking-[0.26em] text-[rgba(144,166,184,0.72)] xl:grid">
                     <span>Task</span>
                     <span>Status</span>
                     <span>Summary</span>
+                    <span className="text-right">Actions</span>
                   </div>
                   <div className="divide-y divide-white/6">
                     {tasks.map((task, index) => (
                       <div
                         key={task.id}
-                        className={`grid grid-cols-[1.15fr_0.8fr_1.7fr_0.95fr] gap-4 px-4 py-4 transition hover:bg-white/[0.03] ${selectedTask?.id === task.id ? 'bg-white/[0.04]' : ''}`}
+                        className={`grid gap-4 px-4 py-4 transition hover:bg-white/[0.03] xl:grid-cols-[1.15fr_0.72fr_1.9fr_0.95fr] ${selectedTask?.id === task.id ? 'bg-white/[0.04]' : ''}`}
                         style={{ animationDelay: `${index * 70}ms` }}
                       >
                         <button className="text-left" onClick={() => setSelectedTask(task)}>
@@ -352,14 +357,16 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                         <button className="text-left text-sm leading-6 text-[rgba(178,194,207,0.8)]" onClick={() => setSelectedTask(task)}>
                           {task.summary}
                         </button>
-                        <InlineTaskActions
-                          task={task}
-                          busy={actionBusy && busyTaskID === task.id}
-                          onSelect={() => setSelectedTask(task)}
-                          onStop={() => runAction('stop', task)}
-                          onComplete={() => runAction('complete', task)}
-                          onDelete={() => runAction('delete', task)}
-                        />
+                        <div className="xl:flex xl:justify-end">
+                          <InlineTaskActions
+                            task={task}
+                            busy={actionBusy && busyTaskID === task.id}
+                            onSelect={() => setSelectedTask(task)}
+                            onStop={() => runAction('stop', task)}
+                            onComplete={() => runAction('complete', task)}
+                            onDelete={() => runAction('delete', task)}
+                          />
+                        </div>
                       </div>
                     ))}
                     {!loading && tasks.length === 0 ? (
@@ -370,44 +377,57 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
               </section>
             </div>
 
-            <aside className="rounded-[28px] border border-white/10 bg-[rgba(6,11,18,0.82)] p-6">
+            <aside className="rounded-[28px] border border-white/10 bg-[rgba(6,11,18,0.82)] p-6 xl:sticky xl:top-5 xl:max-h-[calc(100vh-2.5rem)] xl:overflow-y-auto">
               <p className="text-xs uppercase tracking-[0.3em] text-[rgba(145,165,182,0.74)]">Detail panel</p>
               <h2 className="mt-3 text-2xl font-semibold text-white">
                 {selectedTaskDetail?.title || selectedTask?.title || 'Select a task'}
               </h2>
-              <div className="mt-6 space-y-4">
-                <DetailBlock label="Task ID" value={selectedTaskDetail?.id || selectedTask?.id || 'No selection'} />
-                <DetailBlock label="Status" value={selectedTaskDetail?.status || selectedTask?.status || 'No selection'} />
-                <DetailBlock
-                  label="Repository / Template"
-                  value={
-                    selectedTaskDetail
-                      ? `${selectedTaskDetail.repository_id} / ${selectedTaskDetail.template_id}`
-                      : selectedTask
-                        ? `${selectedTask.repository_id} / ${selectedTask.template_id}`
-                        : 'No selection'
-                  }
-                />
-                <DetailBlock
-                  label="Latest summary"
-                  value={selectedTaskDetail?.summary || selectedTask?.summary || 'Choose a task row to inspect the live task payload.'}
-                  multiline
-                />
-                <DetailBlock
-                  label="Awaiting operator input"
-                  value={selectedTaskDetail?.awaiting_question?.question_text || selectedTask?.awaiting_question?.question_text || 'No explicit operator question is pending.'}
-                  multiline
-                />
-                <TimelineBlock
-                  label="Event timeline"
-                  loading={detailLoading}
-                  events={selectedTaskDetail?.events || []}
-                />
-                <QuestionHistoryBlock
-                  label="Question history"
-                  loading={detailLoading}
-                  questions={selectedTaskDetail?.questions || []}
-                />
+              <div className="mt-6 flex flex-wrap gap-2">
+                <DetailTabButton label="Overview" active={detailSection === 'overview'} onClick={() => setDetailSection('overview')} />
+                <DetailTabButton label="Timeline" active={detailSection === 'timeline'} onClick={() => setDetailSection('timeline')} />
+                <DetailTabButton label="Questions" active={detailSection === 'questions'} onClick={() => setDetailSection('questions')} />
+              </div>
+              <div className="mt-5 space-y-4">
+                {detailSection === 'overview' ? (
+                  <>
+                    <DetailBlock label="Task ID" value={selectedTaskDetail?.id || selectedTask?.id || 'No selection'} />
+                    <DetailBlock label="Status" value={selectedTaskDetail?.status || selectedTask?.status || 'No selection'} />
+                    <DetailBlock
+                      label="Repository / Template"
+                      value={
+                        selectedTaskDetail
+                          ? `${selectedTaskDetail.repository_id} / ${selectedTaskDetail.template_id}`
+                          : selectedTask
+                            ? `${selectedTask.repository_id} / ${selectedTask.template_id}`
+                            : 'No selection'
+                      }
+                    />
+                    <DetailBlock
+                      label="Latest summary"
+                      value={selectedTaskDetail?.summary || selectedTask?.summary || 'Choose a task row to inspect the live task payload.'}
+                      multiline
+                    />
+                    <DetailBlock
+                      label="Awaiting operator input"
+                      value={selectedTaskDetail?.awaiting_question?.question_text || selectedTask?.awaiting_question?.question_text || 'No explicit operator question is pending.'}
+                      multiline
+                    />
+                  </>
+                ) : null}
+                {detailSection === 'timeline' ? (
+                  <TimelineBlock
+                    label="Event timeline"
+                    loading={detailLoading}
+                    events={selectedTaskDetail?.events || []}
+                  />
+                ) : null}
+                {detailSection === 'questions' ? (
+                  <QuestionHistoryBlock
+                    label="Question history"
+                    loading={detailLoading}
+                    questions={selectedTaskDetail?.questions || []}
+                  />
+                ) : null}
               </div>
 
               <TaskControls
@@ -479,7 +499,7 @@ function TaskLaunchPanel({
         </button>
       </div>
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="mt-5 grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
         <label className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
           <span className="text-xs uppercase tracking-[0.22em] text-[rgba(144,165,183,0.72)]">Template</span>
           <select
@@ -699,6 +719,30 @@ function ActionButton({
       disabled={disabled}
       onClick={onClick}
       className={`rounded-2xl border px-4 py-3 text-sm font-medium transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function DetailTabButton({
+  label,
+  active,
+  onClick
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-4 py-2 text-[11px] uppercase tracking-[0.22em] transition ${
+        active
+          ? 'border-[rgba(87,224,172,0.24)] bg-[rgba(53,158,127,0.14)] text-[rgba(206,255,236,0.94)]'
+          : 'border-white/10 bg-white/[0.03] text-[rgba(170,188,203,0.76)] hover:bg-white/[0.06]'
+      }`}
     >
       {label}
     </button>
