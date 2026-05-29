@@ -23,6 +23,7 @@ tar -tzf "${ARCHIVE_PATH}" > "${TMP_DIR}/archive.txt"
 
 grep -q 'alterego/opt/alterego/bin/alterego$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/etc/systemd/system/alteregod.service$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/etc/systemd/system/alterego-web.service$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/etc/alterego/alterego.env.example$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/opt/alterego/config/configs/machines/example.yaml$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/opt/alterego/config/configs/repositories/example.yaml$' "${TMP_DIR}/archive.txt"

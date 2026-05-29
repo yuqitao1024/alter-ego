@@ -27,6 +27,7 @@ mkdir -p \
 	"${STAGE_DIR}/opt/alterego/config/configs/templates" \
 	"${STAGE_DIR}/opt/alterego/config/docs/workflows" \
 	"${STAGE_DIR}/etc/alterego" \
+	"${STAGE_DIR}/etc/caddy" \
 	"${STAGE_DIR}/etc/systemd/system" \
 	"${STAGE_DIR}/var/lib/alterego" \
 	"${OUTPUT_DIR}"
@@ -39,7 +40,9 @@ mkdir -p \
 chmod +x "${STAGE_DIR}/opt/alterego/bin/alterego"
 
 cp "${ROOT_DIR}/packaging/templates/alteregod.service" "${STAGE_DIR}/etc/systemd/system/alteregod.service"
+cp "${ROOT_DIR}/packaging/templates/alterego-web.service" "${STAGE_DIR}/etc/systemd/system/alterego-web.service"
 cp "${ROOT_DIR}/packaging/templates/alterego.env.example" "${STAGE_DIR}/etc/alterego/alterego.env.example"
+cp "${ROOT_DIR}/packaging/templates/Caddyfile" "${STAGE_DIR}/etc/caddy/Caddyfile"
 
 cp "${ROOT_DIR}/configs/machines/example.yaml" "${STAGE_DIR}/opt/alterego/config/configs/machines/example.yaml"
 cp "${ROOT_DIR}/configs/repositories/example.yaml" "${STAGE_DIR}/opt/alterego/config/configs/repositories/example.yaml"

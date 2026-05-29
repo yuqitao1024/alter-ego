@@ -1,0 +1,17 @@
+[Unit]
+Description=Alter Ego Mission Control frontend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/alterego/web/mission-control
+EnvironmentFile=/etc/alterego/alterego-web.env
+ExecStart=/usr/bin/env node server.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
