@@ -84,19 +84,17 @@ func (c LarkOAuthClient) ExchangeCode(ctx context.Context, code string) (OAuthTo
 	}
 
 	var payload struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Data struct {
-			AccessToken string `json:"access_token"`
-		} `json:"data"`
+		Code        int    `json:"code"`
+		Msg         string `json:"msg"`
+		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return OAuthToken{}, err
 	}
-	if payload.Code != 0 || strings.TrimSpace(payload.Data.AccessToken) == "" {
+	if payload.Code != 0 || strings.TrimSpace(payload.AccessToken) == "" {
 		return OAuthToken{}, fmt.Errorf("lark token exchange rejected: code=%d msg=%s", payload.Code, payload.Msg)
 	}
-	return OAuthToken{AccessToken: payload.Data.AccessToken}, nil
+	return OAuthToken{AccessToken: payload.AccessToken}, nil
 }
 
 func (c LarkOAuthClient) FetchUser(ctx context.Context, accessToken string) (OAuthUser, error) {

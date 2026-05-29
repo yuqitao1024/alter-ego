@@ -1,6 +1,8 @@
 package web
 
 import (
+	"context"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -75,5 +77,34 @@ func TestCallbackRejectsMismatchedState(t *testing.T) {
 
 	if recorder.Code != 400 {
 		t.Fatalf("Code = %d, want 400", recorder.Code)
+	}
+}
+
+func TestExchangeCodeAcceptsTopLevelAccessTokenResponse(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/open-apis/authen/v2/oauth/token" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"msg":"","access_token":"token-123","token_type":"Bearer","expires_in":7200}`))
+	}))
+	defer server.Close()
+
+	client := LarkOAuthClient{
+		AppID:       "cli_test",
+		AppSecret:   "secret",
+		BaseURL:     server.URL,
+		RedirectURI: "https://dashboard.example.com/auth/lark/callback",
+		HTTPClient:  server.Client(),
+	}
+
+	token, err := client.ExchangeCode(context.Background(), "code-1")
+	if err != nil {
+		t.Fatalf("ExchangeCode returned error: %v", err)
+	}
+	if token.AccessToken != "token-123" {
+		t.Fatalf("token.AccessToken = %q, want token-123", token.AccessToken)
 	}
 }
