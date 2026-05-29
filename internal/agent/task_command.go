@@ -194,16 +194,8 @@ func (h *TaskCommandHandler) handleTaskActionCard(ctx context.Context, event cha
 		if err := h.service.Stop(ctx, taskID); err != nil {
 			return channel.CardActionResponse{}, err
 		}
-		task, err := h.service.Status(ctx, taskID)
-		if err != nil {
-			return channel.CardActionResponse{}, err
-		}
 		return channel.CardActionResponse{
 			ToastText: fmt.Sprintf("Task %s stopped.", taskID),
-			Message: &channel.OutgoingMessage{
-				Conversation: event.Conversation,
-				Card:         &channel.CardMessage{Payload: buildTaskNoticeCard("Task Stopped", larkcard.TemplateRed, fmt.Sprintf("Task **%s** stopped.", taskID), &task)},
-			},
 		}, nil
 	case "delete":
 		if err := h.service.Delete(ctx, taskID); err != nil {
@@ -211,10 +203,6 @@ func (h *TaskCommandHandler) handleTaskActionCard(ctx context.Context, event cha
 		}
 		return channel.CardActionResponse{
 			ToastText: fmt.Sprintf("Task %s deleted.", taskID),
-			Message: &channel.OutgoingMessage{
-				Conversation: event.Conversation,
-				Card:         &channel.CardMessage{Payload: buildTaskNoticeCard("Task Deleted", larkcard.TemplateRed, fmt.Sprintf("Task **%s** deleted.", taskID), nil)},
-			},
 		}, nil
 	default:
 		return channel.CardActionResponse{ToastText: fmt.Sprintf("Unsupported task action: %s", action)}, nil
@@ -236,31 +224,15 @@ func (h *TaskCommandHandler) handleTaskReplyCard(ctx context.Context, event chan
 		if err := h.service.Reply(ctx, request.taskID, replyText); err != nil {
 			return channel.CardActionResponse{}, err
 		}
-		task, err := h.service.Status(ctx, request.taskID)
-		if err != nil {
-			return channel.CardActionResponse{}, err
-		}
 		return channel.CardActionResponse{
 			ToastText: fmt.Sprintf("Task %s resumed.", request.taskID),
-			Message: &channel.OutgoingMessage{
-				Conversation: event.Conversation,
-				Card:         &channel.CardMessage{Payload: buildTaskNoticeCard("Task Resumed", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** resumed.", request.taskID), &task)},
-			},
 		}, nil
 	case "complete":
 		if err := h.service.Complete(ctx, request.taskID); err != nil {
 			return channel.CardActionResponse{}, err
 		}
-		task, err := h.service.Status(ctx, request.taskID)
-		if err != nil {
-			return channel.CardActionResponse{}, err
-		}
 		return channel.CardActionResponse{
 			ToastText: fmt.Sprintf("Task %s completed.", request.taskID),
-			Message: &channel.OutgoingMessage{
-				Conversation: event.Conversation,
-				Card:         &channel.CardMessage{Payload: buildTaskNoticeCard("Task Completed", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** completed.", request.taskID), &task)},
-			},
 		}, nil
 	default:
 		return channel.CardActionResponse{ToastText: fmt.Sprintf("Unsupported task reply action: %s", request.action)}, nil

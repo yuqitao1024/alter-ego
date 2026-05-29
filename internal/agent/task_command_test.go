@@ -178,6 +178,9 @@ func TestTaskCommandCardActionStopsTask(t *testing.T) {
 	if reply.ToastText != "Task task-1 stopped." {
 		t.Fatalf("reply.ToastText = %q", reply.ToastText)
 	}
+	if reply.Message != nil {
+		t.Fatalf("reply.Message = %#v, want nil", reply.Message)
+	}
 }
 
 func TestTaskCommandCardActionDeletesTask(t *testing.T) {
@@ -206,6 +209,9 @@ func TestTaskCommandCardActionDeletesTask(t *testing.T) {
 	}
 	if reply.ToastText != "Task task-1 deleted." {
 		t.Fatalf("reply.ToastText = %q", reply.ToastText)
+	}
+	if reply.Message != nil {
+		t.Fatalf("reply.Message = %#v, want nil", reply.Message)
 	}
 }
 
@@ -281,8 +287,8 @@ func TestTaskCommandCardActionRepliesWithSelectedChoice(t *testing.T) {
 	if reply.ToastText != "Task task-1 resumed." {
 		t.Fatalf("reply.ToastText = %q", reply.ToastText)
 	}
-	if reply.Message == nil || reply.Message.Card == nil {
-		t.Fatal("reply.Message.Card is nil")
+	if reply.Message != nil {
+		t.Fatalf("reply.Message = %#v, want nil", reply.Message)
 	}
 }
 
@@ -340,8 +346,8 @@ func TestTaskCommandCardActionCompletesTask(t *testing.T) {
 	if reply.ToastText != "Task task-1 completed." {
 		t.Fatalf("reply.ToastText = %q", reply.ToastText)
 	}
-	if reply.Message == nil || reply.Message.Card == nil {
-		t.Fatal("reply.Message.Card is nil")
+	if reply.Message != nil {
+		t.Fatalf("reply.Message = %#v, want nil", reply.Message)
 	}
 }
 
