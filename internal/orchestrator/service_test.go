@@ -687,6 +687,34 @@ func TestReopenStoppedTaskSendsNewInputOnSameThread(t *testing.T) {
 	}
 }
 
+func TestReopenReturnsExplicitErrorWhenOriginalThreadIsMissing(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		sendErr: errors.New("send app-server input: turn/steer: thread not found: thread-1"),
+	}
+	service, store, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
+	defer cleanup()
+
+	task := sampleTaskRun("task-reopen-missing-thread", StatusCompleted)
+	task.TemplateID = "feature_dev"
+	task.RepositoryID = "repo_backend"
+	task.MachineID = "machine_a"
+	task.ThreadID = "thread-1"
+	task.ActiveTurnID = "turn-1"
+	task.RemoteWorkdir = "/srv/codex-tasks/task-reopen-missing-thread/repo"
+	task.UserRequest = "Finish the dashboard implementation"
+	seedTask(t, store, task)
+
+	err := service.Reopen(context.Background(), task.TaskID, "Resolve the merge conflict and rerun tests.")
+	if err == nil {
+		t.Fatal("Reopen returned nil error")
+	}
+	if want := `task "task-reopen-missing-thread" cannot be reopened because its original Codex thread is no longer available`; err.Error() != want {
+		t.Fatalf("Reopen error = %q, want %q", err.Error(), want)
+	}
+}
+
 func TestReopenRejectsNonTerminalTask(t *testing.T) {
 	t.Parallel()
 

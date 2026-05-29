@@ -378,6 +378,9 @@ func (s *Service) Reopen(ctx context.Context, taskID, extraRequirement string) e
 
 	session, err := s.runner.SendInteractiveInput(ctx, sessionFromTask(task), requirement)
 	if err != nil {
+		if isRemoteSessionMissingError(err) {
+			return fmt.Errorf("task %q cannot be reopened because its original Codex thread is no longer available", taskID)
+		}
 		return fmt.Errorf("reopen task %q: %w", taskID, err)
 	}
 
