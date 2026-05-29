@@ -1,9 +1,9 @@
 export function LoginShell() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 py-12">
-      <section className="relative w-full max-w-[1560px] overflow-hidden rounded-[32px] border border-white/10 bg-[rgba(7,16,28,0.72)] shadow-halo backdrop-blur-xl">
-        <div className="grid min-h-[720px] xl:grid-cols-[1.24fr_0.9fr]">
-          <div className="relative overflow-hidden p-10 lg:p-14 xl:p-16">
+    <main className="min-h-screen px-0 py-0 xl:px-5 xl:py-5">
+      <section className="relative w-full overflow-hidden bg-[rgba(7,16,28,0.72)] shadow-halo backdrop-blur-xl xl:min-h-[calc(100vh-2.5rem)] xl:rounded-[32px] xl:border xl:border-white/10">
+        <div className="grid min-h-screen xl:min-h-[calc(100vh-2.5rem)] xl:grid-cols-[1.35fr_0.82fr]">
+          <div className="relative overflow-hidden p-8 sm:p-10 lg:p-14 xl:p-16 2xl:p-20">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(76,222,196,0.22),transparent_0_32%),radial-gradient(circle_at_80%_12%,rgba(87,117,255,0.18),transparent_0_26%)]" />
             <div className="relative flex h-full flex-col justify-between">
               <div className="space-y-6">
@@ -14,16 +14,16 @@ export function LoginShell() {
                   <p className="text-sm uppercase tracking-[0.34em] text-[rgba(137,167,186,0.82)]">
                     Operator Login
                   </p>
-                  <h1 className="max-w-3xl text-5xl font-semibold leading-[1.02] text-white lg:text-7xl xl:text-[5.35rem]">
+                  <h1 className="max-w-4xl text-5xl font-semibold leading-[1.02] text-white lg:text-7xl xl:text-[5.6rem]">
                     Sign in to continue.
                   </h1>
-                  <p className="max-w-2xl text-base leading-7 text-[rgba(184,200,214,0.82)] lg:text-lg">
+                  <p className="max-w-3xl text-base leading-7 text-[rgba(184,200,214,0.82)] lg:text-lg">
                     Use Lark to open the dashboard and manage your tasks.
                   </p>
                 </div>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-3">
                 <div className="animate-rise rounded-3xl border border-white/10 bg-white/5 p-5 [animation-delay:80ms]">
                   <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Identity</p>
                   <p className="mt-3 text-2xl font-semibold text-white">Lark</p>
@@ -40,8 +40,8 @@ export function LoginShell() {
             </div>
           </div>
 
-          <div className="relative flex items-center border-t border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))] p-8 lg:p-12 xl:border-l xl:border-t-0 xl:p-14">
-            <div className="mx-auto w-full max-w-[560px] rounded-[28px] border border-white/10 bg-[rgba(6,11,19,0.82)] p-8 shadow-[0_24px_60px_rgba(0,0,0,0.35)] xl:p-10">
+          <div className="relative flex items-center border-t border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))] p-6 sm:p-8 lg:p-12 xl:border-l xl:border-t-0 xl:p-14 2xl:p-16">
+            <div className="mx-auto w-full max-w-[680px] rounded-[28px] border border-white/10 bg-[rgba(6,11,19,0.82)] p-8 shadow-[0_24px_60px_rgba(0,0,0,0.35)] xl:p-10 2xl:p-12">
               <div className="mb-10 space-y-3">
                 <p className="text-xs uppercase tracking-[0.3em] text-[rgba(145,184,176,0.78)]">Operator Identity</p>
                 <h2 className="text-3xl font-semibold text-white">Sign in with Lark</h2>

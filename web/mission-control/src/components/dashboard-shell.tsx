@@ -256,8 +256,8 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   }
 
   return (
-    <main className="min-h-screen px-5 py-5 lg:px-8 lg:py-7">
-      <div className="mx-auto grid min-h-[calc(100vh-2.5rem)] max-w-[1880px] grid-cols-1 gap-5 xl:grid-cols-[96px_minmax(0,1.24fr)_minmax(430px,0.86fr)]">
+    <main className="min-h-screen px-3 py-3 sm:px-4 sm:py-4 xl:px-5 xl:py-5">
+      <div className="grid min-h-[calc(100vh-1.5rem)] w-full grid-cols-1 gap-4 xl:grid-cols-[88px_minmax(0,1.38fr)_minmax(390px,0.92fr)] 2xl:grid-cols-[88px_minmax(0,1.48fr)_minmax(440px,0.82fr)]">
         <aside className="overflow-hidden rounded-[28px] border border-white/10 bg-[rgba(7,13,23,0.78)] p-5 shadow-halo backdrop-blur-xl">
           <div className="flex h-full flex-col justify-between">
             <div className="space-y-5">
@@ -281,7 +281,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
         </aside>
 
         <section className="overflow-hidden rounded-[30px] border border-white/10 bg-[rgba(8,15,26,0.78)] shadow-halo backdrop-blur-xl">
-          <div className="border-b border-white/10 px-6 py-5 lg:px-8">
+          <div className="border-b border-white/10 px-5 py-5 lg:px-7">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div className="space-y-2">
                 <p className="text-xs uppercase tracking-[0.32em] text-[rgba(148,186,179,0.76)]">Alter Ego Mission Control</p>
@@ -290,7 +290,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                   Browser cockpit backed by the live Alter Ego task store. Same-origin auth stays in Go; this shell reads real orchestration state.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-[minmax(260px,340px)]">
+              <div className="grid gap-3 sm:grid-cols-[minmax(280px,380px)]">
                 <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-5 py-4 text-right">
                   <p className="text-xs uppercase tracking-[0.28em] text-[rgba(141,160,177,0.76)]">Operator</p>
                   <p className="mt-2 text-xl font-semibold text-white">{initialSession.name || initialSession.open_id}</p>
@@ -300,7 +300,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
             </div>
           </div>
 
-          <div className="grid gap-6 p-6 2xl:grid-cols-[minmax(0,1.2fr)_minmax(470px,0.9fr)] lg:p-8">
+          <div className="grid gap-5 p-5 xl:grid-cols-[minmax(0,1.28fr)_minmax(360px,0.9fr)] 2xl:grid-cols-[minmax(0,1.3fr)_minmax(420px,0.88fr)] lg:p-7">
             <div className="space-y-6">
               <TaskLaunchPanel
                 templates={templates}
@@ -332,7 +332,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                 </div>
 
                 <div className="overflow-hidden rounded-[22px] border border-white/8">
-                  <div className="hidden grid-cols-[1.15fr_0.72fr_1.9fr_0.95fr] bg-white/[0.03] px-4 py-3 text-[11px] uppercase tracking-[0.26em] text-[rgba(144,166,184,0.72)] xl:grid">
+                  <div className="hidden grid-cols-[1.05fr_0.74fr_1.95fr_0.9fr] bg-white/[0.03] px-4 py-3 text-[11px] uppercase tracking-[0.26em] text-[rgba(144,166,184,0.72)] lg:grid">
                     <span>Task</span>
                     <span>Status</span>
                     <span>Summary</span>
@@ -342,7 +342,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                     {tasks.map((task, index) => (
                       <div
                         key={task.id}
-                        className={`grid gap-4 px-4 py-4 transition hover:bg-white/[0.03] xl:grid-cols-[1.15fr_0.72fr_1.9fr_0.95fr] ${selectedTask?.id === task.id ? 'bg-white/[0.04]' : ''}`}
+                        className={`grid gap-4 px-4 py-4 transition hover:bg-white/[0.03] lg:grid-cols-[1.05fr_0.74fr_1.95fr_0.9fr] ${selectedTask?.id === task.id ? 'bg-white/[0.04]' : ''}`}
                         style={{ animationDelay: `${index * 70}ms` }}
                       >
                         <button className="text-left" onClick={() => setSelectedTask(task)}>
@@ -357,7 +357,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                         <button className="text-left text-sm leading-6 text-[rgba(178,194,207,0.8)]" onClick={() => setSelectedTask(task)}>
                           {task.summary}
                         </button>
-                        <div className="xl:flex xl:justify-end">
+                        <div className="lg:flex lg:justify-end">
                           <InlineTaskActions
                             task={task}
                             busy={actionBusy && busyTaskID === task.id}
@@ -377,7 +377,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
               </section>
             </div>
 
-            <aside className="rounded-[28px] border border-white/10 bg-[rgba(6,11,18,0.82)] p-6 xl:sticky xl:top-5 xl:max-h-[calc(100vh-2.5rem)] xl:overflow-y-auto">
+            <aside className="rounded-[28px] border border-white/10 bg-[rgba(6,11,18,0.82)] p-6 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
               <p className="text-xs uppercase tracking-[0.3em] text-[rgba(145,165,182,0.74)]">Detail panel</p>
               <h2 className="mt-3 text-2xl font-semibold text-white">
                 {selectedTaskDetail?.title || selectedTask?.title || 'Select a task'}
