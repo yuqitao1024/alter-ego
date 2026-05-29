@@ -10,6 +10,8 @@ type DashboardShellProps = {
 const statusTone: Record<string, string> = {
   running: 'text-[rgb(108,240,188)] bg-[rgba(58,163,126,0.16)] border-[rgba(87,224,172,0.22)]',
   waiting_user_input: 'text-[rgb(255,209,122)] bg-[rgba(176,121,20,0.16)] border-[rgba(247,191,93,0.26)]',
+  completed: 'text-[rgb(140,169,255)] bg-[rgba(67,90,199,0.14)] border-[rgba(133,163,255,0.2)]',
+  stopped: 'text-[rgb(255,138,138)] bg-[rgba(166,54,54,0.12)] border-[rgba(255,138,138,0.18)]',
   failed: 'text-[rgb(255,134,134)] bg-[rgba(184,60,60,0.14)] border-[rgba(255,122,122,0.22)]'
 }
 
@@ -177,6 +179,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   }, [])
 
   const tasks = payload?.tasks ?? []
+  const summary = payload?.summary
 
   async function createTask() {
     if (createBusy) {
@@ -256,142 +259,157 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   }
 
   return (
-    <main className="min-h-screen px-3 py-3 sm:px-4 sm:py-4 xl:px-5 xl:py-5">
-      <div className="grid min-h-[calc(100vh-1.5rem)] w-full grid-cols-1 gap-4 xl:grid-cols-[88px_minmax(0,1.38fr)_minmax(390px,0.92fr)] 2xl:grid-cols-[88px_minmax(0,1.48fr)_minmax(440px,0.82fr)]">
-        <aside className="overflow-hidden rounded-[28px] border border-white/10 bg-[rgba(7,13,23,0.78)] p-5 shadow-halo backdrop-blur-xl">
-          <div className="flex h-full flex-col justify-between">
-            <div className="space-y-5">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(79,255,214,0.18),rgba(89,111,255,0.25))] text-lg font-semibold text-white">
-                AE
-              </div>
-              <div className="space-y-3 text-[11px] uppercase tracking-[0.34em] text-[rgba(145,164,184,0.72)]">
-                <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-4 text-center text-[rgba(178,221,213,0.9)]">
-                  Overview
-                </div>
-                <div className="rounded-2xl border border-transparent px-3 py-4 text-center">Tasks</div>
-                <div className="rounded-2xl border border-transparent px-3 py-4 text-center">Signals</div>
-              </div>
+    <main className="min-h-screen px-3 py-3 xl:px-4 xl:py-4">
+      <div className="grid min-h-[calc(100vh-1.5rem)] grid-cols-1 gap-4 xl:grid-cols-[156px_minmax(0,1fr)]">
+        <aside className="hidden overflow-hidden rounded-[28px] border border-white/10 bg-[rgba(7,13,23,0.84)] px-4 py-5 shadow-halo backdrop-blur-xl xl:flex xl:flex-col xl:justify-between">
+          <div>
+            <div className="flex h-14 w-14 items-center justify-center rounded-[18px] border border-white/10 bg-[linear-gradient(135deg,rgba(79,255,214,0.18),rgba(89,111,255,0.26))] text-sm font-semibold tracking-[0.08em] text-white">
+              AE
             </div>
-            <form action="/auth/logout" method="post">
-              <button className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-4 text-[11px] uppercase tracking-[0.28em] text-[rgba(180,198,212,0.78)] transition hover:border-white/20 hover:bg-white/[0.08]">
-                Logout
-              </button>
-            </form>
+            <div className="mt-6 space-y-2 text-[11px] uppercase tracking-[0.14em] text-[rgba(145,164,184,0.72)]">
+              <div className="rounded-2xl border border-white/8 bg-white/[0.05] px-3 py-4 text-center text-[rgba(205,246,234,0.9)]">Queue</div>
+              <div className="rounded-2xl border border-transparent px-3 py-4 text-center">Runs</div>
+              <div className="rounded-2xl border border-transparent px-3 py-4 text-center">Signals</div>
+            </div>
           </div>
+          <form action="/auth/logout" method="post">
+            <button className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-4 text-[11px] uppercase tracking-[0.14em] text-[rgba(180,198,212,0.78)] transition hover:border-white/20 hover:bg-white/[0.08]">
+              Logout
+            </button>
+          </form>
         </aside>
 
-        <section className="overflow-hidden rounded-[30px] border border-white/10 bg-[rgba(8,15,26,0.78)] shadow-halo backdrop-blur-xl">
-          <div className="border-b border-white/10 px-5 py-5 lg:px-7">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-[0.32em] text-[rgba(148,186,179,0.76)]">Alter Ego Mission Control</p>
-                <h1 className="text-3xl font-semibold text-white lg:text-[2.8rem]">Task Overview Dashboard</h1>
-                <p className="max-w-3xl text-sm leading-6 text-[rgba(177,193,208,0.78)]">
-                  Browser cockpit backed by the live Alter Ego task store. Same-origin auth stays in Go; this shell reads real orchestration state.
-                </p>
+        <section className="rounded-[30px] border border-white/10 bg-[rgba(8,15,26,0.78)] p-4 shadow-halo backdrop-blur-xl lg:p-5">
+          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.28fr)_minmax(320px,420px)]">
+            <article className="rounded-[26px] border border-white/8 bg-white/[0.04] px-6 py-6">
+              <p className="text-xs uppercase tracking-[0.3em] text-[rgba(148,186,179,0.76)]">Alter Ego Mission Control</p>
+              <h1 className="mt-3 max-w-5xl text-4xl font-semibold leading-[0.96] text-white lg:text-5xl 2xl:text-[3.7rem]">
+                Task queue first. Everything else secondary.
+              </h1>
+              <p className="mt-4 max-w-4xl text-sm leading-7 text-[rgba(177,193,208,0.8)] lg:text-[15px]">
+                This browser workspace keeps the queue as the primary anchor. Tasks stay central, operator decisions happen inline, and the detail view behaves like an inspector instead of competing with the main stage.
+              </p>
+            </article>
+
+            <aside className="rounded-[26px] border border-white/8 bg-white/[0.04] px-5 py-5">
+              <p className="text-xs uppercase tracking-[0.24em] text-[rgba(143,166,183,0.74)]">Operator snapshot</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3 2xl:grid-cols-3">
+                <SignalChip label="Running" value={loading ? '...' : String(summary?.running ?? 0)} />
+                <SignalChip label="Waiting" value={loading ? '...' : String(summary?.waiting_user_input ?? 0)} />
+                <SignalChip label="Completed" value={loading ? '...' : String(summary?.completed ?? 0)} />
               </div>
-              <div className="grid gap-3 sm:grid-cols-[minmax(280px,380px)]">
-                <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-5 py-4 text-right">
-                  <p className="text-xs uppercase tracking-[0.28em] text-[rgba(141,160,177,0.76)]">Operator</p>
-                  <p className="mt-2 text-xl font-semibold text-white">{initialSession.name || initialSession.open_id}</p>
-                  <p className="mt-1 text-xs text-[rgba(140,171,162,0.76)]">{initialSession.open_id}</p>
-                </div>
+              <div className="mt-4 rounded-[20px] border border-white/8 bg-white/[0.03] px-4 py-4">
+                <p className="text-xs uppercase tracking-[0.22em] text-[rgba(141,160,177,0.76)]">Current operator</p>
+                <p className="mt-2 text-lg font-semibold text-white">{initialSession.name || initialSession.open_id}</p>
+                <p className="mt-1 text-xs text-[rgba(140,171,162,0.76)]">{initialSession.open_id}</p>
               </div>
-            </div>
+            </aside>
           </div>
 
-          <div className="grid gap-5 p-5 xl:grid-cols-[minmax(0,1.28fr)_minmax(360px,0.9fr)] 2xl:grid-cols-[minmax(0,1.3fr)_minmax(420px,0.88fr)] lg:p-7">
-            <div className="space-y-6">
-              <TaskLaunchPanel
-                templates={templates}
-                createTemplateID={createTemplateID}
-                createRequirement={createRequirement}
-                createBusy={createBusy}
-                createError={createError}
-                createSuccess={createSuccess}
-                onTemplateChange={setCreateTemplateID}
-                onRequirementChange={setCreateRequirement}
-                onCreate={createTask}
-              />
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
+            <TaskLaunchPanel
+              templates={templates}
+              createTemplateID={createTemplateID}
+              createRequirement={createRequirement}
+              createBusy={createBusy}
+              createError={createError}
+              createSuccess={createSuccess}
+              onTemplateChange={setCreateTemplateID}
+              onRequirementChange={setCreateRequirement}
+              onCreate={createTask}
+            />
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <MetricCard label="Running" value={loading ? '...' : String(payload?.summary.running ?? 0)} accent="rgba(75, 226, 177, 0.75)" />
-                <MetricCard label="Waiting" value={loading ? '...' : String(payload?.summary.waiting_user_input ?? 0)} accent="rgba(255, 199, 97, 0.78)" />
-                <MetricCard label="Completed" value={loading ? '...' : String(payload?.summary.completed ?? 0)} accent="rgba(133, 163, 255, 0.78)" />
+            <section className="grid gap-3 rounded-[26px] border border-white/8 bg-white/[0.04] p-5 sm:grid-cols-2 2xl:grid-cols-4">
+              <SignalChip label="Need Reply" value={loading ? '...' : String(summary?.waiting_user_input ?? 0)} />
+              <SignalChip label="Starting" value={loading ? '...' : String(summary?.starting ?? 0)} />
+              <SignalChip label="Recovering" value={loading ? '...' : String(summary?.recovering ?? 0)} />
+              <SignalChip label="Failed" value={loading ? '...' : String(summary?.failed ?? 0)} />
+            </section>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_400px]">
+            <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[rgba(5,11,18,0.74)]">
+              <div className="flex flex-col gap-4 border-b border-white/8 bg-white/[0.02] px-5 py-5 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.24em] text-[rgba(143,166,183,0.74)]">Active queue</p>
+                  <h2 className="mt-2 text-[1.75rem] font-semibold text-white">Tasks are the center of gravity</h2>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button className="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-[rgba(215,226,235,0.86)]">All tasks</button>
+                  <button className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-[rgba(166,184,198,0.8)]">Waiting only</button>
+                  <button className="rounded-full border border-transparent bg-transparent px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-[rgba(145,164,184,0.7)]">Newest first</button>
+                </div>
               </div>
 
-              <section className="rounded-[28px] border border-white/10 bg-[rgba(5,11,18,0.68)] p-5">
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.28em] text-[rgba(143,166,183,0.74)]">Live task feed</p>
-                    <h2 className="mt-2 text-2xl font-semibold text-white">Live queue snapshot</h2>
-                  </div>
-                  <div className="rounded-full border border-[rgba(87,224,172,0.24)] bg-[rgba(63,208,170,0.1)] px-3 py-1 text-xs uppercase tracking-[0.22em] text-[rgba(147,241,213,0.84)]">
-                    real data
-                  </div>
+              <div className="px-3 pb-3">
+                <div className="hidden grid-cols-[1.12fr_0.78fr_1.9fr_0.96fr] gap-4 px-4 py-4 text-[11px] uppercase tracking-[0.22em] text-[rgba(144,166,184,0.72)] lg:grid">
+                  <span>Task</span>
+                  <span>Status</span>
+                  <span>Live summary</span>
+                  <span className="text-right">Actions</span>
                 </div>
 
-                <div className="overflow-hidden rounded-[22px] border border-white/8">
-                  <div className="hidden grid-cols-[1.05fr_0.74fr_1.95fr_0.9fr] bg-white/[0.03] px-4 py-3 text-[11px] uppercase tracking-[0.26em] text-[rgba(144,166,184,0.72)] lg:grid">
-                    <span>Task</span>
-                    <span>Status</span>
-                    <span>Summary</span>
-                    <span className="text-right">Actions</span>
-                  </div>
-                  <div className="divide-y divide-white/6">
-                    {tasks.map((task, index) => (
-                      <div
-                        key={task.id}
-                        className={`grid gap-4 px-4 py-4 transition hover:bg-white/[0.03] lg:grid-cols-[1.05fr_0.74fr_1.95fr_0.9fr] ${selectedTask?.id === task.id ? 'bg-white/[0.04]' : ''}`}
-                        style={{ animationDelay: `${index * 70}ms` }}
-                      >
-                        <button className="text-left" onClick={() => setSelectedTask(task)}>
-                          <span className="block text-sm font-semibold text-white">{task.title}</span>
-                          <span className="mt-1 block text-xs text-[rgba(143,165,184,0.72)]">{task.id} · {task.machine_id}</span>
-                        </button>
-                        <button className="text-left" onClick={() => setSelectedTask(task)}>
-                          <span className={`inline-flex rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em] ${statusTone[task.status] || 'text-[rgba(201,213,224,0.82)] border-white/10 bg-white/[0.04]'}`}>
-                            {task.status}
-                          </span>
-                        </button>
-                        <button className="text-left text-sm leading-6 text-[rgba(178,194,207,0.8)]" onClick={() => setSelectedTask(task)}>
-                          {task.summary}
-                        </button>
-                        <div className="lg:flex lg:justify-end">
-                          <InlineTaskActions
-                            task={task}
-                            busy={actionBusy && busyTaskID === task.id}
-                            onSelect={() => setSelectedTask(task)}
-                            onStop={() => runAction('stop', task)}
-                            onComplete={() => runAction('complete', task)}
-                            onDelete={() => runAction('delete', task)}
-                          />
-                        </div>
+                <div className="space-y-3">
+                  {tasks.map((task, index) => (
+                    <div
+                      key={task.id}
+                      className={`grid gap-4 rounded-[22px] border px-4 py-4 transition hover:-translate-y-[1px] hover:border-white/12 hover:bg-white/[0.04] lg:grid-cols-[1.12fr_0.78fr_1.9fr_0.96fr] ${
+                        selectedTask?.id === task.id
+                          ? 'border-[rgba(105,235,199,0.2)] bg-white/[0.05]'
+                          : 'border-white/8 bg-white/[0.025]'
+                      }`}
+                      style={{ animationDelay: `${index * 70}ms` }}
+                    >
+                      <button className="text-left" onClick={() => setSelectedTask(task)}>
+                        <span className="block text-[15px] font-semibold text-white">{task.title}</span>
+                        <span className="mt-1 block text-xs text-[rgba(143,165,184,0.72)]">{task.id} · {task.machine_id} · {task.template_id}</span>
+                      </button>
+                      <button className="text-left" onClick={() => setSelectedTask(task)}>
+                        <span className={`inline-flex rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em] ${statusTone[task.status] || 'text-[rgba(201,213,224,0.82)] border-white/10 bg-white/[0.04]'}`}>
+                          {task.status}
+                        </span>
+                      </button>
+                      <button className="text-left text-sm leading-7 text-[rgba(178,194,207,0.82)]" onClick={() => setSelectedTask(task)}>
+                        {task.summary || 'No live summary recorded yet.'}
+                      </button>
+                      <div className="lg:flex lg:justify-end">
+                        <InlineTaskActions
+                          task={task}
+                          busy={actionBusy && busyTaskID === task.id}
+                          onSelect={() => setSelectedTask(task)}
+                          onStop={() => runAction('stop', task)}
+                          onComplete={() => runAction('complete', task)}
+                          onDelete={() => runAction('delete', task)}
+                        />
                       </div>
-                    ))}
-                    {!loading && tasks.length === 0 ? (
-                      <div className="px-4 py-8 text-sm text-[rgba(143,165,184,0.74)]">No tasks available.</div>
-                    ) : null}
-                  </div>
+                    </div>
+                  ))}
+                  {!loading && tasks.length === 0 ? (
+                    <div className="rounded-[22px] border border-white/8 bg-white/[0.025] px-4 py-8 text-sm text-[rgba(143,165,184,0.74)]">
+                      No tasks available.
+                    </div>
+                  ) : null}
                 </div>
-              </section>
-            </div>
+              </div>
+            </section>
 
-            <aside className="rounded-[28px] border border-white/10 bg-[rgba(6,11,18,0.82)] p-6 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
-              <p className="text-xs uppercase tracking-[0.3em] text-[rgba(145,165,182,0.74)]">Detail panel</p>
-              <h2 className="mt-3 text-2xl font-semibold text-white">
+            <aside className="rounded-[28px] border border-white/10 bg-[rgba(7,13,23,0.88)] p-5 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+              <p className="text-xs uppercase tracking-[0.24em] text-[rgba(145,165,182,0.74)]">Inspector</p>
+              <h2 className="mt-3 text-[1.9rem] font-semibold text-white">
                 {selectedTaskDetail?.title || selectedTask?.title || 'Select a task'}
               </h2>
-              <div className="mt-6 flex flex-wrap gap-2">
+              <div className="mt-5 flex flex-wrap gap-2">
                 <DetailTabButton label="Overview" active={detailSection === 'overview'} onClick={() => setDetailSection('overview')} />
                 <DetailTabButton label="Timeline" active={detailSection === 'timeline'} onClick={() => setDetailSection('timeline')} />
-                <DetailTabButton label="Questions" active={detailSection === 'questions'} onClick={() => setDetailSection('questions')} />
+                <DetailTabButton label="Reply" active={detailSection === 'questions'} onClick={() => setDetailSection('questions')} />
               </div>
+
               <div className="mt-5 space-y-4">
                 {detailSection === 'overview' ? (
                   <>
-                    <DetailBlock label="Task ID" value={selectedTaskDetail?.id || selectedTask?.id || 'No selection'} />
-                    <DetailBlock label="Status" value={selectedTaskDetail?.status || selectedTask?.status || 'No selection'} />
+                    <DetailBlock label="Current summary" value={selectedTaskDetail?.summary || selectedTask?.summary || 'Choose a task row to inspect the live task payload.'} multiline />
+                    <DetailBlock label="Awaiting operator input" value={selectedTaskDetail?.awaiting_question?.question_text || selectedTask?.awaiting_question?.question_text || 'No explicit operator question is pending.'} multiline />
+                    <DetailBlock label="Task identity" value={selectedTaskDetail?.id || selectedTask?.id || 'No selection'} />
                     <DetailBlock
                       label="Repository / Template"
                       value={
@@ -402,31 +420,13 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                             : 'No selection'
                       }
                     />
-                    <DetailBlock
-                      label="Latest summary"
-                      value={selectedTaskDetail?.summary || selectedTask?.summary || 'Choose a task row to inspect the live task payload.'}
-                      multiline
-                    />
-                    <DetailBlock
-                      label="Awaiting operator input"
-                      value={selectedTaskDetail?.awaiting_question?.question_text || selectedTask?.awaiting_question?.question_text || 'No explicit operator question is pending.'}
-                      multiline
-                    />
                   </>
                 ) : null}
                 {detailSection === 'timeline' ? (
-                  <TimelineBlock
-                    label="Event timeline"
-                    loading={detailLoading}
-                    events={selectedTaskDetail?.events || []}
-                  />
+                  <TimelineBlock label="Event timeline" loading={detailLoading} events={selectedTaskDetail?.events || []} />
                 ) : null}
                 {detailSection === 'questions' ? (
-                  <QuestionHistoryBlock
-                    label="Question history"
-                    loading={detailLoading}
-                    questions={selectedTaskDetail?.questions || []}
-                  />
+                  <QuestionHistoryBlock label="Question history" loading={detailLoading} questions={selectedTaskDetail?.questions || []} />
                 ) : null}
               </div>
 
@@ -444,11 +444,8 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                 onReopen={() => runAction('reopen')}
               />
 
-              <div className="mt-8 rounded-[24px] border border-[rgba(92,112,255,0.18)] bg-[linear-gradient(180deg,rgba(70,94,245,0.12),rgba(14,22,41,0.02))] p-5">
-                <p className="text-xs uppercase tracking-[0.24em] text-[rgba(162,176,255,0.76)]">Next slice</p>
-                <p className="mt-3 text-sm leading-7 text-[rgba(185,197,223,0.8)]">
-                  Browser actions now reuse the same Go task service decisions, and detail inspection reads full task history from the store.
-                </p>
+              <div className="mt-6 rounded-[22px] border border-[rgba(133,163,255,0.14)] bg-[rgba(83,107,214,0.08)] px-4 py-4 text-sm leading-7 text-[rgba(220,228,255,0.92)]">
+                The inspector stays secondary to the queue. On narrower screens this panel can collapse into a drawer without changing the task-first information hierarchy.
               </div>
             </aside>
           </div>
@@ -480,32 +477,29 @@ function TaskLaunchPanel({
   onCreate: () => void
 }) {
   return (
-    <section className="rounded-[28px] border border-white/10 bg-[rgba(5,11,18,0.68)] p-5">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-[rgba(143,166,183,0.74)]">Task Launch</p>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Start a new task</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-[rgba(177,193,208,0.78)]">
-            Launch a new Codex task directly from the dashboard by selecting a template and writing the operator requirement.
-          </p>
+    <section className="rounded-[26px] border border-white/8 bg-white/[0.04] p-5">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.24em] text-[rgba(143,166,183,0.74)]">Quick launch</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Start task without leaving queue view</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onCreate}
+            disabled={createBusy}
+            className="rounded-full border border-[rgba(87,224,172,0.24)] bg-[linear-gradient(135deg,rgba(72,214,182,0.18),rgba(88,104,244,0.18))] px-5 py-3 text-sm font-medium uppercase tracking-[0.18em] text-[rgba(216,255,244,0.96)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {createBusy ? 'Starting...' : 'Start task'}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onCreate}
-          disabled={createBusy}
-          className="rounded-2xl border border-[rgba(87,224,172,0.24)] bg-[rgba(53,158,127,0.14)] px-5 py-3 text-sm font-medium text-[rgba(206,255,236,0.94)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {createBusy ? 'Starting task...' : 'Start task'}
-        </button>
-      </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <label className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
+        <label className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
           <span className="text-xs uppercase tracking-[0.22em] text-[rgba(144,165,183,0.72)]">Template</span>
           <select
             value={createTemplateID}
             onChange={(event) => onTemplateChange(event.target.value)}
-            className="mt-3 w-full rounded-2xl border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none"
+            className="mt-3 w-full rounded-[18px] border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none"
           >
             {templates.map((template) => (
               <option key={template.id} value={template.id}>
@@ -518,13 +512,13 @@ function TaskLaunchPanel({
           </p>
         </label>
 
-        <label className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
+        <label className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
           <span className="text-xs uppercase tracking-[0.22em] text-[rgba(144,165,183,0.72)]">Requirement</span>
           <textarea
             value={createRequirement}
             onChange={(event) => onRequirementChange(event.target.value)}
             placeholder="Describe what Codex should do next."
-            className="mt-3 min-h-[126px] w-full rounded-[20px] border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none transition placeholder:text-[rgba(135,154,170,0.72)] focus:border-[rgba(91,208,180,0.42)]"
+            className="mt-3 min-h-[112px] w-full rounded-[18px] border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none transition placeholder:text-[rgba(135,154,170,0.72)] focus:border-[rgba(91,208,180,0.42)]"
           />
         </label>
       </div>
@@ -580,8 +574,8 @@ function TaskControls({
   const canReopen = task.status === 'completed' || task.status === 'stopped'
 
   return (
-    <div className="mt-8 rounded-[24px] border border-white/10 bg-[rgba(255,255,255,0.03)] p-5">
-      <p className="text-xs uppercase tracking-[0.24em] text-[rgba(150,173,190,0.76)]">Controls</p>
+    <div className="mt-5 rounded-[24px] border border-white/10 bg-[rgba(255,255,255,0.03)] p-5">
+      <p className="text-xs uppercase tracking-[0.22em] text-[rgba(150,173,190,0.76)]">Inline controls</p>
       <div className="mt-4 flex flex-wrap gap-3">
         {canStop ? <ActionButton label="Stop task" disabled={actionBusy} onClick={onStop} tone="danger" /> : null}
         {canComplete ? <ActionButton label="Mark complete" disabled={actionBusy} onClick={onComplete} tone="primary" /> : null}
@@ -594,7 +588,7 @@ function TaskControls({
             value={actionText}
             onChange={(event) => onActionTextChange(event.target.value)}
             placeholder={canReply ? 'Reply to Codex to continue this task.' : 'Describe the extra requirement for reopening this task.'}
-            className="min-h-[110px] w-full rounded-[20px] border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none transition placeholder:text-[rgba(135,154,170,0.72)] focus:border-[rgba(91,208,180,0.42)]"
+            className="min-h-[110px] w-full rounded-[18px] border border-white/10 bg-[rgba(6,11,19,0.9)] px-4 py-3 text-sm text-white outline-none transition placeholder:text-[rgba(135,154,170,0.72)] focus:border-[rgba(91,208,180,0.42)]"
           />
           <div className="flex flex-wrap gap-3">
             {canReply ? <ActionButton label="Send reply" disabled={actionBusy} onClick={onReply} tone="primary" /> : null}
@@ -614,6 +608,15 @@ function TaskControls({
           {actionSuccess}
         </p>
       ) : null}
+    </div>
+  )
+}
+
+function SignalChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[18px] border border-white/8 bg-white/[0.03] px-4 py-4">
+      <p className="text-[11px] uppercase tracking-[0.2em] text-[rgba(145,166,182,0.72)]">{label}</p>
+      <p className="mt-3 text-[1.7rem] font-semibold text-white">{value}</p>
     </div>
   )
 }
