@@ -67,6 +67,48 @@ func TestProtectedSessionEndpointReturnsSessionMetadata(t *testing.T) {
 	}
 }
 
+func TestLogoutClearsSessionAndRedirectsToLogin(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "secret",
+		AllowUsers:    map[string]bool{"ou_allowed_1": true},
+	}, stubOAuthClient{}, &stubDataProvider{}, nil)
+
+	loginRecorder := httptest.NewRecorder()
+	if err := handler.sessions.SetSession(loginRecorder, Session{OpenID: "ou_allowed_1"}); err != nil {
+		t.Fatalf("SetSession returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	for _, cookie := range loginRecorder.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.Logout(recorder, req)
+
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("Code = %d, want 302", recorder.Code)
+	}
+	if got := recorder.Header().Get("Location"); got != "/login" {
+		t.Fatalf("Location = %q, want /login", got)
+	}
+
+	foundClearedCookie := false
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == sessionCookieName && cookie.MaxAge < 0 {
+			foundClearedCookie = true
+			break
+		}
+	}
+	if !foundClearedCookie {
+		t.Fatalf("expected cleared %q cookie", sessionCookieName)
+	}
+}
+
 func TestProtectedDashboardEndpointRequiresSession(t *testing.T) {
 	t.Parallel()
 

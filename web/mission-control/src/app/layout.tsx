@@ -3,7 +3,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Alter Ego',
-  description: 'Secure operator dashboard'
+  description: 'Task workspace for your parallel intelligent self'
 }
 
 export default function RootLayout({

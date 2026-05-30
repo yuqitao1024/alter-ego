@@ -1,0 +1,43 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" rx="64" fill="#09111C"/>
+  <rect x="18" y="18" width="220" height="220" rx="46" fill="url(#bg)" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>
+  <path d="M82 70C68.5 79.5 60 95.5 60 114V142C60 172.928 85.0721 198 116 198H128V170H118C95.9086 170 78 152.091 78 130V115.5C78 100.312 86.4974 86.4053 99.9998 79.5L82 70Z" fill="url(#leftGlow)"/>
+  <path d="M174 70C187.5 79.5 196 95.5 196 114V142C196 172.928 170.928 198 140 198H128V170H138C160.091 170 178 152.091 178 130V115.5C178 100.312 169.503 86.4053 156 79.5L174 70Z" fill="url(#rightGlow)"/>
+  <path d="M128 56C103.699 56 84 75.6995 84 100V119C84 143.301 103.699 163 128 163C152.301 163 172 143.301 172 119V100C172 75.6995 152.301 56 128 56Z" fill="url(#faceFill)"/>
+  <path d="M128 56C111.026 56 97.2671 75.6995 97.2671 100V119C97.2671 143.301 111.026 163 128 163C112.742 163 100.373 143.301 100.373 119V100C100.373 75.6995 112.742 56 128 56Z" fill="rgba(255,255,255,0.08)"/>
+  <path d="M128 56C144.974 56 158.733 75.6995 158.733 100V119C158.733 143.301 144.974 163 128 163C143.258 163 155.627 143.301 155.627 119V100C155.627 75.6995 143.258 56 128 56Z" fill="rgba(0,0,0,0.12)"/>
+  <path d="M128 60V160" stroke="url(#spine)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M96 110C104.284 101.716 116.239 96.5 129 96.5C141.761 96.5 153.716 101.716 162 110" stroke="rgba(222,244,255,0.36)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M102 111C108.317 105.088 117.164 101.5 126.848 101.5H129.152C138.836 101.5 147.683 105.088 154 111" stroke="url(#visor)" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="111" cy="112" r="5" fill="#EAF7FF"/>
+  <circle cx="145" cy="112" r="5" fill="#EAF7FF"/>
+  <path d="M113 136C117.209 140.419 122.93 143 129 143C135.07 143 140.791 140.419 145 136" stroke="rgba(234,247,255,0.82)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M80 185C92.5521 195.734 109.114 202.2 127.186 202.2H128.814C146.886 202.2 163.448 195.734 176 185" stroke="rgba(111,241,208,0.2)" stroke-width="10" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="bg" x1="38" y1="26" x2="220" y2="230" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101C2D"/>
+      <stop offset="1" stop-color="#081019"/>
+    </linearGradient>
+    <linearGradient id="leftGlow" x1="60" y1="88" x2="128" y2="198" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#62E9C8" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#62E9C8" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="rightGlow" x1="196" y1="88" x2="128" y2="198" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#87A7FF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#87A7FF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="faceFill" x1="84" y1="56" x2="172" y2="163" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E8F5FF"/>
+      <stop offset="0.5" stop-color="#DCEBFA"/>
+      <stop offset="1" stop-color="#C8D8EA"/>
+    </linearGradient>
+    <linearGradient id="spine" x1="128.5" y1="60" x2="128.5" y2="160" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6EF0D0"/>
+      <stop offset="1" stop-color="#84A4FF"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="102" y1="111" x2="154" y2="111" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6EF0D0"/>
+      <stop offset="1" stop-color="#86A7FF"/>
+    </linearGradient>
+  </defs>
+</svg>

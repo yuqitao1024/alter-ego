@@ -106,7 +106,7 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	h.sessions.ClearSession(w)
-	w.WriteHeader(http.StatusNoContent)
+	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
