@@ -20,7 +20,7 @@ export function LoginShell() {
                 </div>
 
                 <div className="space-y-4">
-                  <h1 className="max-w-3xl text-5xl font-semibold leading-[1.02] text-white lg:text-7xl xl:text-[5.35rem]">
+                  <h1 className="max-w-3xl text-4xl font-semibold leading-[1.04] text-white lg:text-[3.8rem] xl:text-[4.4rem]">
                     Let another intelligent you keep work moving.
                   </h1>
                   <p className="max-w-2xl text-base leading-7 text-[rgba(184,200,214,0.82)] lg:text-lg">
