@@ -54,3 +54,87 @@ button,
 input {
   font: inherit;
 }
+
+.markdown-content {
+  color: inherit;
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content pre {
+  margin: 0 0 0.72rem;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin: 0 0 0.7rem;
+  font-weight: 600;
+  color: rgba(241, 247, 252, 0.98);
+  line-height: 1.25;
+}
+
+.markdown-content h1 {
+  font-size: 1.02rem;
+}
+
+.markdown-content h2 {
+  font-size: 0.98rem;
+}
+
+.markdown-content h3,
+.markdown-content h4 {
+  font-size: 0.92rem;
+}
+
+.markdown-content p,
+.markdown-content li {
+  line-height: 1.75;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.2rem;
+}
+
+.markdown-content blockquote {
+  border-left: 2px solid rgba(110, 240, 208, 0.22);
+  padding-left: 0.9rem;
+  color: rgba(176, 196, 212, 0.82);
+}
+
+.markdown-content hr {
+  margin: 0.9rem 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.markdown-content a {
+  color: rgba(135, 202, 255, 0.96);
+  text-decoration: underline;
+  text-decoration-color: rgba(135, 202, 255, 0.42);
+}
+
+.markdown-content--compact p,
+.markdown-content--compact li {
+  line-height: 1.55;
+}
+
+.markdown-content--compact p,
+.markdown-content--compact ul,
+.markdown-content--compact ol,
+.markdown-content--compact blockquote,
+.markdown-content--compact pre {
+  margin-bottom: 0.5rem;
+}

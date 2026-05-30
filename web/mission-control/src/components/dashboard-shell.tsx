@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { DashboardPayload, DashboardTask, DashboardTaskDetail, DashboardTaskEvent, DashboardTaskQuestion, TaskTemplate, WebSession } from '@/lib/types'
+import { MarkdownContent } from '@/components/markdown-content'
 
 type DashboardShellProps = {
   initialSession: WebSession
@@ -370,7 +371,11 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                         </span>
                       </button>
                       <button className="text-left text-sm leading-7 text-[rgba(178,194,207,0.82)]" onClick={() => setSelectedTask(task)}>
-                        {task.summary || 'No summary yet.'}
+                        {task.summary ? (
+                          <MarkdownContent content={task.summary} compact clampLines={3} />
+                        ) : (
+                          'No summary yet.'
+                        )}
                       </button>
                       <div className="lg:flex lg:justify-end">
                         <InlineTaskActions
@@ -407,8 +412,8 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
               <div className="mt-5 space-y-4">
                 {detailSection === 'overview' ? (
                   <>
-                    <DetailBlock label="Latest summary" value={selectedTaskDetail?.summary || selectedTask?.summary || 'Choose a task to inspect its latest state.'} multiline />
-                    <DetailBlock label="Pending reply" value={selectedTaskDetail?.awaiting_question?.question_text || selectedTask?.awaiting_question?.question_text || 'No pending reply.'} multiline />
+                    <DetailMarkdownBlock label="Latest summary" value={selectedTaskDetail?.summary || selectedTask?.summary || 'Choose a task to inspect its latest state.'} />
+                    <DetailMarkdownBlock label="Pending reply" value={selectedTaskDetail?.awaiting_question?.question_text || selectedTask?.awaiting_question?.question_text || 'No pending reply.'} />
                     <DetailBlock label="Task ID" value={selectedTaskDetail?.id || selectedTask?.id || 'No selection'} />
                     <DetailBlock
                       label="Ownership"
@@ -830,6 +835,17 @@ function DetailBlock({ label, value, multiline }: { label: string; value: string
   )
 }
 
+function DetailMarkdownBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[22px] bg-white/[0.03] p-4">
+      <p className="text-xs uppercase tracking-[0.24em] text-[rgba(144,165,183,0.72)]">{label}</p>
+      <div className="mt-3 text-sm text-[rgba(224,231,239,0.92)]">
+        <MarkdownContent content={value} />
+      </div>
+    </div>
+  )
+}
+
 function TimelineBlock({ label, loading, events }: { label: string; loading: boolean; events: DashboardTaskEvent[] }) {
   return (
     <div className="rounded-[22px] bg-white/[0.03] p-4">
@@ -867,12 +883,18 @@ function QuestionHistoryBlock({ label, loading, questions }: { label: string; lo
                 <p className="text-xs uppercase tracking-[0.2em] text-[rgba(255,214,145,0.88)]">{question.question_type || 'question'}</p>
                 <p className="text-[11px] text-[rgba(136,158,178,0.72)]">{formatTimestamp(question.asked_at)}</p>
               </div>
-              <p className="mt-2 text-sm leading-6 text-[rgba(224,231,239,0.92)]">{question.question_text}</p>
+              <div className="mt-2 text-sm text-[rgba(224,231,239,0.92)]">
+                <MarkdownContent content={question.question_text} compact />
+              </div>
               {question.context_excerpt ? (
-                <p className="mt-2 text-sm leading-6 text-[rgba(174,191,206,0.78)]">{question.context_excerpt}</p>
+                <div className="mt-2 text-sm text-[rgba(174,191,206,0.78)]">
+                  <MarkdownContent content={question.context_excerpt} compact />
+                </div>
               ) : null}
               {question.options_summary ? (
-                <p className="mt-2 text-sm leading-6 text-[rgba(154,176,194,0.78)]">Options: {question.options_summary}</p>
+                <div className="mt-2 text-sm text-[rgba(154,176,194,0.78)]">
+                  <MarkdownContent content={`Options\n\n${question.options_summary}`} compact />
+                </div>
               ) : null}
               {question.answer_text ? (
                 <p className="mt-3 rounded-xl border border-[rgba(87,224,172,0.14)] bg-[rgba(53,158,127,0.08)] px-3 py-2 text-sm leading-6 text-[rgba(208,248,232,0.92)]">
