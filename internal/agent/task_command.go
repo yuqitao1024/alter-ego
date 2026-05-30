@@ -35,7 +35,7 @@ func NewTaskCommandHandler(service TaskService) *TaskCommandHandler {
 func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.MessageEvent) (channel.OutgoingMessage, error) {
 	reply := channel.OutgoingMessage{Conversation: event.Conversation}
 	if h.service == nil {
-		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Service", larkcard.TemplateRed, "Task service is not configured.", nil)}
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Service", larkcard.TemplateRed, "Task service is not configured.", nil, event.Sender.ID)}
 		return reply, nil
 	}
 
@@ -57,7 +57,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		if err != nil {
 			return reply, err
 		}
-		reply.Card = &channel.CardMessage{Payload: buildTaskStartCard(task)}
+		reply.Card = &channel.CardMessage{Payload: buildTaskStartCard(task, event.Sender.ID)}
 	case "list":
 		showAll := len(fields) == 3 && fields[2] == "-a"
 		if len(fields) > 3 || (len(fields) == 3 && !showAll) {
@@ -75,11 +75,11 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 			return reply, err
 		}
 		if len(tasks) == 0 {
-			reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("No Tasks", larkcard.TemplateGrey, "No active tasks.", nil)}
+			reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("No Tasks", larkcard.TemplateGrey, "No active tasks.", nil, event.Sender.ID)}
 			return reply, nil
 		}
 
-		reply.Card = &channel.CardMessage{Payload: buildTaskListCard(tasks, showAll)}
+		reply.Card = &channel.CardMessage{Payload: buildTaskListCard(tasks, showAll, event.Sender.ID)}
 	case "status":
 		if len(fields) != 3 {
 			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task status <task-id>")}
@@ -89,7 +89,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		if err != nil {
 			return reply, err
 		}
-		reply.Card = &channel.CardMessage{Payload: buildTaskStatusCard(task)}
+		reply.Card = &channel.CardMessage{Payload: buildTaskStatusCard(task, event.Sender.ID)}
 	case "reply":
 		if len(fields) < 4 {
 			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task reply <task-id> <decision text>")}
@@ -104,7 +104,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		if err != nil {
 			return reply, err
 		}
-		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Resumed", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** resumed.", taskID), &task)}
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Resumed", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** resumed.", taskID), &task, event.Sender.ID)}
 	case "reopen":
 		if len(fields) < 4 {
 			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task reopen <task-id> <extra requirement>")}
@@ -119,7 +119,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		if err != nil {
 			return reply, err
 		}
-		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Reopened", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** reopened.", taskID), &task)}
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Reopened", larkcard.TemplateGreen, fmt.Sprintf("Task **%s** reopened.", taskID), &task, event.Sender.ID)}
 	case "stop":
 		if len(fields) != 3 {
 			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task stop <task-id>")}
@@ -133,7 +133,7 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 		if err != nil {
 			return reply, err
 		}
-		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Stopped", larkcard.TemplateRed, fmt.Sprintf("Task **%s** stopped.", taskID), &task)}
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Stopped", larkcard.TemplateRed, fmt.Sprintf("Task **%s** stopped.", taskID), &task, event.Sender.ID)}
 	case "delete":
 		if len(fields) != 3 {
 			reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task delete <task-id|-a>")}
@@ -144,14 +144,18 @@ func (h *TaskCommandHandler) HandleCommand(ctx context.Context, event channel.Me
 			if err != nil {
 				return reply, err
 			}
-			reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Tasks Deleted", larkcard.TemplateRed, fmt.Sprintf("Deleted **%d** terminal task(s).", count), nil)}
+			reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Tasks Deleted", larkcard.TemplateRed, fmt.Sprintf("Deleted **%d** terminal task(s).", count), nil, event.Sender.ID)}
 			return reply, nil
 		}
 		taskID := fields[2]
+		task, err := h.service.Status(ctx, taskID)
+		if err != nil {
+			return reply, err
+		}
 		if err := h.service.Delete(ctx, taskID); err != nil {
 			return reply, err
 		}
-		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Deleted", larkcard.TemplateRed, fmt.Sprintf("Task **%s** deleted.", taskID), nil)}
+		reply.Card = &channel.CardMessage{Payload: buildTaskNoticeCard("Task Deleted", larkcard.TemplateRed, fmt.Sprintf("Task **%s** deleted.", taskID), &task, event.Sender.ID)}
 	default:
 		reply.Card = &channel.CardMessage{Payload: buildTaskUsageCard("Usage: /task <start|list|status|reply|reopen|stop|delete> ...")}
 	}
@@ -184,7 +188,7 @@ func (h *TaskCommandHandler) handleTaskActionCard(ctx context.Context, event cha
 		}
 		message := channel.OutgoingMessage{
 			Conversation: event.Conversation,
-			Card:         &channel.CardMessage{Payload: buildTaskStatusCard(task)},
+			Card:         &channel.CardMessage{Payload: buildTaskStatusCard(task, event.Sender.ID)},
 		}
 		return channel.CardActionResponse{
 			ToastText: "Task status sent.",
@@ -285,7 +289,7 @@ func parseTaskCardAction(value map[string]interface{}) (taskCardAction, error) {
 	}
 }
 
-func buildTaskListCard(tasks []orchestrator.TaskRun, showAll bool) interface{} {
+func buildTaskListCard(tasks []orchestrator.TaskRun, showAll bool, viewerID string) interface{} {
 	title := "Active Tasks"
 	if showAll {
 		title = "All Tasks"
@@ -300,7 +304,7 @@ func buildTaskListCard(tasks []orchestrator.TaskRun, showAll bool) interface{} {
 		elements = append(elements,
 			larkcard.NewMessageCardHr().Build(),
 			larkcard.NewMessageCardMarkdown().
-				Content(fmt.Sprintf("**%s**\nTemplate: `%s`\nMachine: `%s`\nStatus: `%s`", task.TaskID, task.TemplateID, task.MachineID, task.Status)).
+				Content(fmt.Sprintf("**%s**\nOwner: **%s**\nCreated by: `%s`\nTemplate: `%s`\nMachine: `%s`\nStatus: `%s`", task.TaskID, formatTaskOwnerLabel(task, viewerID), formatTaskCreator(task), task.TemplateID, task.MachineID, task.Status)).
 				Build(),
 			taskActionRow(task).Build(),
 		)
@@ -316,10 +320,10 @@ func buildTaskListCard(tasks []orchestrator.TaskRun, showAll bool) interface{} {
 		Build()
 }
 
-func buildTaskStartCard(task orchestrator.TaskRun) interface{} {
+func buildTaskStartCard(task orchestrator.TaskRun, viewerID string) interface{} {
 	elements := []larkcard.MessageCardElement{
 		larkcard.NewMessageCardMarkdown().
-			Content(fmt.Sprintf("Started **%s**", task.TaskID)).
+			Content(fmt.Sprintf("Started **%s**\nOwner: **%s**\nCreated by: `%s`", task.TaskID, formatTaskOwnerLabel(task, viewerID), formatTaskCreator(task))).
 			Build(),
 		larkcard.NewMessageCardMarkdown().
 			Content(fmt.Sprintf("Template: `%s`\nRepository: `%s`\nMachine: `%s`\nStatus: `%s`", task.TemplateID, task.RepositoryID, task.MachineID, task.Status)).
@@ -337,11 +341,11 @@ func buildTaskStartCard(task orchestrator.TaskRun) interface{} {
 		Build()
 }
 
-func buildTaskStatusCard(task orchestrator.TaskRun) interface{} {
-	return buildTaskNoticeCard("Task Status", larkcard.TemplateBlue, formatTaskStatusMarkdown(task), &task)
+func buildTaskStatusCard(task orchestrator.TaskRun, viewerID string) interface{} {
+	return buildTaskNoticeCard("Task Status", larkcard.TemplateBlue, formatTaskStatusMarkdown(task, viewerID), &task, viewerID)
 }
 
-func buildTaskNoticeCard(title string, template string, message string, task *orchestrator.TaskRun) interface{} {
+func buildTaskNoticeCard(title string, template string, message string, task *orchestrator.TaskRun, viewerID string) interface{} {
 	elements := []larkcard.MessageCardElement{
 		larkcard.NewMessageCardMarkdown().
 			Content(strings.TrimSpace(message)).
@@ -350,7 +354,7 @@ func buildTaskNoticeCard(title string, template string, message string, task *or
 	if task != nil {
 		elements = append(elements,
 			larkcard.NewMessageCardMarkdown().
-				Content(fmt.Sprintf("Template: `%s`\nRepository: `%s`\nMachine: `%s`\nStatus: `%s`\nThread: `%s`", task.TemplateID, task.RepositoryID, task.MachineID, task.Status, task.ThreadID)).
+				Content(fmt.Sprintf("Owner: **%s**\nCreated by: `%s`\nTemplate: `%s`\nRepository: `%s`\nMachine: `%s`\nStatus: `%s`\nThread: `%s`", formatTaskOwnerLabel(*task, viewerID), formatTaskCreator(*task), task.TemplateID, task.RepositoryID, task.MachineID, task.Status, task.ThreadID)).
 				Build(),
 		)
 		elements = append(elements, taskActionRow(*task).Build())
@@ -367,7 +371,7 @@ func buildTaskNoticeCard(title string, template string, message string, task *or
 }
 
 func buildTaskUsageCard(message string) interface{} {
-	return buildTaskNoticeCard("Task Command Usage", larkcard.TemplateGrey, message, nil)
+	return buildTaskNoticeCard("Task Command Usage", larkcard.TemplateGrey, message, nil, "")
 }
 
 func taskActionRow(task orchestrator.TaskRun) *larkcard.MessageCardAction {
@@ -411,8 +415,10 @@ func taskButton(label, action, taskID string, buttonType larkcard.MessageCardBut
 
 func formatTaskStatus(task orchestrator.TaskRun) string {
 	return fmt.Sprintf(
-		"task: %s\ntemplate: %s\nrepository: %s\nmachine: %s\nstatus: %s\nthread: %s\nsummary: %s",
+		"task: %s\nowner: %s\ncreated_by: %s\ntemplate: %s\nrepository: %s\nmachine: %s\nstatus: %s\nthread: %s\nsummary: %s",
 		task.TaskID,
+		formatTaskOwnerLabel(task, ""),
+		formatTaskCreator(task),
 		task.TemplateID,
 		task.RepositoryID,
 		task.MachineID,
@@ -422,10 +428,12 @@ func formatTaskStatus(task orchestrator.TaskRun) string {
 	)
 }
 
-func formatTaskStatusMarkdown(task orchestrator.TaskRun) string {
+func formatTaskStatusMarkdown(task orchestrator.TaskRun, viewerID string) string {
 	return fmt.Sprintf(
-		"**Task**: `%s`\n**Template**: `%s`\n**Repository**: `%s`\n**Machine**: `%s`\n**Status**: `%s`\n**Thread**: `%s`\n**Summary**: %s",
+		"**Task**: `%s`\n**Owner**: **%s**\n**Created by**: `%s`\n**Template**: `%s`\n**Repository**: `%s`\n**Machine**: `%s`\n**Status**: `%s`\n**Thread**: `%s`\n**Summary**: %s",
 		task.TaskID,
+		formatTaskOwnerLabel(task, viewerID),
+		formatTaskCreator(task),
 		task.TemplateID,
 		task.RepositoryID,
 		task.MachineID,
@@ -433,6 +441,20 @@ func formatTaskStatusMarkdown(task orchestrator.TaskRun) string {
 		task.ThreadID,
 		firstNonEmpty(task.LastOutputSummary, "(empty)"),
 	)
+}
+
+func formatTaskCreator(task orchestrator.TaskRun) string {
+	return firstNonEmpty(task.CreatedBy, "(unknown)")
+}
+
+func formatTaskOwnerLabel(task orchestrator.TaskRun, viewerID string) string {
+	if strings.TrimSpace(task.CreatedBy) == "" {
+		return "owner unknown"
+	}
+	if strings.TrimSpace(viewerID) != "" && task.CreatedBy == strings.TrimSpace(viewerID) {
+		return "your task"
+	}
+	return "other user's task"
 }
 
 func stringValue(values map[string]interface{}, key string) string {

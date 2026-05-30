@@ -465,6 +465,7 @@ func (s *Service) Dashboard(ctx context.Context) (DashboardSnapshot, error) {
 		dashboardTask := DashboardTask{
 			ID:            task.TaskID,
 			Title:         firstNonEmpty(task.UserRequest, task.TemplateID, task.TaskID),
+			CreatedBy:     task.CreatedBy,
 			Status:        task.Status,
 			TemplateID:    task.TemplateID,
 			RepositoryID:  task.RepositoryID,
@@ -517,6 +518,7 @@ func (s *Service) TaskDetail(ctx context.Context, taskID string) (DashboardTaskD
 	detail := DashboardTaskDetail{
 		ID:            task.TaskID,
 		Title:         firstNonEmpty(task.UserRequest, task.TemplateID, task.TaskID),
+		CreatedBy:     task.CreatedBy,
 		Status:        task.Status,
 		TemplateID:    task.TemplateID,
 		RepositoryID:  task.RepositoryID,

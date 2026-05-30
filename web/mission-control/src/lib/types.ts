@@ -28,6 +28,7 @@ export type DashboardQuestion = {
 export type DashboardTask = {
   id: string
   title: string
+  created_by: string
   status: string
   summary: string
   template_id: string
@@ -54,6 +55,7 @@ export type DashboardTaskQuestion = {
 export type DashboardTaskDetail = {
   id: string
   title: string
+  created_by: string
   status: string
   summary: string
   template_id: string

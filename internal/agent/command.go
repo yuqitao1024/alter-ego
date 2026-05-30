@@ -51,7 +51,7 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, event channel.Messag
 		reply.Card = &channel.CardMessage{Payload: buildCommandCard(
 			"Command Help",
 			larkcard.TemplateBlue,
-			"/help - show supported commands\n/status - show handler status\n/reset - clear current conversation context\n/machine init <machine-id> - install and enable Codex App Server on a machine",
+			"/help - show supported commands\n/status - show handler status\n/reset - clear current conversation context\n/machine init <machine-id> - install and enable Codex App Server on a machine\n\nTask commands:\n/task start <template> <requirement> - create a new task\n/task list [-a] - list active tasks or all tasks\n/task status <task-id> - show task detail\n/task reply <task-id> <text> - reply to a waiting task\n/task reopen <task-id> <extra requirement> - continue a completed or stopped task\n/task stop <task-id> - stop a running task\n/task delete <task-id|-a> - delete terminal task(s)",
 		)}
 	case "/machine":
 		if len(fields) != 3 || fields[1] != "init" {

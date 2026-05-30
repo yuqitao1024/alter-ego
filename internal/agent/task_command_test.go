@@ -50,6 +50,11 @@ func TestTaskCommandStartCreatesTask(t *testing.T) {
 			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
 		}
 	}
+	for _, part := range []string{"Created by", "ou_1", "Owner", "your task"} {
+		if !cardContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing owner marker %q: %#v", part, reply.Card.Payload)
+		}
+	}
 }
 
 func TestTaskCommandListFormatsActiveTasks(t *testing.T) {
@@ -76,6 +81,11 @@ func TestTaskCommandListFormatsActiveTasks(t *testing.T) {
 	if !cardContains(reply.Card.Payload, "task-1") || !cardContains(reply.Card.Payload, "task-2") {
 		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
 	}
+	for _, part := range []string{"Created by", "Owner"} {
+		if !cardContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
+		}
+	}
 }
 
 func TestTaskCommandListAllFormatsAllTasks(t *testing.T) {
@@ -98,6 +108,11 @@ func TestTaskCommandListAllFormatsAllTasks(t *testing.T) {
 	}
 	if !cardContains(reply.Card.Payload, "task-1") || !cardContains(reply.Card.Payload, "task-2") {
 		t.Fatalf("reply.Card.Payload = %#v", reply.Card.Payload)
+	}
+	for _, part := range []string{"Created by", "Owner"} {
+		if !cardContains(reply.Card.Payload, part) {
+			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
+		}
 	}
 }
 
@@ -252,6 +267,11 @@ func TestTaskCommandCardActionSendsStatusMessage(t *testing.T) {
 	}
 	if !cardContains(reply.Message.Card.Payload, "Working on tests") {
 		t.Fatalf("reply.Message.Card.Payload = %#v", reply.Message.Card.Payload)
+	}
+	for _, part := range []string{"Created by", "Owner"} {
+		if !cardContains(reply.Message.Card.Payload, part) {
+			t.Fatalf("reply.Message.Card.Payload missing %q: %#v", part, reply.Message.Card.Payload)
+		}
 	}
 	if reply.Message.Conversation.ID != "oc_1" {
 		t.Fatalf("reply.Message.Conversation = %#v", reply.Message.Conversation)

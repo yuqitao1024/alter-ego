@@ -43,7 +43,7 @@ func buildTaskQuestionCard(task orchestrator.TaskRun) map[string]interface{} {
 	elements := []interface{}{
 		map[string]interface{}{
 			"tag":     "markdown",
-			"content": fmt.Sprintf("**Task**: `%s`\n\n%s", task.TaskID, strings.TrimSpace(question.QuestionText)),
+			"content": fmt.Sprintf("**Task**: `%s`\n**Owner**: **your task**\n**Created by**: `%s`\n\n%s", task.TaskID, firstNonEmpty(task.CreatedBy, "(unknown)"), strings.TrimSpace(question.QuestionText)),
 		},
 	}
 
@@ -128,7 +128,7 @@ func buildTaskProgressCard(task orchestrator.TaskRun, message string) map[string
 	elements := []interface{}{
 		map[string]interface{}{
 			"tag":     "markdown",
-			"content": fmt.Sprintf("**Task**: `%s`\n\n%s", task.TaskID, strings.TrimSpace(message)),
+			"content": fmt.Sprintf("**Task**: `%s`\n**Owner**: **your task**\n**Created by**: `%s`\n\n%s", task.TaskID, firstNonEmpty(task.CreatedBy, "(unknown)"), strings.TrimSpace(message)),
 		},
 	}
 	if summary := strings.TrimSpace(task.LastOutputSummary); summary != "" {
@@ -154,4 +154,13 @@ func buildTaskProgressCard(task orchestrator.TaskRun, message string) map[string
 			"elements": elements,
 		},
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

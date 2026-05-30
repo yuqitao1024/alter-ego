@@ -26,7 +26,7 @@ func TestCommandHandlerHelpListsSupportedCommands(t *testing.T) {
 	if reply.Card == nil {
 		t.Fatal("reply.Card is nil")
 	}
-	for _, part := range []string{"/help", "/status", "/reset"} {
+	for _, part := range []string{"/help", "/status", "/reset", "/task start", "/task list", "/task status", "/task reply", "/task reopen", "/task stop", "/task delete"} {
 		if !cardPayloadContains(reply.Card.Payload, part) {
 			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
 		}

@@ -181,6 +181,7 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
   const tasks = payload?.tasks ?? []
   const summary = payload?.summary
   const operatorName = initialSession.name?.trim() || 'Authorized user'
+  const operatorID = initialSession.open_id?.trim() || ''
 
   async function createTask() {
     if (createBusy) {
@@ -359,6 +360,9 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                       <button className="text-left" onClick={() => setSelectedTask(task)}>
                         <span className="block text-[15px] font-semibold text-white">{task.title}</span>
                         <span className="mt-1 block text-xs text-[rgba(143,165,184,0.72)]">{task.id} · {task.machine_id} · {task.template_id}</span>
+                        <span className="mt-2 inline-flex rounded-full bg-[rgba(255,255,255,0.05)] px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-[rgba(210,223,234,0.82)]">
+                          {task.created_by === operatorID ? 'Your task' : `Created by ${task.created_by || 'unknown'}`}
+                        </span>
                       </button>
                       <button className="text-left" onClick={() => setSelectedTask(task)}>
                         <span className={`inline-flex rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em] ${statusTone[task.status] || 'text-[rgba(201,213,224,0.82)] border-white/10 bg-white/[0.04]'}`}>
@@ -406,6 +410,20 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                     <DetailBlock label="Latest summary" value={selectedTaskDetail?.summary || selectedTask?.summary || 'Choose a task to inspect its latest state.'} multiline />
                     <DetailBlock label="Pending reply" value={selectedTaskDetail?.awaiting_question?.question_text || selectedTask?.awaiting_question?.question_text || 'No pending reply.'} multiline />
                     <DetailBlock label="Task ID" value={selectedTaskDetail?.id || selectedTask?.id || 'No selection'} />
+                    <DetailBlock
+                      label="Ownership"
+                      value={
+                        selectedTaskDetail
+                          ? selectedTaskDetail.created_by === operatorID
+                            ? `Your task · ${selectedTaskDetail.created_by || 'unknown'}`
+                            : `Other user's task · ${selectedTaskDetail.created_by || 'unknown'}`
+                          : selectedTask
+                            ? selectedTask.created_by === operatorID
+                              ? `Your task · ${selectedTask.created_by || 'unknown'}`
+                              : `Other user's task · ${selectedTask.created_by || 'unknown'}`
+                            : 'No selection'
+                      }
+                    />
                     <DetailBlock
                       label="Repository / Template"
                       value={
