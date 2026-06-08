@@ -2,9 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestStoreCreatesTaskAndReloadsIt(t *testing.T) {
@@ -369,6 +373,73 @@ func TestStorePersistsAndUpdatesTaskQuestions(t *testing.T) {
 	if got[0].AnsweredAt == nil || !got[0].AnsweredAt.Equal(answeredAt) {
 		t.Fatalf("AnsweredAt = %#v, want %s", got[0].AnsweredAt, answeredAt)
 	}
+}
+
+func TestStoreWaitsForBusyWriter(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "store.db")
+
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore(primary) returned error: %v", err)
+	}
+	defer store.Close()
+
+	competing, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore(competing) returned error: %v", err)
+	}
+	defer competing.Close()
+
+	lockDB, err := sql.Open("sqlite", sqliteStoreDSN(path))
+	if err != nil {
+		t.Fatalf("sql.Open(lockDB) returned error: %v", err)
+	}
+	defer lockDB.Close()
+	lockDB.SetMaxOpenConns(1)
+	lockDB.SetMaxIdleConns(1)
+
+	tx, err := lockDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx returned error: %v", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_type, message, created_at) VALUES (?, ?, ?, ?)`,
+		"task-lock-holder", "lock", "holding write lock", time.Now().UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("lock insert returned error: %v", err)
+	}
+
+	release := make(chan struct{})
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		if err := tx.Commit(); err != nil {
+			t.Errorf("Commit returned error: %v", err)
+		}
+		close(release)
+	}()
+
+	task := sampleTaskRun("task-busy-wait", StatusPending)
+	startedAt := time.Now()
+	err = competing.CreateTask(ctx, task)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "busy") || strings.Contains(strings.ToLower(err.Error()), "locked") {
+			t.Fatalf("CreateTask returned busy error instead of waiting: %v", err)
+		}
+		t.Fatalf("CreateTask returned error: %v", err)
+	}
+
+	<-release
+	if elapsed := time.Since(startedAt); elapsed < 100*time.Millisecond {
+		t.Fatalf("CreateTask completed too quickly; elapsed=%s, want it to wait for lock release", elapsed)
+	}
+
+	got, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask returned error: %v", err)
+	}
+	assertTaskFields(t, got, task)
 }
 
 func openTestStore(t *testing.T) *Store {

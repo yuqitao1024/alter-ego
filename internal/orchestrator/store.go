@@ -6,20 +6,26 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+const sqliteBusyTimeout = 5000
 
 type Store struct {
 	db *sql.DB
 }
 
 func OpenStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", sqliteStoreDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite store: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	store := &Store{db: db}
 	if err := store.init(context.Background()); err != nil {
@@ -28,6 +34,44 @@ func OpenStore(path string) (*Store, error) {
 	}
 
 	return store, nil
+}
+
+func sqliteStoreDSN(path string) string {
+	pragmas := []string{
+		fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeout),
+		"journal_mode(WAL)",
+		"foreign_keys(ON)",
+	}
+
+	if strings.HasPrefix(path, "file:") {
+		separator := "?"
+		if strings.Contains(path, "?") {
+			separator = "&"
+		}
+		var builder strings.Builder
+		builder.WriteString(path)
+		builder.WriteString(separator)
+		for i, pragma := range pragmas {
+			if i > 0 {
+				builder.WriteByte('&')
+			}
+			builder.WriteString("_pragma=")
+			builder.WriteString(url.QueryEscape(pragma))
+		}
+		return builder.String()
+	}
+
+	if path == ":memory:" {
+		path = "file::memory:"
+	}
+
+	u := &url.URL{Scheme: "file", Path: path}
+	query := u.Query()
+	for _, pragma := range pragmas {
+		query.Add("_pragma", pragma)
+	}
+	u.RawQuery = query.Encode()
+	return u.String()
 }
 
 func (s *Store) Close() error {
