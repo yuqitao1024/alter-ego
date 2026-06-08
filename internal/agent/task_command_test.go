@@ -16,13 +16,13 @@ func TestTaskCommandStartCreatesTask(t *testing.T) {
 
 	service := &fakeTaskService{
 		startTask: orchestrator.TaskRun{
-			TaskID:       "task-1",
-			TemplateID:   "feature_dev",
-			MachineID:    "machine_a",
-			Status:       orchestrator.StatusRunning,
-			UserRequest:  "Implement feature",
-			CreatedBy:    "ou_1",
-			RepositoryID: "repo_backend",
+			TaskID:        "task-1",
+			TemplateID:    "feature_dev",
+			MachineID:     "machine_a",
+			Status:        orchestrator.StatusRunning,
+			UserRequest:   "Implement feature",
+			CreatedBy:     "ou_1",
+			RemoteWorkdir: "/srv/codex-tasks/task-1/repo",
 		},
 	}
 	handler := NewTaskCommandHandler(service)
@@ -45,7 +45,7 @@ func TestTaskCommandStartCreatesTask(t *testing.T) {
 	if reply.Text != "" {
 		t.Fatalf("reply.Text = %q, want empty text when card is present", reply.Text)
 	}
-	for _, part := range []string{"task-1", "feature_dev", "repo_backend", "machine_a", "running", "Status", "Stop"} {
+	for _, part := range []string{"task-1", "feature_dev", "/srv/codex-tasks/task-1/repo", "machine_a", "running", "Status", "Stop"} {
 		if !cardContains(reply.Card.Payload, part) {
 			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)
 		}
@@ -386,7 +386,7 @@ func TestTaskCommandStatusFormatsTaskDetails(t *testing.T) {
 		statusTask: orchestrator.TaskRun{
 			TaskID:            "task-1",
 			TemplateID:        "feature_dev",
-			RepositoryID:      "repo_backend",
+			RemoteWorkdir:     "/srv/codex-tasks/task-1/repo",
 			MachineID:         "machine_a",
 			Status:            orchestrator.StatusRunning,
 			LastOutputSummary: "Tests passed",
@@ -402,7 +402,7 @@ func TestTaskCommandStatusFormatsTaskDetails(t *testing.T) {
 	if reply.Card == nil {
 		t.Fatal("reply.Card is nil")
 	}
-	wantParts := []string{"task-1", "feature_dev", "repo_backend", "machine_a", "thread-1", "Tests passed"}
+	wantParts := []string{"task-1", "feature_dev", "/srv/codex-tasks/task-1/repo", "machine_a", "thread-1", "Tests passed"}
 	for _, part := range wantParts {
 		if !cardContains(reply.Card.Payload, part) {
 			t.Fatalf("reply.Card.Payload missing %q: %#v", part, reply.Card.Payload)

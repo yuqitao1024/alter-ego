@@ -23,13 +23,13 @@ type RemoteRunner interface {
 
 type StartRequest struct {
 	Machine             MachineConfig
-	RepositoryID        string
 	TaskID              string
 	RemoteRepoURL       string
 	RemoteWorkspaceRoot string
 	CheckoutBranch      string
 	PreCloneBootstrap   []string
 	PostCloneBootstrap  []string
+	WorkspaceSetup      WorkspaceSetup
 	UserRequest         string
 	WorkflowContent     string
 }

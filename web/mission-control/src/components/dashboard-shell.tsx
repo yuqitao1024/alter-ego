@@ -430,12 +430,12 @@ export function DashboardShell({ initialSession }: DashboardShellProps) {
                       }
                     />
                     <DetailBlock
-                      label="Repository / Template"
+                      label="Workspace / Template"
                       value={
                         selectedTaskDetail
-                          ? `${selectedTaskDetail.repository_id} / ${selectedTaskDetail.template_id}`
+                          ? `${selectedTaskDetail.remote_workdir || '(not started)'} / ${selectedTaskDetail.template_id}`
                           : selectedTask
-                            ? `${selectedTask.repository_id} / ${selectedTask.template_id}`
+                            ? `${selectedTask.remote_workdir || '(not started)'} / ${selectedTask.template_id}`
                             : 'No selection'
                       }
                     />

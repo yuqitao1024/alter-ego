@@ -11,12 +11,20 @@ func NewScheduler() *Scheduler {
 }
 
 func SelectMachine(repo RepositoryConfig, active []TaskRun) (string, error) {
-	if len(repo.MachineIDs) == 0 {
-		return "", fmt.Errorf("repository %q has no machines", repo.ID)
+	return selectMachine(repo.ID, repo.MachineIDs, active, "repository")
+}
+
+func SelectMachineForWorkspace(workspace WorkspaceConfig, active []TaskRun) (string, error) {
+	return selectMachine(workspace.Root, workspace.MachineIDs, active, "workspace")
+}
+
+func selectMachine(subject string, machineIDs []string, active []TaskRun, kind string) (string, error) {
+	if len(machineIDs) == 0 {
+		return "", fmt.Errorf("%s %q has no machines", kind, subject)
 	}
 
-	loads := make(map[string]int, len(repo.MachineIDs))
-	for _, machineID := range repo.MachineIDs {
+	loads := make(map[string]int, len(machineIDs))
+	for _, machineID := range machineIDs {
 		loads[machineID] = 0
 	}
 
@@ -26,9 +34,9 @@ func SelectMachine(repo RepositoryConfig, active []TaskRun) (string, error) {
 		}
 	}
 
-	selected := repo.MachineIDs[0]
+	selected := machineIDs[0]
 	lowest := loads[selected]
-	for _, machineID := range repo.MachineIDs[1:] {
+	for _, machineID := range machineIDs[1:] {
 		if load := loads[machineID]; load < lowest {
 			selected = machineID
 			lowest = load

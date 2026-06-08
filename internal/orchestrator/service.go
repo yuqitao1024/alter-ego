@@ -69,22 +69,26 @@ func (s *Service) StartTask(ctx context.Context, templateID, createdBy, userRequ
 		return TaskRun{}, fmt.Errorf("list active tasks: %w", err)
 	}
 
-	machineID, err := SelectMachine(*template.Repository, active)
+	workspace, err := s.workspaceForTemplate(template)
+	if err != nil {
+		return TaskRun{}, err
+	}
+
+	machineID, err := SelectMachineForWorkspace(*workspace, active)
 	if err != nil {
 		return TaskRun{}, err
 	}
 
 	now := s.now()
 	task := TaskRun{
-		TaskID:       newTaskID(now),
-		TemplateID:   template.ID,
-		RepositoryID: template.Repository.ID,
-		MachineID:    machineID,
-		Status:       StatusPending,
-		UserRequest:  userRequest,
-		CreatedBy:    createdBy,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		TaskID:      newTaskID(now),
+		TemplateID:  template.ID,
+		MachineID:   machineID,
+		Status:      StatusPending,
+		UserRequest: userRequest,
+		CreatedBy:   createdBy,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	if err := s.store.CreateTask(ctx, task); err != nil {
 		return TaskRun{}, fmt.Errorf("create task: %w", err)
@@ -468,9 +472,9 @@ func (s *Service) Dashboard(ctx context.Context) (DashboardSnapshot, error) {
 			CreatedBy:     task.CreatedBy,
 			Status:        task.Status,
 			TemplateID:    task.TemplateID,
-			RepositoryID:  task.RepositoryID,
 			MachineID:     task.MachineID,
 			ThreadID:      task.ThreadID,
+			RemoteWorkdir: task.RemoteWorkdir,
 			Summary:       task.LastOutputSummary,
 			LastInput:     task.LastInput,
 			LastUpdatedAt: task.UpdatedAt,
@@ -521,9 +525,9 @@ func (s *Service) TaskDetail(ctx context.Context, taskID string) (DashboardTaskD
 		CreatedBy:     task.CreatedBy,
 		Status:        task.Status,
 		TemplateID:    task.TemplateID,
-		RepositoryID:  task.RepositoryID,
 		MachineID:     task.MachineID,
 		ThreadID:      task.ThreadID,
+		RemoteWorkdir: task.RemoteWorkdir,
 		Summary:       task.LastOutputSummary,
 		LastInput:     task.LastInput,
 		LastUpdatedAt: task.UpdatedAt,
@@ -611,9 +615,13 @@ func (s *Service) DeleteTerminalTasks(ctx context.Context) (int, error) {
 }
 
 func (s *Service) deleteTaskWorkspace(ctx context.Context, task TaskRun) error {
-	repository := s.registry.Repositories[task.RepositoryID]
-	if repository == nil {
-		return fmt.Errorf("unknown repository %q for task %q", task.RepositoryID, task.TaskID)
+	template, err := s.lookupTemplate(task.TemplateID)
+	if err != nil {
+		return err
+	}
+	workspace, err := s.workspaceForTemplate(template)
+	if err != nil {
+		return err
 	}
 	machine := s.registry.Machines[task.MachineID]
 	if machine == nil {
@@ -622,7 +630,7 @@ func (s *Service) deleteTaskWorkspace(ctx context.Context, task TaskRun) error {
 	return s.runner.DeleteTaskWorkspace(ctx, DeleteWorkspaceRequest{
 		Machine:             *machine,
 		TaskID:              task.TaskID,
-		RemoteWorkspaceRoot: repository.RemoteWorkspaceRoot,
+		RemoteWorkspaceRoot: workspace.Root,
 	})
 }
 
@@ -651,15 +659,16 @@ func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {
 		return err
 	}
 
+	workspace, err := s.workspaceForTemplate(template)
+	if err != nil {
+		return err
+	}
+
 	session, err := s.runner.StartInteractiveSession(ctx, StartRequest{
 		Machine:             *machine,
-		RepositoryID:        template.Repository.ID,
 		TaskID:              task.TaskID,
-		RemoteRepoURL:       template.Repository.RemoteRepoURL,
-		RemoteWorkspaceRoot: template.Repository.RemoteWorkspaceRoot,
-		CheckoutBranch:      template.Repository.DefaultBranch,
-		PreCloneBootstrap:   append([]string(nil), template.Repository.PreCloneBootstrap...),
-		PostCloneBootstrap:  append([]string(nil), template.Repository.PostCloneBootstrap...),
+		RemoteWorkspaceRoot: workspace.Root,
+		WorkspaceSetup:      *workspace.Setup,
 		UserRequest:         task.UserRequest,
 		WorkflowContent:     workflowText,
 	})
@@ -1045,10 +1054,20 @@ func (s *Service) lookupTemplate(templateID string) (*TemplateConfig, error) {
 	if template == nil {
 		return nil, fmt.Errorf("unknown template %q", templateID)
 	}
-	if template.Repository == nil {
-		return nil, fmt.Errorf("template %q is missing bound repository", templateID)
+	if template.Workspace == nil {
+		return nil, fmt.Errorf("template %q is missing workspace configuration", templateID)
 	}
 	return template, nil
+}
+
+func (s *Service) workspaceForTemplate(template *TemplateConfig) (*WorkspaceConfig, error) {
+	if template == nil {
+		return nil, fmt.Errorf("template is nil")
+	}
+	if template.Workspace != nil {
+		return template.Workspace, nil
+	}
+	return nil, fmt.Errorf("template %q is missing workspace configuration", template.ID)
 }
 
 func (s *Service) lookupMachine(machineID string) (*MachineConfig, error) {

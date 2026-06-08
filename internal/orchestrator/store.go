@@ -91,7 +91,6 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 		INSERT INTO tasks (
 			task_id,
 			template_id,
-			repository_id,
 			machine_id,
 			status,
 			user_request,
@@ -107,11 +106,10 @@ func (s *Store) CreateTask(ctx context.Context, task TaskRun) error {
 				awaiting_question,
 				created_at,
 				updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.TaskID,
 		task.TemplateID,
-		task.RepositoryID,
 		task.MachineID,
 		task.Status,
 		task.UserRequest,
@@ -144,7 +142,6 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE tasks
 		SET template_id = ?,
-			repository_id = ?,
 			machine_id = ?,
 			status = ?,
 			user_request = ?,
@@ -163,7 +160,6 @@ func (s *Store) UpdateTask(ctx context.Context, task TaskRun) error {
 		WHERE task_id = ?
 	`,
 		task.TemplateID,
-		task.RepositoryID,
 		task.MachineID,
 		task.Status,
 		task.UserRequest,
@@ -201,7 +197,6 @@ func (s *Store) GetTask(ctx context.Context, taskID string) (TaskRun, error) {
 		SELECT
 			task_id,
 			template_id,
-			repository_id,
 			machine_id,
 			status,
 			user_request,
@@ -252,7 +247,6 @@ func (s *Store) GetTaskByThread(ctx context.Context, threadID string) (TaskRun, 
 		SELECT
 			task_id,
 			template_id,
-			repository_id,
 			machine_id,
 			status,
 			user_request,
@@ -284,7 +278,6 @@ func (s *Store) ListActiveTasks(ctx context.Context) ([]TaskRun, error) {
 		SELECT
 			task_id,
 			template_id,
-			repository_id,
 			machine_id,
 			status,
 			user_request,
@@ -329,7 +322,6 @@ func (s *Store) ListTasks(ctx context.Context) ([]TaskRun, error) {
 		SELECT
 			task_id,
 			template_id,
-			repository_id,
 			machine_id,
 			status,
 			user_request,
@@ -675,7 +667,6 @@ func (s *Store) init(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS tasks (
 			task_id TEXT PRIMARY KEY,
 			template_id TEXT NOT NULL,
-			repository_id TEXT NOT NULL,
 			machine_id TEXT NOT NULL,
 			status TEXT NOT NULL,
 			user_request TEXT NOT NULL,
@@ -787,7 +778,6 @@ func scanTask(scanner taskScanner) (TaskRun, error) {
 	err := scanner.Scan(
 		&task.TaskID,
 		&task.TemplateID,
-		&task.RepositoryID,
 		&task.MachineID,
 		&status,
 		&task.UserRequest,

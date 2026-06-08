@@ -326,7 +326,7 @@ func buildTaskStartCard(task orchestrator.TaskRun, viewerID string) interface{} 
 			Content(fmt.Sprintf("Started **%s**\nOwner: **%s**\nCreated by: `%s`", task.TaskID, formatTaskOwnerLabel(task, viewerID), formatTaskCreator(task))).
 			Build(),
 		larkcard.NewMessageCardMarkdown().
-			Content(fmt.Sprintf("Template: `%s`\nRepository: `%s`\nMachine: `%s`\nStatus: `%s`", task.TemplateID, task.RepositoryID, task.MachineID, task.Status)).
+			Content(fmt.Sprintf("Template: `%s`\nWorkspace: `%s`\nMachine: `%s`\nStatus: `%s`", task.TemplateID, firstNonEmpty(task.RemoteWorkdir, "(not started)"), task.MachineID, task.Status)).
 			Build(),
 		taskActionRow(task).Build(),
 	}
@@ -354,7 +354,7 @@ func buildTaskNoticeCard(title string, template string, message string, task *or
 	if task != nil {
 		elements = append(elements,
 			larkcard.NewMessageCardMarkdown().
-				Content(fmt.Sprintf("Owner: **%s**\nCreated by: `%s`\nTemplate: `%s`\nRepository: `%s`\nMachine: `%s`\nStatus: `%s`\nThread: `%s`", formatTaskOwnerLabel(*task, viewerID), formatTaskCreator(*task), task.TemplateID, task.RepositoryID, task.MachineID, task.Status, task.ThreadID)).
+				Content(fmt.Sprintf("Owner: **%s**\nCreated by: `%s`\nTemplate: `%s`\nWorkspace: `%s`\nMachine: `%s`\nStatus: `%s`\nThread: `%s`", formatTaskOwnerLabel(*task, viewerID), formatTaskCreator(*task), task.TemplateID, firstNonEmpty(task.RemoteWorkdir, "(not started)"), task.MachineID, task.Status, task.ThreadID)).
 				Build(),
 		)
 		elements = append(elements, taskActionRow(*task).Build())
@@ -415,12 +415,12 @@ func taskButton(label, action, taskID string, buttonType larkcard.MessageCardBut
 
 func formatTaskStatus(task orchestrator.TaskRun) string {
 	return fmt.Sprintf(
-		"task: %s\nowner: %s\ncreated_by: %s\ntemplate: %s\nrepository: %s\nmachine: %s\nstatus: %s\nthread: %s\nsummary: %s",
+		"task: %s\nowner: %s\ncreated_by: %s\ntemplate: %s\nworkspace: %s\nmachine: %s\nstatus: %s\nthread: %s\nsummary: %s",
 		task.TaskID,
 		formatTaskOwnerLabel(task, ""),
 		formatTaskCreator(task),
 		task.TemplateID,
-		task.RepositoryID,
+		firstNonEmpty(task.RemoteWorkdir, "(not started)"),
 		task.MachineID,
 		task.Status,
 		task.ThreadID,
@@ -430,12 +430,12 @@ func formatTaskStatus(task orchestrator.TaskRun) string {
 
 func formatTaskStatusMarkdown(task orchestrator.TaskRun, viewerID string) string {
 	return fmt.Sprintf(
-		"**Task**: `%s`\n**Owner**: **%s**\n**Created by**: `%s`\n**Template**: `%s`\n**Repository**: `%s`\n**Machine**: `%s`\n**Status**: `%s`\n**Thread**: `%s`\n**Summary**: %s",
+		"**Task**: `%s`\n**Owner**: **%s**\n**Created by**: `%s`\n**Template**: `%s`\n**Workspace**: `%s`\n**Machine**: `%s`\n**Status**: `%s`\n**Thread**: `%s`\n**Summary**: %s",
 		task.TaskID,
 		formatTaskOwnerLabel(task, viewerID),
 		formatTaskCreator(task),
 		task.TemplateID,
-		task.RepositoryID,
+		firstNonEmpty(task.RemoteWorkdir, "(not started)"),
 		task.MachineID,
 		task.Status,
 		task.ThreadID,

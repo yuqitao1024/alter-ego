@@ -1,5 +1,16 @@
 id: feature_dev
-repository_id: repo_backend
 display_name: Feature Development
 description: Default feature workflow for scoped repository changes.
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
+    pre_clone_bootstrap:
+      - setup-git-auth
+    post_clone_bootstrap:
+      - git submodule update --init --recursive
 workflow_path: docs/workflows/example-feature-dev.md

@@ -71,7 +71,6 @@ func TestAppServerRunnerStartInteractiveSessionStartsWatcher(t *testing.T) {
 			AppServerServiceName: "codex-app-server",
 			AppServerInstallUser: "coder",
 		},
-		RepositoryID:        "repo_backend",
 		TaskID:              "task-1",
 		RemoteRepoURL:       "git@github.com:example/backend.git",
 		RemoteWorkspaceRoot: "/srv/codex-tasks",
@@ -102,6 +101,56 @@ func TestAppServerRunnerStartInteractiveSessionStartsWatcher(t *testing.T) {
 	}
 	if len(runtime.startRequest.SandboxPolicy.WritableRoots) != 0 {
 		t.Fatalf("startRequest.SandboxPolicy.WritableRoots = %#v, want empty", runtime.startRequest.SandboxPolicy.WritableRoots)
+	}
+}
+
+func TestAppServerRunnerStartInteractiveSessionUsesTaskRootForEmptyWorkspace(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCodexRuntime{
+		startThreadID: "thread-1",
+		startTurnID:   "turn-1",
+	}
+	runner := NewAppServerRunner(runtime)
+	runner.transport = &fakeSSHTransport{}
+	runner.machineResolver = func(machineID string) (MachineConfig, error) {
+		return MachineConfig{
+			ID:                   machineID,
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		}, nil
+	}
+
+	session, err := runner.StartInteractiveSession(context.Background(), StartRequest{
+		Machine: MachineConfig{
+			ID:                   "machine_a",
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		},
+		TaskID:              "task-empty",
+		RemoteWorkspaceRoot: "/srv/codex-tasks",
+		WorkspaceSetup: WorkspaceSetup{
+			Type: WorkspaceSetupTypeEmpty,
+		},
+		UserRequest:     "Continue implementation",
+		WorkflowContent: "workflow",
+	})
+	if err != nil {
+		t.Fatalf("StartInteractiveSession returned error: %v", err)
+	}
+	if session.Workdir != "/srv/codex-tasks/task-empty" {
+		t.Fatalf("session.Workdir = %q, want /srv/codex-tasks/task-empty", session.Workdir)
+	}
+	if runtime.startRequest.Cwd != "/srv/codex-tasks/task-empty" {
+		t.Fatalf("startRequest.Cwd = %q, want /srv/codex-tasks/task-empty", runtime.startRequest.Cwd)
 	}
 }
 

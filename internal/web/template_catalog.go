@@ -21,10 +21,9 @@ func (c RegistryTemplateCatalog) ListTemplates(context.Context) ([]TemplateSumma
 			continue
 		}
 		items = append(items, TemplateSummary{
-			ID:           template.ID,
-			DisplayName:  template.DisplayName,
-			Description:  template.Description,
-			RepositoryID: template.RepositoryID,
+			ID:          template.ID,
+			DisplayName: template.DisplayName,
+			Description: template.Description,
 		})
 	}
 	return items, nil

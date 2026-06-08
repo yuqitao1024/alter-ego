@@ -8,7 +8,6 @@ export type TaskTemplate = {
   id: string
   display_name: string
   description: string
-  repository_id: string
 }
 
 export type DashboardTaskEvent = {
@@ -32,9 +31,9 @@ export type DashboardTask = {
   status: string
   summary: string
   template_id: string
-  repository_id: string
   machine_id: string
   thread_id: string
+  remote_workdir: string
   last_input: string
   last_updated_at: string
   created_at: string
@@ -59,9 +58,9 @@ export type DashboardTaskDetail = {
   status: string
   summary: string
   template_id: string
-  repository_id: string
   machine_id: string
   thread_id: string
+  remote_workdir: string
   last_input: string
   last_updated_at: string
   created_at: string

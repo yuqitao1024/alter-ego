@@ -566,15 +566,15 @@ func (s *stubDataProvider) TaskDetail(_ context.Context, taskID string) (any, er
 		return nil, contextErrorString(s.detailErr)
 	}
 	return map[string]any{
-		"id":            taskID,
-		"title":         "Investigate stalled task",
-		"status":        "waiting_user_input",
-		"template_id":   "feature_dev",
-		"repository_id": "repo_backend",
-		"machine_id":    "machine_a",
-		"thread_id":     "thread-1",
-		"summary":       "Need operator confirmation before continuing.",
-		"last_input":    "Investigate websocket reconnect handling",
+		"id":             taskID,
+		"title":          "Investigate stalled task",
+		"status":         "waiting_user_input",
+		"template_id":    "feature_dev",
+		"machine_id":     "machine_a",
+		"thread_id":      "thread-1",
+		"remote_workdir": "/srv/codex-tasks/task-1",
+		"summary":        "Need operator confirmation before continuing.",
+		"last_input":     "Investigate websocket reconnect handling",
 		"events": []map[string]any{
 			{"event_type": "task_started", "message": "task started", "created_at": "2026-05-28T10:00:00Z"},
 			{"event_type": "waiting_user_input", "message": "waiting for plan_decision", "created_at": "2026-05-28T10:05:00Z"},

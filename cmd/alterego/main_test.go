@@ -28,7 +28,7 @@ func (stubDashboardService) TaskDetail(context.Context, string) (orchestrator.Da
 func (stubDashboardService) StartTask(context.Context, string, string, string) (orchestrator.TaskRun, error) {
 	return orchestrator.TaskRun{}, nil
 }
-func (stubDashboardService) Reply(context.Context, string, string) error { return nil }
+func (stubDashboardService) Reply(context.Context, string, string) error  { return nil }
 func (stubDashboardService) Reopen(context.Context, string, string) error { return nil }
 func (stubDashboardService) Complete(context.Context, string) error       { return nil }
 func (stubDashboardService) Stop(context.Context, string) error           { return nil }
@@ -260,9 +260,20 @@ post_clone_bootstrap:
   - pnpm install
 `)
 	writeFile(t, filepath.Join(root, "configs/templates/feature_dev.yaml"), `id: feature_dev
-repository_id: repo_backend
 display_name: Feature Development
 description: Default feature workflow
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
+    pre_clone_bootstrap:
+      - setup-git-auth
+    post_clone_bootstrap:
+      - pnpm install
 workflow_path: docs/workflows/feature_dev.md
 `)
 	writeFile(t, filepath.Join(root, "docs/workflows/feature_dev.md"), "Workflow: analyze and implement.\n")

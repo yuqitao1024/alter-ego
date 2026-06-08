@@ -25,12 +25,11 @@ type TemplateSummary struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"display_name"`
 	Description string `json:"description"`
-	RepositoryID string `json:"repository_id"`
 }
 
 type OrchestratorDashboardProvider struct {
-	Service  TaskDashboardService
-	Catalog  TemplateCatalogService
+	Service TaskDashboardService
+	Catalog TemplateCatalogService
 }
 
 func (p OrchestratorDashboardProvider) Dashboard(ctx context.Context) (any, error) {

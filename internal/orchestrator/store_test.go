@@ -111,7 +111,6 @@ func TestStorePersistsThreadIdentity(t *testing.T) {
 	task := TaskRun{
 		TaskID:       "task-appserver",
 		TemplateID:   "simt-stl-dev",
-		RepositoryID: "simt-stl",
 		MachineID:    "A5-82",
 		Status:       StatusRunning,
 		ThreadID:     "thread_123",
@@ -145,7 +144,6 @@ func TestStorePersistsSupervisorControlFields(t *testing.T) {
 	task := TaskRun{
 		TaskID:            "task-supervisor",
 		TemplateID:        "feature_dev",
-		RepositoryID:      "repo_backend",
 		MachineID:         "machine_a",
 		Status:            StatusRecovering,
 		UserRequest:       "continue",
@@ -457,7 +455,6 @@ func sampleTaskRun(taskID string, status TaskStatus) TaskRun {
 	return TaskRun{
 		TaskID:            taskID,
 		TemplateID:        "feature_dev",
-		RepositoryID:      "repo_backend",
 		MachineID:         "machine_a",
 		Status:            status,
 		UserRequest:       "Implement persisted store",
@@ -478,9 +475,6 @@ func assertTaskFields(t *testing.T, got, want TaskRun) {
 	}
 	if got.TemplateID != want.TemplateID {
 		t.Fatalf("TemplateID = %q, want %q", got.TemplateID, want.TemplateID)
-	}
-	if got.RepositoryID != want.RepositoryID {
-		t.Fatalf("RepositoryID = %q, want %q", got.RepositoryID, want.RepositoryID)
 	}
 	if got.MachineID != want.MachineID {
 		t.Fatalf("MachineID = %q, want %q", got.MachineID, want.MachineID)

@@ -19,15 +19,14 @@ func TestStartTaskSelectsMachineAndStartsSession(t *testing.T) {
 	defer cleanup()
 
 	seedTask(t, store, TaskRun{
-		TaskID:       "existing",
-		TemplateID:   "feature_dev",
-		RepositoryID: "repo_backend",
-		MachineID:    "machine_a",
-		Status:       StatusRunning,
-		UserRequest:  "existing work",
-		CreatedBy:    "tester",
-		CreatedAt:    time.Now().UTC().Add(-time.Minute),
-		UpdatedAt:    time.Now().UTC().Add(-time.Minute),
+		TaskID:      "existing",
+		TemplateID:  "feature_dev",
+		MachineID:   "machine_a",
+		Status:      StatusRunning,
+		UserRequest: "existing work",
+		CreatedBy:   "tester",
+		CreatedAt:   time.Now().UTC().Add(-time.Minute),
+		UpdatedAt:   time.Now().UTC().Add(-time.Minute),
 	})
 
 	runner := service.runner.(*fakeServiceRunner)
@@ -68,6 +67,50 @@ func TestStartTaskUsesBase36MillisecondTaskID(t *testing.T) {
 	}
 	if task.TaskID != "task-kf12oi" {
 		t.Fatalf("TaskID = %q, want task-kf12oi", task.TaskID)
+	}
+}
+
+func TestStartTaskSupportsTemplateWithEmptyWorkspace(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		startSession: RemoteSession{
+			MachineID:    "machine_a",
+			Workdir:      "/srv/codex-tasks/task-1",
+			ThreadID:     "thread-1",
+			ActiveTurnID: "turn-1",
+		},
+	}
+	service, _, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
+	defer cleanup()
+
+	service.registry.Templates["research"] = &TemplateConfig{
+		ID: "research",
+		Workspace: &WorkspaceConfig{
+			Root:       "/srv/codex-tasks",
+			MachineIDs: []string{"machine_a"},
+			Machines: []*MachineConfig{
+				service.registry.Machines["machine_a"],
+			},
+			Setup: &WorkspaceSetup{
+				Type: WorkspaceSetupTypeEmpty,
+			},
+		},
+		ResolvedWorkflowPath: writeWorkflowFixture(t, "Research workflow\n"),
+	}
+
+	task, err := service.StartTask(context.Background(), "research", "yuqitao", "Investigate docs")
+	if err != nil {
+		t.Fatalf("StartTask returned error: %v", err)
+	}
+	if task.RemoteWorkdir != "/srv/codex-tasks/task-1" {
+		t.Fatalf("task.RemoteWorkdir = %q, want /srv/codex-tasks/task-1", task.RemoteWorkdir)
+	}
+	if runner.lastStartRequest.RemoteRepoURL != "" {
+		t.Fatalf("RemoteRepoURL = %q, want empty", runner.lastStartRequest.RemoteRepoURL)
+	}
+	if runner.lastStartRequest.WorkspaceSetup.Type != WorkspaceSetupTypeEmpty {
+		t.Fatalf("WorkspaceSetup.Type = %q, want %q", runner.lastStartRequest.WorkspaceSetup.Type, WorkspaceSetupTypeEmpty)
 	}
 }
 
@@ -429,7 +472,6 @@ func TestDashboardBuildsRealTaskSnapshot(t *testing.T) {
 
 	running := sampleTaskRun("task-running", StatusRunning)
 	running.TemplateID = "feature_dev"
-	running.RepositoryID = "repo_backend"
 	running.MachineID = "machine_a"
 	running.UserRequest = "Fix websocket reconnect handling"
 	running.LastOutputSummary = "Applied reconnect retry logic and running tests."
@@ -447,7 +489,6 @@ func TestDashboardBuildsRealTaskSnapshot(t *testing.T) {
 
 	waiting := sampleTaskRun("task-waiting", StatusWaitingUserInput)
 	waiting.TemplateID = "simt-stl-research"
-	waiting.RepositoryID = "repo_backend"
 	waiting.MachineID = "machine_b"
 	waiting.UserRequest = "Compare three paper directions and pick one."
 	waiting.LastOutputSummary = "Codex finished the first pass and needs operator direction."
@@ -481,7 +522,6 @@ func TestDashboardBuildsRealTaskSnapshot(t *testing.T) {
 
 	completed := sampleTaskRun("task-completed", StatusCompleted)
 	completed.TemplateID = "feature_dev"
-	completed.RepositoryID = "repo_backend"
 	completed.MachineID = "machine_a"
 	completed.UserRequest = "Ship dashboard phase 1."
 	completed.LastOutputSummary = "Feature merged and validated."
@@ -701,7 +741,6 @@ func TestReopenReturnsExplicitErrorWhenOriginalThreadIsMissing(t *testing.T) {
 
 	task := sampleTaskRun("task-reopen-missing-thread", StatusCompleted)
 	task.TemplateID = "feature_dev"
-	task.RepositoryID = "repo_backend"
 	task.MachineID = "machine_a"
 	task.ThreadID = "thread-1"
 	task.ActiveTurnID = "turn-1"
@@ -1506,8 +1545,20 @@ func newCustomTestServiceWithNotifier(t *testing.T, runner *fakeServiceRunner, d
 		},
 		Templates: map[string]*TemplateConfig{
 			"feature_dev": {
-				ID:                   "feature_dev",
-				RepositoryID:         "repo_backend",
+				ID: "feature_dev",
+				Workspace: workspaceFromRepository(&RepositoryConfig{
+					ID:                  "repo_backend",
+					RemoteRepoURL:       "git@github.com:example/backend.git",
+					RemoteWorkspaceRoot: "/srv/codex-tasks",
+					DefaultBranch:       "main",
+					MachineIDs:          []string{"machine_a", "machine_b"},
+					PreCloneBootstrap:   []string{"setup-git-auth"},
+					PostCloneBootstrap:  []string{"pnpm install"},
+					Machines: []*MachineConfig{
+						{ID: "machine_a", Host: "host-a", User: "coder"},
+						{ID: "machine_b", Host: "host-b", User: "coder"},
+					},
+				}),
 				ResolvedWorkflowPath: writeWorkflowFixture(t, "Feature workflow: analyze first\n"),
 			},
 		},
@@ -1516,7 +1567,7 @@ func newCustomTestServiceWithNotifier(t *testing.T, runner *fakeServiceRunner, d
 		registry.Machines["machine_a"],
 		registry.Machines["machine_b"],
 	}
-	registry.Templates["feature_dev"].Repository = registry.Repositories["repo_backend"]
+	registry.Templates["feature_dev"].Workspace = workspaceFromRepository(registry.Repositories["repo_backend"])
 
 	service := NewService(store, registry, NewScheduler(), runner, decider)
 	service.SetNotifier(notifier)
@@ -1564,12 +1615,13 @@ func writeWorkflowFixture(t *testing.T, body string) string {
 type fakeServiceRunner struct {
 	calls []string
 
-	startSession RemoteSession
-	sendSession  RemoteSession
-	outputWindow OutputWindow
-	snapshot     codexappserver.ThreadSnapshot
-	hasSession   bool
-	eventCh      chan RuntimeEvent
+	lastStartRequest StartRequest
+	startSession     RemoteSession
+	sendSession      RemoteSession
+	outputWindow     OutputWindow
+	snapshot         codexappserver.ThreadSnapshot
+	hasSession       bool
+	eventCh          chan RuntimeEvent
 
 	sentInputs    []string
 	serverReplies []string
@@ -1585,8 +1637,9 @@ type fakeServiceRunner struct {
 	cleanedSessions   []RemoteSession
 }
 
-func (f *fakeServiceRunner) StartInteractiveSession(context.Context, StartRequest) (RemoteSession, error) {
+func (f *fakeServiceRunner) StartInteractiveSession(_ context.Context, req StartRequest) (RemoteSession, error) {
 	f.calls = append(f.calls, "start")
+	f.lastStartRequest = req
 	if f.startErr != nil {
 		return RemoteSession{}, f.startErr
 	}

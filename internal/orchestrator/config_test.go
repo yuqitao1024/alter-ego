@@ -35,8 +35,15 @@ machine_ids:
 `)
 	writeConfigFile(t, root, "configs/templates/simt-stl-dev.yaml", `
 id: simt-stl-dev
-repository_id: simt-stl
 display_name: SimT STL Dev
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - A5-82
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/simt-stl.git
+    checkout_branch: main
 workflow_path: docs/workflows/simt-stl-dev.md
 `)
 	writeConfigFile(t, root, "docs/workflows/simt-stl-dev.md", `
@@ -88,7 +95,14 @@ machine_ids:
 `)
 	writeConfigFile(t, root, "configs/templates/template.yaml", `
 id: feature_dev
-repository_id: repo
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/repo.git
+    checkout_branch: main
 workflow_path: docs/workflows/feature_dev.md
 `)
 	writeConfigFile(t, root, "docs/workflows/feature_dev.md", "workflow\n")
@@ -183,16 +197,34 @@ post_clone_bootstrap:
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
-repository_id: repo_backend
 display_name: Feature Development
 description: Default feature workflow
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
+    pre_clone_bootstrap:
+      - setup-git-auth
+    post_clone_bootstrap:
+      - git submodule update --init --recursive
 workflow_path: docs/workflows/example-feature-dev.md
 `)
 	writeConfigFile(t, root, "configs/templates/ops-review.yaml", `
 id: ops_review
-repository_id: repo_backend
 display_name: Ops Review
 description: Secondary workflow for ordering checks
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
 workflow_path: docs/workflows/ops-review.md
 `)
 	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
@@ -214,41 +246,35 @@ workflow_path: docs/workflows/ops-review.md
 	if template == nil {
 		t.Fatal("Templates[feature_dev] = nil")
 	}
-	if template.Repository == nil {
-		t.Fatal("template.Repository = nil")
+	if template.Workspace == nil {
+		t.Fatal("template.Workspace = nil")
 	}
-	if template.Repository != cfg.Repositories["repo_backend"] {
-		t.Fatal("template.Repository does not point at cfg.Repositories[repo_backend]")
+	if template.Workspace.Root != "/srv/codex-tasks" {
+		t.Fatalf("template.Workspace.Root = %q, want /srv/codex-tasks", template.Workspace.Root)
 	}
-	if template.Repository.ID != "repo_backend" {
-		t.Fatalf("template.Repository.ID = %q, want repo_backend", template.Repository.ID)
+	if len(template.Workspace.Machines) != 1 {
+		t.Fatalf("len(template.Workspace.Machines) = %d, want 1", len(template.Workspace.Machines))
 	}
-	if len(template.Repository.Machines) != 1 {
-		t.Fatalf("len(template.Repository.Machines) = %d, want 1", len(template.Repository.Machines))
+	if template.Workspace.Machines[0] != cfg.Machines["machine_a"] {
+		t.Fatal("template.Workspace.Machines[0] does not point at cfg.Machines[machine_a]")
 	}
-	if template.Repository.Machines[0] != cfg.Machines["machine_a"] {
-		t.Fatal("template.Repository.Machines[0] does not point at cfg.Machines[machine_a]")
+	if len(template.Workspace.Machines[0].ShellInit) != 2 {
+		t.Fatalf("machine.ShellInit = %#v, want 2 entries", template.Workspace.Machines[0].ShellInit)
 	}
-	if len(template.Repository.Machines[0].ShellInit) != 2 {
-		t.Fatalf("machine.ShellInit = %#v, want 2 entries", template.Repository.Machines[0].ShellInit)
+	if template.Workspace.Machines[0].ShellInit[0] != "source /opt/codex/env.sh" {
+		t.Fatalf("machine.ShellInit[0] = %q", template.Workspace.Machines[0].ShellInit[0])
 	}
-	if template.Repository.Machines[0].ShellInit[0] != "source /opt/codex/env.sh" {
-		t.Fatalf("machine.ShellInit[0] = %q", template.Repository.Machines[0].ShellInit[0])
+	if template.Workspace.Setup == nil {
+		t.Fatal("template.Workspace.Setup = nil")
 	}
-	if template.Repository.Machines[0] == nil || template.Repository.Machines[0].ID != "machine_a" {
-		t.Fatalf("template.Repository.Machines[0] = %#v, want machine_a", template.Repository.Machines[0])
+	if template.Workspace.Setup.RemoteRepoURL != "git@github.com:example/backend.git" {
+		t.Fatalf("template.Workspace.Setup.RemoteRepoURL = %q", template.Workspace.Setup.RemoteRepoURL)
 	}
-	if template.Repository.RemoteRepoURL != "git@github.com:example/backend.git" {
-		t.Fatalf("template.Repository.RemoteRepoURL = %q", template.Repository.RemoteRepoURL)
+	if len(template.Workspace.Setup.PreCloneBootstrap) != 1 || template.Workspace.Setup.PreCloneBootstrap[0] != "setup-git-auth" {
+		t.Fatalf("template.Workspace.Setup.PreCloneBootstrap = %#v", template.Workspace.Setup.PreCloneBootstrap)
 	}
-	if template.Repository.RemoteWorkspaceRoot != "/srv/codex-tasks" {
-		t.Fatalf("template.Repository.RemoteWorkspaceRoot = %q", template.Repository.RemoteWorkspaceRoot)
-	}
-	if len(template.Repository.PreCloneBootstrap) != 1 || template.Repository.PreCloneBootstrap[0] != "setup-git-auth" {
-		t.Fatalf("template.Repository.PreCloneBootstrap = %#v", template.Repository.PreCloneBootstrap)
-	}
-	if len(template.Repository.PostCloneBootstrap) != 1 || template.Repository.PostCloneBootstrap[0] != "git submodule update --init --recursive" {
-		t.Fatalf("template.Repository.PostCloneBootstrap = %#v", template.Repository.PostCloneBootstrap)
+	if len(template.Workspace.Setup.PostCloneBootstrap) != 1 || template.Workspace.Setup.PostCloneBootstrap[0] != "git submodule update --init --recursive" {
+		t.Fatalf("template.Workspace.Setup.PostCloneBootstrap = %#v", template.Workspace.Setup.PostCloneBootstrap)
 	}
 
 	wantWorkflowPath, err := filepath.EvalSymlinks(filepath.Join(root, "docs/workflows/example-feature-dev.md"))
@@ -269,7 +295,7 @@ workflow_path: docs/workflows/ops-review.md
 	}
 }
 
-func TestLoadConfigRejectsTemplateWithUnknownRepository(t *testing.T) {
+func TestLoadConfigRejectsTemplateWithUnknownWorkspaceMachine(t *testing.T) {
 	root := t.TempDir()
 
 	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
@@ -283,19 +309,16 @@ app_server_service_name: codex-app-server
 app_server_install_user: dev
 app_server_ws_auth_token: test-token
 `)
-	writeConfigFile(t, root, "configs/repositories/backend.yaml", `
-id: repo_backend
-remote_repo_url: git@github.com:example/backend.git
-remote_workspace_root: /srv/codex-tasks
-default_branch: main
-machine_ids:
-  - machine_a
-`)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
-repository_id: missing_repo
 display_name: Feature Development
 description: Default feature workflow
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_missing
+  setup:
+    type: empty
 workflow_path: docs/workflows/example-feature-dev.md
 `)
 	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
@@ -306,8 +329,62 @@ workflow_path: docs/workflows/example-feature-dev.md
 	if err == nil {
 		t.Fatal("LoadRegistry returned nil error")
 	}
-	if !strings.Contains(err.Error(), "missing_repo") {
-		t.Fatalf("LoadRegistry error = %q, want missing_repo", err)
+	if !strings.Contains(err.Error(), "machine_missing") {
+		t.Fatalf("LoadRegistry error = %q, want machine_missing", err)
+	}
+}
+
+func TestLoadConfigAllowsTemplateWithoutRepositoryForEmptyWorkspace(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
+app_server_ws_auth_token: test-token
+`)
+	writeConfigFile(t, root, "configs/templates/research.yaml", `
+id: research
+display_name: Research
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: empty
+workflow_path: docs/workflows/research.md
+`)
+	writeConfigFile(t, root, "docs/workflows/research.md", `
+# Research
+`)
+
+	registry, err := LoadRegistry(root)
+	if err != nil {
+		t.Fatalf("LoadRegistry returned error: %v", err)
+	}
+
+	template := registry.Templates["research"]
+	if template == nil {
+		t.Fatal("Templates[research] = nil")
+	}
+	if template.Workspace == nil {
+		t.Fatal("template.Workspace = nil")
+	}
+	if template.Workspace.Root != "/srv/codex-tasks" {
+		t.Fatalf("template.Workspace.Root = %q", template.Workspace.Root)
+	}
+	if len(template.Workspace.Machines) != 1 || template.Workspace.Machines[0].ID != "machine_a" {
+		t.Fatalf("template.Workspace.Machines = %#v, want [machine_a]", template.Workspace.Machines)
+	}
+	if template.Workspace.Setup == nil {
+		t.Fatal("template.Workspace.Setup = nil")
+	}
+	if template.Workspace.Setup.Type != WorkspaceSetupTypeEmpty {
+		t.Fatalf("template.Workspace.Setup.Type = %q, want %q", template.Workspace.Setup.Type, WorkspaceSetupTypeEmpty)
 	}
 }
 
@@ -335,9 +412,16 @@ machine_ids:
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
-repository_id: repo_backend
 display_name: Feature Development
 description: Default feature workflow
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
 workflow_path: docs/workflows/example-feature-dev.md
 `)
 	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
@@ -378,9 +462,16 @@ machine_ids:
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
-repository_id: repo_backend
 display_name: Feature Development
 description: Default feature workflow
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
 workflow_path: docs/workflows/missing.md
 `)
 
@@ -417,7 +508,14 @@ machine_ids:
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
-repository_id: repo_backend
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
 workflow_path: ../escape.md
 `)
 	if err := os.WriteFile(outsideWorkflow, []byte("# Escape\n"), 0o644); err != nil {
@@ -451,7 +549,14 @@ machine_ids:
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
-repository_id: repo_backend
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
 workflow_path: docs/workflows/example-feature-dev.md
 `)
 	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
@@ -499,7 +604,14 @@ machine_ids:
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
-repository_id: repo_backend
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
 workflow_path: docs/workflows/example-feature-dev.md
 `)
 	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `
@@ -536,7 +648,14 @@ machine_ids:
 `)
 	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
 id: feature_dev
-repository_id: repo_backend
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: repo
+    remote_repo_url: git@github.com:example/backend.git
+    checkout_branch: main
 workflow_path: docs/workflows/example-feature-dev.md
 `)
 	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", `

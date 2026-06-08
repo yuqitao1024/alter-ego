@@ -34,7 +34,6 @@ const (
 type TaskRun struct {
 	TaskID              string
 	TemplateID          string
-	RepositoryID        string
 	MachineID           string
 	Status              TaskStatus
 	UserRequest         string
@@ -146,9 +145,9 @@ type DashboardTask struct {
 	CreatedBy        string               `json:"created_by"`
 	Status           TaskStatus           `json:"status"`
 	TemplateID       string               `json:"template_id"`
-	RepositoryID     string               `json:"repository_id"`
 	MachineID        string               `json:"machine_id"`
 	ThreadID         string               `json:"thread_id"`
+	RemoteWorkdir    string               `json:"remote_workdir"`
 	Summary          string               `json:"summary"`
 	LastInput        string               `json:"last_input"`
 	LastUpdatedAt    time.Time            `json:"last_updated_at"`
@@ -163,9 +162,9 @@ type DashboardTaskDetail struct {
 	CreatedBy        string                  `json:"created_by"`
 	Status           TaskStatus              `json:"status"`
 	TemplateID       string                  `json:"template_id"`
-	RepositoryID     string                  `json:"repository_id"`
 	MachineID        string                  `json:"machine_id"`
 	ThreadID         string                  `json:"thread_id"`
+	RemoteWorkdir    string                  `json:"remote_workdir"`
 	Summary          string                  `json:"summary"`
 	LastInput        string                  `json:"last_input"`
 	LastUpdatedAt    time.Time               `json:"last_updated_at"`

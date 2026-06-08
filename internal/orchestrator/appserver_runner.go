@@ -53,14 +53,14 @@ func (r *AppServerRunner) SetMachineResolver(resolver func(machineID string) (Ma
 }
 
 func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req StartRequest) (RemoteSession, error) {
-	repoDir := taskRepoWorkdir(req.RemoteWorkspaceRoot, req.TaskID)
+	workdir := taskSessionWorkdir(req)
 	command := wrapRemoteCommand(req.Machine, buildPrepareWorkspaceCommand(req))
 	if _, err := r.runWorkspaceCommand(ctx, req.Machine, "prepare remote workspace", command); err != nil {
 		return RemoteSession{}, err
 	}
 
 	threadID, turnID, err := r.manager.StartTaskSession(ctx, machineRuntimeConfig(req.Machine), codexappserver.StartTaskSessionRequest{
-		Cwd:              repoDir,
+		Cwd:              workdir,
 		BaseInstructions: strings.TrimSpace(req.WorkflowContent),
 		Input:            buildStartInput(req.WorkflowContent, req.UserRequest),
 		ApprovalPolicy:   "never",
@@ -82,7 +82,7 @@ func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req Start
 
 	return RemoteSession{
 		MachineID:    req.Machine.ID,
-		Workdir:      repoDir,
+		Workdir:      workdir,
 		ThreadID:     threadID,
 		ActiveTurnID: turnID,
 	}, nil
@@ -355,15 +355,44 @@ func buildPrepareWorkspaceCommand(req StartRequest) string {
 
 	steps := []string{
 		fmt.Sprintf("mkdir -p %s", shellQuote(taskRoot)),
-		fmt.Sprintf("rm -rf %s", shellQuote(repoDir)),
 		fmt.Sprintf("cd %s", shellQuote(taskRoot)),
 	}
-	steps = append(steps, req.PreCloneBootstrap...)
-	steps = append(steps,
-		fmt.Sprintf("git clone %s repo", shellQuote(req.RemoteRepoURL)),
-		fmt.Sprintf("cd %s", shellQuote(repoDir)),
-		fmt.Sprintf("git checkout %s", shellQuote(req.CheckoutBranch)),
-	)
-	steps = append(steps, req.PostCloneBootstrap...)
+	setup := effectiveWorkspaceSetup(req)
+	switch setup.Type {
+	case WorkspaceSetupTypeRepo:
+		steps = append(steps, fmt.Sprintf("rm -rf %s", shellQuote(repoDir)))
+		steps = append(steps, setup.PreCloneBootstrap...)
+		steps = append(steps,
+			fmt.Sprintf("git clone %s repo", shellQuote(setup.RemoteRepoURL)),
+			fmt.Sprintf("cd %s", shellQuote(repoDir)),
+			fmt.Sprintf("git checkout %s", shellQuote(setup.CheckoutBranch)),
+		)
+		steps = append(steps, setup.PostCloneBootstrap...)
+	case WorkspaceSetupTypeCustom:
+		steps = append(steps, setup.CustomSteps...)
+	case WorkspaceSetupTypeEmpty:
+	default:
+	}
 	return strings.Join(steps, " && ")
+}
+
+func taskSessionWorkdir(req StartRequest) string {
+	setup := effectiveWorkspaceSetup(req)
+	if setup.Type == WorkspaceSetupTypeRepo {
+		return taskRepoWorkdir(req.RemoteWorkspaceRoot, req.TaskID)
+	}
+	return taskRootDir(req.RemoteWorkspaceRoot, req.TaskID)
+}
+
+func effectiveWorkspaceSetup(req StartRequest) WorkspaceSetup {
+	if req.WorkspaceSetup.Type != "" {
+		return req.WorkspaceSetup
+	}
+	return WorkspaceSetup{
+		Type:               WorkspaceSetupTypeRepo,
+		RemoteRepoURL:      req.RemoteRepoURL,
+		CheckoutBranch:     req.CheckoutBranch,
+		PreCloneBootstrap:  append([]string(nil), req.PreCloneBootstrap...),
+		PostCloneBootstrap: append([]string(nil), req.PostCloneBootstrap...),
+	}
 }
