@@ -67,10 +67,7 @@ func ConfigFromMapOptional(values map[string]string) (Config, bool, error) {
 	appSecret := strings.TrimSpace(values["ALTER_EGO_BITABLE_APP_SECRET"])
 	appToken := strings.TrimSpace(values["ALTER_EGO_BITABLE_APP_TOKEN"])
 	tableID := strings.TrimSpace(values["ALTER_EGO_BITABLE_TABLE_ID"])
-
-	if appID == "" && appSecret == "" && appToken == "" && tableID == "" {
-		return Config{}, false, nil
-	}
+	baseURL := strings.TrimSpace(values["ALTER_EGO_BITABLE_BASE_URL"])
 
 	fields := FieldMapping{
 		IssueKey:        strings.TrimSpace(values["ALTER_EGO_BITABLE_FIELD_ISSUE_KEY"]),
@@ -92,6 +89,10 @@ func ConfigFromMapOptional(values map[string]string) (Config, bool, error) {
 		LastPRUpdatedAt: strings.TrimSpace(values["ALTER_EGO_BITABLE_FIELD_LAST_PR_UPDATED_AT"]),
 	}
 
+	if appID == "" && appSecret == "" && appToken == "" && tableID == "" && baseURL == "" && fields == (FieldMapping{}) {
+		return Config{}, false, nil
+	}
+
 	if appID == "" || appSecret == "" || appToken == "" || tableID == "" {
 		return Config{}, false, fmt.Errorf("ALTER_EGO_BITABLE_APP_ID, ALTER_EGO_BITABLE_APP_SECRET, ALTER_EGO_BITABLE_APP_TOKEN, and ALTER_EGO_BITABLE_TABLE_ID are required")
 	}
@@ -99,7 +100,6 @@ func ConfigFromMapOptional(values map[string]string) (Config, bool, error) {
 		return Config{}, false, fmt.Errorf("ALTER_EGO_BITABLE_FIELD_ISSUE_KEY is required")
 	}
 
-	baseURL := strings.TrimSpace(values["ALTER_EGO_BITABLE_BASE_URL"])
 	if baseURL == "" {
 		baseURL = "https://open.feishu.cn"
 	}

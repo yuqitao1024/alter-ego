@@ -3,6 +3,8 @@ package gitcode
 import "testing"
 
 func TestConfigFromMapOptionalDisabledWhenUnset(t *testing.T) {
+	t.Parallel()
+
 	_, enabled, err := ConfigFromMapOptional(map[string]string{})
 	if err != nil {
 		t.Fatalf("ConfigFromMapOptional returned error: %v", err)
@@ -13,6 +15,8 @@ func TestConfigFromMapOptionalDisabledWhenUnset(t *testing.T) {
 }
 
 func TestConfigFromMapOptionalParsesDefaults(t *testing.T) {
+	t.Parallel()
+
 	cfg, enabled, err := ConfigFromMapOptional(map[string]string{
 		"ALTER_EGO_GITCODE_WEBHOOK_SECRET": "top-secret",
 	})
@@ -31,11 +35,45 @@ func TestConfigFromMapOptionalParsesDefaults(t *testing.T) {
 }
 
 func TestConfigFromMapOptionalRejectsUnknownVerificationMode(t *testing.T) {
+	t.Parallel()
+
 	_, _, err := ConfigFromMapOptional(map[string]string{
 		"ALTER_EGO_GITCODE_WEBHOOK_SECRET":            "top-secret",
 		"ALTER_EGO_GITCODE_WEBHOOK_VERIFICATION_MODE": "bogus",
 	})
 	if err == nil {
 		t.Fatal("ConfigFromMapOptional returned nil error, want validation error")
+	}
+}
+
+func TestConfigFromMapOptionalRejectsPartialConfigWithoutSecret(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		values map[string]string
+	}{
+		{
+			name: "mode only",
+			values: map[string]string{
+				"ALTER_EGO_GITCODE_WEBHOOK_VERIFICATION_MODE": VerificationModeSignature,
+			},
+		},
+		{
+			name: "db path only",
+			values: map[string]string{
+				"ALTER_EGO_GITCODE_DB_PATH": "/tmp/gitcode.db",
+			},
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := ConfigFromMapOptional(tc.values)
+			if err == nil {
+				t.Fatal("ConfigFromMapOptional returned nil error, want missing secret error")
+			}
+		})
 	}
 }

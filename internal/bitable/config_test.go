@@ -3,6 +3,8 @@ package bitable
 import "testing"
 
 func TestConfigFromMapOptionalDisabledWhenUnset(t *testing.T) {
+	t.Parallel()
+
 	_, enabled, err := ConfigFromMapOptional(map[string]string{})
 	if err != nil {
 		t.Fatalf("ConfigFromMapOptional returned error: %v", err)
@@ -13,6 +15,8 @@ func TestConfigFromMapOptionalDisabledWhenUnset(t *testing.T) {
 }
 
 func TestConfigFromMapOptionalParsesCredentialsBaseURLAndFieldMapping(t *testing.T) {
+	t.Parallel()
+
 	cfg, enabled, err := ConfigFromMapOptional(map[string]string{
 		"ALTER_EGO_BITABLE_APP_ID":                   "cli_test",
 		"ALTER_EGO_BITABLE_APP_SECRET":               "secret",
@@ -54,6 +58,8 @@ func TestConfigFromMapOptionalParsesCredentialsBaseURLAndFieldMapping(t *testing
 }
 
 func TestConfigFromMapOptionalRequiresIssueKeyField(t *testing.T) {
+	t.Parallel()
+
 	_, _, err := ConfigFromMapOptional(map[string]string{
 		"ALTER_EGO_BITABLE_APP_ID":     "cli_test",
 		"ALTER_EGO_BITABLE_APP_SECRET": "secret",
@@ -62,5 +68,44 @@ func TestConfigFromMapOptionalRequiresIssueKeyField(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("ConfigFromMapOptional returned nil error, want missing field mapping error")
+	}
+}
+
+func TestConfigFromMapOptionalRejectsPartialConfigWithBaseURLOnly(t *testing.T) {
+	t.Parallel()
+
+	_, enabled, err := ConfigFromMapOptional(map[string]string{
+		"ALTER_EGO_BITABLE_BASE_URL": "https://open.feishu.cn",
+	})
+	if err == nil {
+		t.Fatal("ConfigFromMapOptional returned nil error, want misconfiguration error")
+	}
+	if enabled {
+		t.Fatal("enabled = true, want false")
+	}
+}
+
+func TestConfigFromMapOptionalRejectsPartialConfigWithFieldOnly(t *testing.T) {
+	t.Parallel()
+
+	_, enabled, err := ConfigFromMapOptional(map[string]string{
+		"ALTER_EGO_BITABLE_FIELD_ISSUE_KEY": "IssueKey",
+	})
+	if err == nil {
+		t.Fatal("ConfigFromMapOptional returned nil error, want misconfiguration error")
+	}
+	if enabled {
+		t.Fatal("enabled = true, want false")
+	}
+}
+
+func TestConfigFromMapOptionalRejectsMissingCredentialsWhenPartialConfigPresent(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := ConfigFromMapOptional(map[string]string{
+		"ALTER_EGO_BITABLE_APP_ID": "cli_test",
+	})
+	if err == nil {
+		t.Fatal("ConfigFromMapOptional returned nil error, want missing credentials error")
 	}
 }
