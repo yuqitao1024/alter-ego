@@ -119,6 +119,33 @@ func (s *DeliveryStore) MarkProcessed(ctx context.Context, record DeliveryRecord
 	return rowsAffected > 0, nil
 }
 
+func (s *DeliveryStore) WasProcessed(ctx context.Context, record DeliveryRecord) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("gitcode delivery store is not configured")
+	}
+	if record.DeliveryID == "" {
+		return false, fmt.Errorf("delivery id is required")
+	}
+	if record.EventUUID == "" {
+		return false, fmt.Errorf("event uuid is required")
+	}
+
+	var matched int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM webhook_deliveries
+		WHERE delivery_id = ? OR event_uuid = ?
+		LIMIT 1
+	`, record.DeliveryID, record.EventUUID).Scan(&matched)
+	if err == nil {
+		return true, nil
+	}
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return false, fmt.Errorf("check gitcode delivery %q processed: %w", record.DeliveryID, err)
+}
+
 func (s *DeliveryStore) init(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

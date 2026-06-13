@@ -2,7 +2,6 @@ package gitcode
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -163,24 +162,10 @@ func (h *WebhookHandler) processDelivery(ctx context.Context, record DeliveryRec
 }
 
 func (h *WebhookHandler) wasProcessed(ctx context.Context, record DeliveryRecord) (bool, error) {
-	if h.store == nil || h.store.db == nil {
+	if h.store == nil {
 		return false, fmt.Errorf("gitcode delivery store is not configured")
 	}
-
-	var matched int
-	err := h.store.db.QueryRowContext(ctx, `
-		SELECT 1
-		FROM webhook_deliveries
-		WHERE delivery_id = ? OR event_uuid = ?
-		LIMIT 1
-	`, record.DeliveryID, record.EventUUID).Scan(&matched)
-	if err == nil {
-		return true, nil
-	}
-	if err == sql.ErrNoRows {
-		return false, nil
-	}
-	return false, fmt.Errorf("check gitcode delivery %q processed: %w", record.DeliveryID, err)
+	return h.store.WasProcessed(ctx, record)
 }
 
 func (h *WebhookHandler) markProcessed(ctx context.Context, record DeliveryRecord) (bool, error) {

@@ -174,6 +174,45 @@ func TestDeliveryStoreSharesPersistentStateAcrossConnections(t *testing.T) {
 	}
 }
 
+func TestDeliveryStoreWasProcessedReportsStoredDeliveries(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestDeliveryStore(t)
+	defer store.Close()
+
+	record := DeliveryRecord{
+		DeliveryID: "delivery-processed-1",
+		EventUUID:  "event-processed-1",
+		EventType:  "issue.updated",
+		IssueKey:   "ABC-321",
+	}
+
+	processed, err := store.WasProcessed(ctx, record)
+	if err != nil {
+		t.Fatalf("WasProcessed before insert returned error: %v", err)
+	}
+	if processed {
+		t.Fatal("WasProcessed before insert = true, want false")
+	}
+
+	inserted, err := store.MarkProcessed(ctx, record)
+	if err != nil {
+		t.Fatalf("MarkProcessed returned error: %v", err)
+	}
+	if !inserted {
+		t.Fatal("MarkProcessed returned false, want true")
+	}
+
+	processed, err = store.WasProcessed(ctx, record)
+	if err != nil {
+		t.Fatalf("WasProcessed after insert returned error: %v", err)
+	}
+	if !processed {
+		t.Fatal("WasProcessed after insert = false, want true")
+	}
+}
+
 func TestDeliveryStoreUpgradesLegacyDuplicateEventUUIDs(t *testing.T) {
 	t.Parallel()
 

@@ -106,6 +106,8 @@ export ALTER_EGO_GITCODE_WEBHOOK_VERIFICATION_MODE="token"
 export ALTER_EGO_GITCODE_DB_PATH=".alterego/gitcode.db"
 ```
 
+`ALTER_EGO_GITCODE_WEBHOOK_VERIFICATION_MODE` accepts `token` or `signature`. Use `signature` when GitCode is configured to send `X-GitCode-Signature-256` HMAC headers instead of `X-GitCode-Token`.
+
 Bitable environment variables:
 
 ```sh
