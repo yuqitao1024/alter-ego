@@ -3,6 +3,7 @@ package issuesync
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -257,9 +258,61 @@ func parsePRIID(line string) (int, bool) {
 }
 
 func parseMappedTime(fields map[string]any, name string) time.Time {
-	raw := fieldString(fields, name)
+	name = strings.TrimSpace(name)
+	if name == "" || fields == nil {
+		return time.Time{}
+	}
+
+	value, ok := fields[name]
+	if !ok || value == nil {
+		return time.Time{}
+	}
+
+	switch v := value.(type) {
+	case float64:
+		return unixMillisTime(int64(math.Round(v)))
+	case float32:
+		return unixMillisTime(int64(math.Round(float64(v))))
+	case int:
+		return unixMillisTime(int64(v))
+	case int8:
+		return unixMillisTime(int64(v))
+	case int16:
+		return unixMillisTime(int64(v))
+	case int32:
+		return unixMillisTime(int64(v))
+	case int64:
+		return unixMillisTime(v)
+	case uint:
+		return unixMillisTime(int64(v))
+	case uint8:
+		return unixMillisTime(int64(v))
+	case uint16:
+		return unixMillisTime(int64(v))
+	case uint32:
+		return unixMillisTime(int64(v))
+	case uint64:
+		if v > math.MaxInt64 {
+			return time.Time{}
+		}
+		return unixMillisTime(int64(v))
+	case string:
+		return parseMappedTimeString(v)
+	case fmt.Stringer:
+		return parseMappedTimeString(v.String())
+	default:
+		return parseMappedTimeString(fmt.Sprint(v))
+	}
+}
+
+func parseMappedTimeString(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return time.Time{}
+	}
+
+	if millis, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return unixMillisTime(millis)
 	}
 
 	t, err := time.Parse(time.RFC3339Nano, raw)
@@ -271,6 +324,13 @@ func parseMappedTime(fields map[string]any, name string) time.Time {
 		return t
 	}
 	return time.Time{}
+}
+
+func unixMillisTime(value int64) time.Time {
+	if value <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(value).UTC()
 }
 
 func maxTime(left, right time.Time) time.Time {

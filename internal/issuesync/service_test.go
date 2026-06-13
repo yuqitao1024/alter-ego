@@ -3,6 +3,7 @@ package issuesync
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -155,8 +156,119 @@ func TestServiceApplyMergeRequestEventSkipsMissingRows(t *testing.T) {
 	}
 }
 
+func TestServiceApplyMergeRequestEventPreservesNewerNumericLastPRUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	fields := bitable.FieldMapping{
+		IssueKey:        "IssueKey",
+		RelatedPRs:      "RelatedPRs",
+		RelatedPRURLs:   "RelatedPRURLs",
+		RelatedPRStatus: "RelatedPRStatus",
+		LastPRUpdatedAt: "LastPRUpdatedAt",
+	}
+	newerStored := time.Date(2026, 6, 13, 9, 30, 0, 0, time.UTC)
+	table := &stubTableClient{
+		findResults: map[string]stubFindResult{
+			"org/repo/issues/18": {
+				recordID: "rec_18",
+				fields: map[string]any{
+					"IssueKey":        "org/repo/issues/18",
+					"RelatedPRs":      "!9 Existing PR [merged]",
+					"RelatedPRURLs":   "!9 https://gitcode.example/org/repo/-/merge_requests/9",
+					"RelatedPRStatus": "!9 merged",
+					"LastPRUpdatedAt": float64(newerStored.UnixMilli()),
+				},
+			},
+		},
+	}
+	service := NewService(table, fields)
+
+	olderEvent := gitcode.MergeRequestEvent{
+		PullRequestIID:      9,
+		Title:               "Existing PR",
+		State:               "merged",
+		URL:                 "https://gitcode.example/org/repo/-/merge_requests/9",
+		UpdatedAt:           newerStored.Add(-30 * time.Minute),
+		AssociatedIssueKeys: []string{"org/repo/issues/18"},
+	}
+
+	if err := service.ApplyMergeRequestEvent(context.Background(), olderEvent); err != nil {
+		t.Fatalf("ApplyMergeRequestEvent returned error: %v", err)
+	}
+
+	if len(table.updated) != 1 {
+		t.Fatalf("update calls = %d, want 1", len(table.updated))
+	}
+	if got := table.updated[0].fields["LastPRUpdatedAt"]; got != newerStored.Format(time.RFC3339Nano) {
+		t.Fatalf("LastPRUpdatedAt = %#v, want %q", got, newerStored.Format(time.RFC3339Nano))
+	}
+}
+
+func TestServiceApplyMergeRequestEventDeduplicatesWhitespacePaddedIssueKeys(t *testing.T) {
+	t.Parallel()
+
+	fields := bitable.FieldMapping{
+		IssueKey:        "IssueKey",
+		RelatedPRs:      "RelatedPRs",
+		RelatedPRURLs:   "RelatedPRURLs",
+		RelatedPRStatus: "RelatedPRStatus",
+		LastPRUpdatedAt: "LastPRUpdatedAt",
+	}
+	table := &stubTableClient{
+		findResults: map[string]stubFindResult{
+			"org/repo/issues/18": {
+				recordID: "rec_18",
+				fields: map[string]any{
+					"IssueKey": "org/repo/issues/18",
+				},
+			},
+		},
+	}
+	service := NewService(table, fields)
+
+	event := gitcode.MergeRequestEvent{
+		PullRequestIID: 21,
+		Title:          "Normalize issue keys",
+		State:          "opened",
+		URL:            "https://gitcode.example/org/repo/-/merge_requests/21",
+		UpdatedAt:      time.Date(2026, 6, 13, 10, 0, 0, 0, time.UTC),
+		AssociatedIssueKeys: []string{
+			" org/repo/issues/18 ",
+			"org/repo/issues/18",
+			"",
+			"  ",
+		},
+	}
+
+	if err := service.ApplyMergeRequestEvent(context.Background(), event); err != nil {
+		t.Fatalf("ApplyMergeRequestEvent returned error: %v", err)
+	}
+
+	if len(table.findCalls) != 1 {
+		t.Fatalf("find calls = %d, want 1", len(table.findCalls))
+	}
+	if len(table.updated) != 1 {
+		t.Fatalf("update calls = %d, want 1", len(table.updated))
+	}
+}
+
+func TestParseMappedTimeAcceptsNumericStringMilliseconds(t *testing.T) {
+	t.Parallel()
+
+	stored := time.Date(2026, 6, 13, 11, 0, 0, 0, time.UTC)
+	fields := map[string]any{
+		"LastPRUpdatedAt": strconv.FormatInt(stored.UnixMilli(), 10),
+	}
+
+	got := parseMappedTime(fields, "LastPRUpdatedAt")
+	if !got.Equal(stored) {
+		t.Fatalf("parseMappedTime() = %s, want %s", got, stored)
+	}
+}
+
 type stubTableClient struct {
 	findResults map[string]stubFindResult
+	findCalls   []string
 	created     []map[string]any
 	updated     []stubUpdateCall
 }
@@ -173,6 +285,7 @@ type stubUpdateCall struct {
 }
 
 func (s *stubTableClient) FindRecordByIssueKey(_ context.Context, issueKey string) (string, map[string]any, error) {
+	s.findCalls = append(s.findCalls, issueKey)
 	result, ok := s.findResults[issueKey]
 	if !ok {
 		return "", nil, nil
