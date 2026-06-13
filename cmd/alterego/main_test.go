@@ -134,7 +134,7 @@ func TestBuildHTTPHandlerWithoutWebConfigServesOnlyCallback(t *testing.T) {
 		CallbackListenAddr: ":8080",
 	}, web.Config{}, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}), stubDashboardService{}, nil, nil)
+	}), nil, stubDashboardService{}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildHTTPHandler returned error: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestBuildHTTPHandlerWithWebConfigServesLoginAndCallback(t *testing.T) {
 		AllowUsers:    map[string]bool{"ou_1": true},
 	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}), stubDashboardService{}, &orchestrator.Registry{}, nil)
+	}), nil, stubDashboardService{}, &orchestrator.Registry{}, nil)
 	if err != nil {
 		t.Fatalf("buildHTTPHandler returned error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestBuildHTTPHandlerRejectsMismatchedListenAddrWhenWebEnabled(t *testing.T)
 		ListenAddr:    "127.0.0.1:18080",
 		SessionSecret: "web-secret",
 		AllowUsers:    map[string]bool{"ou_1": true},
-	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), stubDashboardService{}, &orchestrator.Registry{}, nil)
+	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), nil, stubDashboardService{}, &orchestrator.Registry{}, nil)
 	if err == nil {
 		t.Fatal("buildHTTPHandler returned nil error, want mismatch error")
 	}
@@ -224,12 +224,72 @@ func TestBuildHTTPHandlerAllowsEquivalentListenAddrWhenWebEnabled(t *testing.T) 
 		ListenAddr:    "127.0.0.1:8080",
 		SessionSecret: "web-secret",
 		AllowUsers:    map[string]bool{"ou_1": true},
-	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), stubDashboardService{}, &orchestrator.Registry{}, nil)
+	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), nil, stubDashboardService{}, &orchestrator.Registry{}, nil)
 	if err != nil {
 		t.Fatalf("buildHTTPHandler returned error: %v", err)
 	}
 	if listenAddr != "127.0.0.1:8080" {
 		t.Fatalf("listenAddr = %q", listenAddr)
+	}
+}
+
+func TestBuildHTTPHandlerWithoutWebConfigServesGitCodeWebhook(t *testing.T) {
+	t.Parallel()
+
+	gitcodeHit := false
+	handler, _, err := buildHTTPHandler(lark.Config{
+		CallbackListenAddr: ":8080",
+	}, web.Config{}, false, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gitcodeHit = true
+		w.WriteHeader(http.StatusAccepted)
+	}), stubDashboardService{}, nil, nil)
+	if err != nil {
+		t.Fatalf("buildHTTPHandler returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/gitcode/webhook", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("gitcode status = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+	if !gitcodeHit {
+		t.Fatal("gitcode handler was not invoked")
+	}
+}
+
+func TestBuildHTTPHandlerWithWebConfigServesGitCodeWebhook(t *testing.T) {
+	t.Parallel()
+
+	gitcodeHit := false
+	handler, _, err := buildHTTPHandler(lark.Config{
+		AppID:              "cli_test",
+		AppSecret:          "secret",
+		Domain:             "https://open.feishu.cn",
+		CallbackListenAddr: "127.0.0.1:18080",
+	}, web.Config{
+		PublicBaseURL: "https://dashboard.example.com",
+		ListenAddr:    "127.0.0.1:18080",
+		SessionSecret: "web-secret",
+		AllowUsers:    map[string]bool{"ou_1": true},
+	}, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gitcodeHit = true
+		w.WriteHeader(http.StatusAccepted)
+	}), stubDashboardService{}, &orchestrator.Registry{}, nil)
+	if err != nil {
+		t.Fatalf("buildHTTPHandler returned error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/gitcode/webhook", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("gitcode status = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+	if !gitcodeHit {
+		t.Fatal("gitcode handler was not invoked")
 	}
 }
 

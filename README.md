@@ -94,6 +94,54 @@ export ALTER_EGO_WEB_LISTEN_ADDR="127.0.0.1:8080"
 export ALTER_EGO_WEB_SESSION_SECRET="change-me"
 ```
 
+## GitCode Issue Sync
+
+Alter Ego can accept GitCode webhooks and sync issue and merge request state into a Feishu Bitable table. GitCode and Bitable configuration are optional, but they must be enabled together.
+
+GitCode environment variables:
+
+```sh
+export ALTER_EGO_GITCODE_WEBHOOK_SECRET="change-me"
+export ALTER_EGO_GITCODE_WEBHOOK_VERIFICATION_MODE="token"
+export ALTER_EGO_GITCODE_DB_PATH=".alterego/gitcode.db"
+```
+
+Bitable environment variables:
+
+```sh
+export ALTER_EGO_BITABLE_APP_ID="cli_xxx"
+export ALTER_EGO_BITABLE_APP_SECRET="xxx"
+export ALTER_EGO_BITABLE_APP_TOKEN="bascn_xxx"
+export ALTER_EGO_BITABLE_TABLE_ID="tblxxx"
+export ALTER_EGO_BITABLE_BASE_URL="https://open.feishu.cn"
+
+export ALTER_EGO_BITABLE_FIELD_ISSUE_KEY="IssueKey"
+export ALTER_EGO_BITABLE_FIELD_ISSUE_IID="IssueIID"
+export ALTER_EGO_BITABLE_FIELD_TITLE="Title"
+export ALTER_EGO_BITABLE_FIELD_DESCRIPTION="Description"
+export ALTER_EGO_BITABLE_FIELD_STATE="State"
+export ALTER_EGO_BITABLE_FIELD_ACTION="Action"
+export ALTER_EGO_BITABLE_FIELD_LABELS="Labels"
+export ALTER_EGO_BITABLE_FIELD_AUTHOR="Author"
+export ALTER_EGO_BITABLE_FIELD_ASSIGNEES="Assignees"
+export ALTER_EGO_BITABLE_FIELD_ISSUE_URL="IssueURL"
+export ALTER_EGO_BITABLE_FIELD_CREATED_AT="CreatedAt"
+export ALTER_EGO_BITABLE_FIELD_UPDATED_AT="UpdatedAt"
+export ALTER_EGO_BITABLE_FIELD_LAST_ACTOR="LastActor"
+export ALTER_EGO_BITABLE_FIELD_RELATED_PRS="RelatedPRs"
+export ALTER_EGO_BITABLE_FIELD_RELATED_PR_URLS="RelatedPRURLs"
+export ALTER_EGO_BITABLE_FIELD_RELATED_PR_STATUS="RelatedPRStatus"
+export ALTER_EGO_BITABLE_FIELD_LAST_PR_UPDATED_AT="LastPRUpdatedAt"
+```
+
+Webhook route:
+
+```text
+POST /gitcode/webhook
+```
+
+When browser mode is disabled, the route is served from `ALTER_EGO_LARK_CALLBACK_LISTEN_ADDR`. When browser mode is enabled, it is served from `ALTER_EGO_WEB_LISTEN_ADDR`.
+
 ## Remote Codex Tasks
 
 Remote Codex orchestration is configured from repository files and persisted in SQLite. Each task runs against a long-lived remote `codex app-server` thread, and Alter Ego drives Codex through the structured app-server protocol instead of scraping terminal output. SSH is still used to bootstrap and proxy the remote app-server process, but the task state source is the app-server thread and turn model.

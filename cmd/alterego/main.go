@@ -16,7 +16,10 @@ import (
 	"time"
 
 	"github.com/yuqitao1024/alter-ego/internal/agent"
+	"github.com/yuqitao1024/alter-ego/internal/bitable"
 	"github.com/yuqitao1024/alter-ego/internal/codexappserver"
+	"github.com/yuqitao1024/alter-ego/internal/gitcode"
+	"github.com/yuqitao1024/alter-ego/internal/issuesync"
 	"github.com/yuqitao1024/alter-ego/internal/lark"
 	"github.com/yuqitao1024/alter-ego/internal/orchestrator"
 	"github.com/yuqitao1024/alter-ego/internal/web"
@@ -36,6 +39,17 @@ func run() error {
 	webCfg, webEnabled, err := web.ConfigFromEnvOptional()
 	if err != nil {
 		return err
+	}
+	gitcodeCfg, gitcodeEnabled, err := gitcode.ConfigFromEnvOptional()
+	if err != nil {
+		return err
+	}
+	bitableCfg, bitableEnabled, err := bitable.ConfigFromEnvOptional()
+	if err != nil {
+		return err
+	}
+	if gitcodeEnabled != bitableEnabled {
+		return fmt.Errorf("gitcode webhook and bitable configs must be enabled together")
 	}
 	agentCfg := agent.ConfigFromEnv()
 	var streamBroker *web.StreamBroker
@@ -75,7 +89,23 @@ func run() error {
 
 	adapter := lark.NewAdapter(larkCfg, handler)
 	callbackHandler := lark.NewCallbackHandler(adapter)
-	httpHandler, listenAddr, err := buildHTTPHandler(larkCfg, webCfg, webEnabled, callbackHandler, taskSubsystem.Service, taskSubsystem.Registry, streamBroker)
+	var gitcodeHandler http.Handler
+	if gitcodeEnabled {
+		if err := ensureParentDir(gitcodeCfg.DBPath); err != nil {
+			return err
+		}
+		deliveryStore, err := gitcode.OpenDeliveryStore(gitcodeCfg.DBPath)
+		if err != nil {
+			return err
+		}
+		defer deliveryStore.Close()
+
+		bitableClient := bitable.NewClient(bitableCfg, nil)
+		syncService := issuesync.NewService(bitableClient, bitableCfg.Fields)
+		gitcodeHandler = gitcode.NewWebhookHandler(gitcodeCfg, deliveryStore, syncService)
+	}
+
+	httpHandler, listenAddr, err := buildHTTPHandler(larkCfg, webCfg, webEnabled, callbackHandler, gitcodeHandler, taskSubsystem.Service, taskSubsystem.Registry, streamBroker)
 	if err != nil {
 		return err
 	}
@@ -93,11 +123,14 @@ func run() error {
 	return err
 }
 
-func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, callbackHandler http.Handler, taskService web.TaskDashboardService, registry *orchestrator.Registry, streamBroker *web.StreamBroker) (http.Handler, string, error) {
+func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, callbackHandler http.Handler, gitcodeHandler http.Handler, taskService web.TaskDashboardService, registry *orchestrator.Registry, streamBroker *web.StreamBroker) (http.Handler, string, error) {
 	if !webEnabled {
 		mux := http.NewServeMux()
 		if callbackHandler != nil {
 			mux.Handle("/lark/card/callback", callbackHandler)
+		}
+		if gitcodeHandler != nil {
+			mux.Handle("/gitcode/webhook", gitcodeHandler)
 		}
 		return mux, larkCfg.CallbackListenAddr, nil
 	}
@@ -117,7 +150,15 @@ func buildHTTPHandler(larkCfg lark.Config, webCfg web.Config, webEnabled bool, c
 		Service: taskService,
 		Catalog: web.RegistryTemplateCatalog{Registry: registry},
 	}, streamBroker)
-	return web.NewRouter(webHandler, callbackHandler), listenAddr, nil
+
+	if gitcodeHandler == nil {
+		return web.NewRouter(webHandler, callbackHandler), listenAddr, nil
+	}
+
+	root := http.NewServeMux()
+	root.Handle("/gitcode/webhook", gitcodeHandler)
+	root.Handle("/", web.NewRouter(webHandler, callbackHandler))
+	return root, listenAddr, nil
 }
 
 func sameListenTarget(a, b string) bool {
@@ -145,6 +186,13 @@ func splitListenAddr(addr string) (string, string, error) {
 		return "", "", err
 	}
 	return host, port, nil
+}
+
+func ensureParentDir(path string) error {
+	if path == "" || path == ":memory:" || strings.HasPrefix(path, "file:") {
+		return nil
+	}
+	return os.MkdirAll(filepath.Dir(path), 0o755)
 }
 
 type taskSubsystemConfig struct {
