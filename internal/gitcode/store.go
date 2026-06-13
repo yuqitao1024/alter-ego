@@ -120,7 +120,16 @@ func (s *DeliveryStore) MarkProcessed(ctx context.Context, record DeliveryRecord
 }
 
 func (s *DeliveryStore) init(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delivery store init transaction: %w", err)
+	}
+
+	rollback := func() {
+		_ = tx.Rollback()
+	}
+
+	_, err = tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_deliveries (
 			delivery_id TEXT PRIMARY KEY,
 			event_uuid TEXT NOT NULL,
@@ -129,14 +138,34 @@ func (s *DeliveryStore) init(ctx context.Context) error {
 		)
 	`)
 	if err != nil {
+		rollback()
 		return fmt.Errorf("create webhook_deliveries table: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
+
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM webhook_deliveries
+		WHERE rowid NOT IN (
+			SELECT MIN(rowid)
+			FROM webhook_deliveries
+			GROUP BY event_uuid
+		)
+	`)
+	if err != nil {
+		rollback()
+		return fmt.Errorf("dedupe historical webhook deliveries: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
 		CREATE UNIQUE INDEX IF NOT EXISTS webhook_deliveries_event_uuid_idx
 		ON webhook_deliveries(event_uuid)
 	`)
 	if err != nil {
+		rollback()
 		return fmt.Errorf("create webhook_deliveries event uuid index: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delivery store init transaction: %w", err)
 	}
 
 	return nil
