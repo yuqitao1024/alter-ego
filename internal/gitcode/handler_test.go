@@ -720,6 +720,52 @@ func TestWebhookHandlerConcurrentSameEventUUIDAcrossHandlersRetriesAfterFailure(
 	}
 }
 
+func TestWebhookHandlerMarksProcessedWhenRequestContextCancelsAfterSync(t *testing.T) {
+	t.Parallel()
+
+	store := openTestDeliveryStore(t)
+	service := &fakeSyncService{}
+	handler := NewWebhookHandler(Config{
+		Secret:           "secret",
+		VerificationMode: VerificationModeToken,
+	}, store, service)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	service.issueFn = func(context.Context, IssueEvent) error {
+		cancel()
+		return nil
+	}
+
+	event := IssueEvent{
+		DeliveryID: "delivery-cancel-after-sync-1",
+		EventUUID:  "uuid-cancel-after-sync-1",
+		IssueIID:   17,
+		IssueKey:   "org/repo/issues/17",
+		Title:      "Issue 17",
+		State:      "opened",
+		Action:     "open",
+		IssueURL:   "https://gitcode.com/org/repo/issues/17",
+		CreatedAt:  time.Date(2025, 5, 7, 14, 19, 24, 0, time.UTC),
+		UpdatedAt:  time.Date(2025, 5, 7, 14, 19, 24, 0, time.UTC),
+		LastActor:  "alice",
+	}
+
+	if err := handler.handleIssueEvent(ctx, event); err != nil {
+		t.Fatalf("handleIssueEvent returned error after sync-side cancel: %v", err)
+	}
+	if service.issueCallCount() != 1 {
+		t.Fatalf("issue calls after first delivery = %d, want 1", service.issueCallCount())
+	}
+
+	service.issueFn = nil
+	if err := handler.handleIssueEvent(context.Background(), event); err != nil {
+		t.Fatalf("handleIssueEvent duplicate returned error: %v", err)
+	}
+	if service.issueCallCount() != 1 {
+		t.Fatalf("issue calls after duplicate = %d, want 1", service.issueCallCount())
+	}
+}
+
 func TestWebhookHandlerDispatchesMergeRequestEvent(t *testing.T) {
 	t.Parallel()
 

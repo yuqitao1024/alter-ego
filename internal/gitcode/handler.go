@@ -143,7 +143,7 @@ func (h *WebhookHandler) processDelivery(ctx context.Context, record DeliveryRec
 				}
 				return err
 			}
-			if err := h.completeDeliveryClaim(ctx, record); err != nil {
+			if err := h.completeDeliveryClaim(context.WithoutCancel(ctx), record); err != nil {
 				releaseErr := h.releaseDeliveryClaim(context.WithoutCancel(ctx), record)
 				if releaseErr != nil {
 					return fmt.Errorf("%w (release delivery claim: %v)", err, releaseErr)
