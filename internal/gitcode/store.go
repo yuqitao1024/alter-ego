@@ -89,6 +89,9 @@ func (s *DeliveryStore) MarkProcessed(ctx context.Context, record DeliveryRecord
 	if record.DeliveryID == "" {
 		return false, fmt.Errorf("delivery id is required")
 	}
+	if record.EventUUID == "" {
+		return false, fmt.Errorf("event uuid is required")
+	}
 
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO webhook_deliveries (
@@ -97,7 +100,7 @@ func (s *DeliveryStore) MarkProcessed(ctx context.Context, record DeliveryRecord
 			event_type,
 			issue_key
 		) VALUES (?, ?, ?, ?)
-		ON CONFLICT(delivery_id) DO NOTHING
+		ON CONFLICT DO NOTHING
 	`,
 		record.DeliveryID,
 		record.EventUUID,
@@ -127,6 +130,13 @@ func (s *DeliveryStore) init(ctx context.Context) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create webhook_deliveries table: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS webhook_deliveries_event_uuid_idx
+		ON webhook_deliveries(event_uuid)
+	`)
+	if err != nil {
+		return fmt.Errorf("create webhook_deliveries event uuid index: %w", err)
 	}
 
 	return nil
