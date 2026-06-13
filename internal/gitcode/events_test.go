@@ -20,6 +20,17 @@ func TestVerifyRequestTokenModeAcceptsMatchingHeader(t *testing.T) {
 	}
 }
 
+func TestVerifyRequestTokenModeRejectsMismatch(t *testing.T) {
+	t.Parallel()
+
+	header := http.Header{}
+	header.Set("X-GitCode-Token", "wrong-secret")
+
+	if err := VerifyRequest(Config{Secret: "secret", VerificationMode: VerificationModeToken}, header, []byte(`{}`)); err == nil {
+		t.Fatal("VerifyRequest returned nil error, want token mismatch rejection")
+	}
+}
+
 func TestVerifyRequestRejectsEmptySecret(t *testing.T) {
 	t.Parallel()
 
@@ -39,6 +50,30 @@ func TestVerifyRequestSignatureModeAcceptsMatchingHeader(t *testing.T) {
 
 	if err := VerifyRequest(Config{Secret: "secret", VerificationMode: VerificationModeSignature}, header, body); err != nil {
 		t.Fatalf("VerifyRequest returned error: %v", err)
+	}
+}
+
+func TestVerifyRequestSignatureModeRejectsMalformedPrefix(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"ok":true}`)
+	header := http.Header{}
+	header.Set("X-GitCode-Signature-256", "sha1="+hmacSHA256Hex("secret", body))
+
+	if err := VerifyRequest(Config{Secret: "secret", VerificationMode: VerificationModeSignature}, header, body); err == nil {
+		t.Fatal("VerifyRequest returned nil error, want malformed signature prefix rejection")
+	}
+}
+
+func TestVerifyRequestSignatureModeRejectsMismatch(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"ok":true}`)
+	header := http.Header{}
+	header.Set("X-GitCode-Signature-256", "sha256="+hmacSHA256Hex("wrong-secret", body))
+
+	if err := VerifyRequest(Config{Secret: "secret", VerificationMode: VerificationModeSignature}, header, body); err == nil {
+		t.Fatal("VerifyRequest returned nil error, want signature mismatch rejection")
 	}
 }
 
