@@ -63,8 +63,9 @@ type webhookLabel struct {
 }
 
 type webhookIssueRef struct {
-	IID int    `json:"iid"`
-	URL string `json:"url"`
+	IID  int    `json:"iid"`
+	Path string `json:"path"`
+	URL  string `json:"url"`
 }
 
 type webhookUser struct {
@@ -86,6 +87,10 @@ type webhookObjectAttributes struct {
 }
 
 func VerifyRequest(cfg Config, header http.Header, body []byte) error {
+	if subtleTrim(cfg.Secret) == "" {
+		return fmt.Errorf("gitcode webhook secret is required")
+	}
+
 	switch cfg.VerificationMode {
 	case VerificationModeSignature:
 		return verifySignatureHeader(cfg.Secret, header.Get("X-GitCode-Signature-256"), body)
@@ -114,13 +119,13 @@ func ParseEvent(header http.Header, body []byte) (interface{}, error) {
 }
 
 func parseIssueEvent(header http.Header, payload webhookEnvelope) (IssueEvent, error) {
-	createdAt, err := parseTimestamp(payload.ObjectAttributes.CreatedAt)
+	createdAt, err := parseRequiredTimestamp("issue created_at", payload.ObjectAttributes.CreatedAt)
 	if err != nil {
-		return IssueEvent{}, fmt.Errorf("parse issue created_at: %w", err)
+		return IssueEvent{}, err
 	}
-	updatedAt, err := parseTimestamp(payload.ObjectAttributes.UpdatedAt)
+	updatedAt, err := parseRequiredTimestamp("issue updated_at", payload.ObjectAttributes.UpdatedAt)
 	if err != nil {
-		return IssueEvent{}, fmt.Errorf("parse issue updated_at: %w", err)
+		return IssueEvent{}, err
 	}
 	issueKey, err := issuePathFromURL(payload.ObjectAttributes.URL)
 	if err != nil {
@@ -153,15 +158,15 @@ func parseIssueEvent(header http.Header, payload webhookEnvelope) (IssueEvent, e
 }
 
 func parseMergeRequestEvent(header http.Header, payload webhookEnvelope) (MergeRequestEvent, error) {
-	updatedAt, err := parseTimestamp(payload.ObjectAttributes.UpdatedAt)
+	updatedAt, err := parseRequiredTimestamp("merge request updated_at", payload.ObjectAttributes.UpdatedAt)
 	if err != nil {
-		return MergeRequestEvent{}, fmt.Errorf("parse merge request updated_at: %w", err)
+		return MergeRequestEvent{}, err
 	}
 
 	issueKeys := make([]string, 0, len(payload.Issues))
 	seen := make(map[string]struct{}, len(payload.Issues))
 	for _, issue := range payload.Issues {
-		issueKey, err := issuePathFromURL(issue.URL)
+		issueKey, err := issueKeyFromReference(issue)
 		if err != nil {
 			return MergeRequestEvent{}, fmt.Errorf("parse associated issue key: %w", err)
 		}
@@ -214,6 +219,19 @@ func computeSignature(secret string, body []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+func parseRequiredTimestamp(fieldName, raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, fmt.Errorf("%s is required", fieldName)
+	}
+
+	t, err := parseTimestamp(raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse %s: %w", fieldName, err)
+	}
+	return t, nil
+}
+
 func parseTimestamp(raw string) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -233,6 +251,14 @@ func parseTimestamp(raw string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unsupported timestamp %q", raw)
 }
 
+func issueKeyFromReference(ref webhookIssueRef) (string, error) {
+	path := normalizeIssuePath(ref.Path)
+	if path != "" {
+		return path, nil
+	}
+	return issuePathFromURL(ref.URL)
+}
+
 func issuePathFromURL(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -246,6 +272,13 @@ func issuePathFromURL(raw string) (string, error) {
 		return "", fmt.Errorf("issue url path is empty")
 	}
 	return path, nil
+}
+
+func normalizeIssuePath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "/")
+	raw = strings.TrimSuffix(raw, "/")
+	return raw
 }
 
 func firstNonEmpty(values ...string) string {
