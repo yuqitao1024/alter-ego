@@ -17,9 +17,11 @@ type Client struct {
 	cfg        Config
 	httpClient *http.Client
 
-	mu         sync.Mutex
-	token      string
-	tokenUntil time.Time
+	mu          sync.Mutex
+	token       string
+	tokenUntil  time.Time
+	refreshing  bool
+	refreshDone chan struct{}
 }
 
 func NewClient(cfg Config, httpClient *http.Client) *Client {
@@ -39,7 +41,7 @@ func (c *Client) FindRecordByIssueKey(ctx context.Context, issueKey string) (str
 		return "", nil, err
 	}
 
-	filter := fmt.Sprintf(`CurrentValue.[%s]="%s"`, c.cfg.Fields.IssueKey, issueKey)
+	filter := fmt.Sprintf(`CurrentValue.[%s]="%s"`, c.cfg.Fields.IssueKey, escapeFilterValue(issueKey))
 	endpoint := fmt.Sprintf(
 		"%s/open-apis/bitable/v1/apps/%s/tables/%s/records?filter=%s",
 		strings.TrimRight(c.cfg.BaseURL, "/"),
@@ -69,7 +71,7 @@ func (c *Client) FindRecordByIssueKey(ctx context.Context, issueKey string) (str
 		return "", nil, err
 	}
 	if payload.Code != 0 {
-		return "", nil, fmt.Errorf("bitable list records failed with code %d", payload.Code)
+		return "", nil, feishuCodeError("bitable list records failed", payload.Code, payload.Msg)
 	}
 	if len(payload.Data.Items) == 0 {
 		return "", nil, nil
@@ -118,7 +120,7 @@ func (c *Client) CreateRecord(ctx context.Context, fields map[string]any) (strin
 		return "", err
 	}
 	if payload.Code != 0 {
-		return "", fmt.Errorf("bitable create record failed with code %d", payload.Code)
+		return "", feishuCodeError("bitable create record failed", payload.Code, payload.Msg)
 	}
 
 	return payload.Data.Record.RecordID, nil
@@ -164,61 +166,53 @@ func (c *Client) UpdateRecord(ctx context.Context, recordID string, fields map[s
 		return err
 	}
 	if payload.Code != 0 {
-		return fmt.Errorf("bitable update record failed with code %d", payload.Code)
+		return feishuCodeError("bitable update record failed", payload.Code, payload.Msg)
 	}
 
 	return nil
 }
 
 func (c *Client) tenantAccessToken(ctx context.Context) (string, error) {
-	c.mu.Lock()
-	if c.token != "" && time.Now().Before(c.tokenUntil) {
-		token := c.token
+	for {
+		c.mu.Lock()
+		if c.token != "" && time.Now().Before(c.tokenUntil) {
+			token := c.token
+			c.mu.Unlock()
+			return token, nil
+		}
+		if c.refreshing {
+			done := c.refreshDone
+			c.mu.Unlock()
+
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			continue
+		}
+
+		c.refreshing = true
+		c.refreshDone = make(chan struct{})
 		c.mu.Unlock()
+
+		token, tokenUntil, err := c.requestTenantAccessToken(ctx)
+
+		c.mu.Lock()
+		if err == nil {
+			c.token = token
+			c.tokenUntil = tokenUntil
+		}
+		c.refreshing = false
+		close(c.refreshDone)
+		c.refreshDone = nil
+		c.mu.Unlock()
+
+		if err != nil {
+			return "", err
+		}
 		return token, nil
 	}
-	c.mu.Unlock()
-
-	body, err := json.Marshal(map[string]string{
-		"app_id":     c.cfg.AppID,
-		"app_secret": c.cfg.AppSecret,
-	})
-	if err != nil {
-		return "", err
-	}
-
-	endpoint := strings.TrimRight(c.cfg.BaseURL, "/") + "/open-apis/auth/v3/tenant_access_token/internal"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	var payload struct {
-		Code              int    `json:"code"`
-		Msg               string `json:"msg"`
-		TenantAccessToken string `json:"tenant_access_token"`
-		Expire            int    `json:"expire"`
-	}
-
-	if err := c.doJSON(req, &payload); err != nil {
-		return "", err
-	}
-	if payload.Code != 0 {
-		return "", fmt.Errorf("tenant access token request failed with code %d", payload.Code)
-	}
-
-	expiresIn := time.Duration(payload.Expire) * time.Second
-	if payload.Expire > 60 {
-		expiresIn -= 60 * time.Second
-	}
-
-	c.mu.Lock()
-	c.token = payload.TenantAccessToken
-	c.tokenUntil = time.Now().Add(expiresIn)
-	c.mu.Unlock()
-
-	return payload.TenantAccessToken, nil
 }
 
 func (c *Client) doJSON(req *http.Request, out any) error {
@@ -240,4 +234,56 @@ func (c *Client) doJSON(req *http.Request, out any) error {
 	}
 
 	return nil
+}
+
+func (c *Client) requestTenantAccessToken(ctx context.Context) (string, time.Time, error) {
+	body, err := json.Marshal(map[string]string{
+		"app_id":     c.cfg.AppID,
+		"app_secret": c.cfg.AppSecret,
+	})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	endpoint := strings.TrimRight(c.cfg.BaseURL, "/") + "/open-apis/auth/v3/tenant_access_token/internal"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	var payload struct {
+		Code              int    `json:"code"`
+		Msg               string `json:"msg"`
+		TenantAccessToken string `json:"tenant_access_token"`
+		Expire            int    `json:"expire"`
+	}
+
+	if err := c.doJSON(req, &payload); err != nil {
+		return "", time.Time{}, err
+	}
+	if payload.Code != 0 {
+		return "", time.Time{}, feishuCodeError("tenant access token request failed", payload.Code, payload.Msg)
+	}
+
+	expiresIn := time.Duration(payload.Expire) * time.Second
+	if payload.Expire > 60 {
+		expiresIn -= 60 * time.Second
+	}
+
+	return payload.TenantAccessToken, time.Now().Add(expiresIn), nil
+}
+
+func escapeFilterValue(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	return value
+}
+
+func feishuCodeError(prefix string, code int, msg string) error {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return fmt.Errorf("%s with code %d", prefix, code)
+	}
+	return fmt.Errorf("%s with code %d: %s", prefix, code, msg)
 }

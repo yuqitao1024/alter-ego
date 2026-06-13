@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestClientFindCreateAndUpdateIssueRecord(t *testing.T) {
@@ -256,7 +258,7 @@ func TestClientPropagatesBitableErrors(t *testing.T) {
 				"expire":              7200,
 			})
 		case strings.HasSuffix(r.URL.Path, "/records") && r.Method == http.MethodPost:
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 999})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 999, "msg": "create rejected"})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -278,7 +280,125 @@ func TestClientPropagatesBitableErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("CreateRecord error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "bitable create record failed with code 999") {
+	if !strings.Contains(err.Error(), "bitable create record failed with code 999: create rejected") {
 		t.Fatalf("CreateRecord error = %v", err)
+	}
+}
+
+func TestClientConcurrentCallersShareOneTokenRefresh(t *testing.T) {
+	t.Parallel()
+
+	var tokenRequests atomic.Int32
+	release := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			tokenRequests.Add(1)
+			<-release
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":                0,
+				"tenant_access_token": "tenant-token",
+				"expire":              7200,
+			})
+		case r.URL.Path == "/open-apis/bitable/v1/apps/app_token/tables/tbl_issue/records" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": map[string]any{
+					"items": []map[string]any{},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		AppID:     "cli_test",
+		AppSecret: "secret",
+		AppToken:  "app_token",
+		TableID:   "tbl_issue",
+		BaseURL:   server.URL,
+		Fields: FieldMapping{
+			IssueKey: "IssueKey",
+		},
+	}, server.Client())
+
+	const callers = 8
+	started := make(chan struct{}, callers)
+	errCh := make(chan error, callers)
+
+	for i := 0; i < callers; i++ {
+		go func() {
+			started <- struct{}{}
+			_, _, err := client.FindRecordByIssueKey(context.Background(), "org/repo/issues/8")
+			errCh <- err
+		}()
+	}
+
+	for i := 0; i < callers; i++ {
+		<-started
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	for i := 0; i < callers; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("FindRecordByIssueKey returned error: %v", err)
+		}
+	}
+
+	if got := tokenRequests.Load(); got != 1 {
+		t.Fatalf("token requests = %d, want 1", got)
+	}
+}
+
+func TestClientEscapesFilterValue(t *testing.T) {
+	t.Parallel()
+
+	issueKey := `repo/"quoted"\path`
+	wantFilter := `CurrentValue.[IssueKey]="repo/\"quoted\"\\path"`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":                0,
+				"tenant_access_token": "tenant-token",
+				"expire":              7200,
+			})
+		case r.URL.Path == "/open-apis/bitable/v1/apps/app_token/tables/tbl_issue/records" && r.Method == http.MethodGet:
+			filter := r.URL.Query().Get("filter")
+			if filter != wantFilter {
+				t.Fatalf("filter = %q, want %q", filter, wantFilter)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": map[string]any{
+					"items": []map[string]any{},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		AppID:     "cli_test",
+		AppSecret: "secret",
+		AppToken:  "app_token",
+		TableID:   "tbl_issue",
+		BaseURL:   server.URL,
+		Fields: FieldMapping{
+			IssueKey: "IssueKey",
+		},
+	}, server.Client())
+
+	_, _, err := client.FindRecordByIssueKey(context.Background(), issueKey)
+	if err != nil {
+		t.Fatalf("FindRecordByIssueKey returned error: %v", err)
 	}
 }
