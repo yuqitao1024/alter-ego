@@ -6,24 +6,51 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type fakeSyncService struct {
+	mu         sync.Mutex
 	issueCalls []IssueEvent
 	prCalls    []MergeRequestEvent
 	issueErr   error
 	prErr      error
+	issueFn    func(context.Context, IssueEvent) error
+	prFn       func(context.Context, MergeRequestEvent) error
 }
 
-func (f *fakeSyncService) ApplyIssueEvent(_ context.Context, event IssueEvent) error {
+func (f *fakeSyncService) ApplyIssueEvent(ctx context.Context, event IssueEvent) error {
+	f.mu.Lock()
 	f.issueCalls = append(f.issueCalls, event)
-	return f.issueErr
+	fn := f.issueFn
+	err := f.issueErr
+	f.mu.Unlock()
+
+	if fn != nil {
+		return fn(ctx, event)
+	}
+	return err
 }
 
-func (f *fakeSyncService) ApplyMergeRequestEvent(_ context.Context, event MergeRequestEvent) error {
+func (f *fakeSyncService) ApplyMergeRequestEvent(ctx context.Context, event MergeRequestEvent) error {
+	f.mu.Lock()
 	f.prCalls = append(f.prCalls, event)
-	return f.prErr
+	fn := f.prFn
+	err := f.prErr
+	f.mu.Unlock()
+
+	if fn != nil {
+		return fn(ctx, event)
+	}
+	return err
+}
+
+func (f *fakeSyncService) issueCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.issueCalls)
 }
 
 func TestWebhookHandlerRejectsNonPost(t *testing.T) {
@@ -136,11 +163,13 @@ func TestWebhookHandlerRetriesAfterIssueSyncFailure(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("first status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
-	if len(service.issueCalls) != 1 {
-		t.Fatalf("issue calls after first failure = %d, want 1", len(service.issueCalls))
+	if service.issueCallCount() != 1 {
+		t.Fatalf("issue calls after first failure = %d, want 1", service.issueCallCount())
 	}
 
+	service.mu.Lock()
 	service.issueErr = nil
+	service.mu.Unlock()
 	req = httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
 	req.Header.Set("X-GitCode-Token", "secret")
 	req.Header.Set("X-GitCode-Delivery", "delivery-retry-1")
@@ -151,8 +180,8 @@ func TestWebhookHandlerRetriesAfterIssueSyncFailure(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("retry status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if len(service.issueCalls) != 2 {
-		t.Fatalf("issue calls after retry = %d, want 2", len(service.issueCalls))
+	if service.issueCallCount() != 2 {
+		t.Fatalf("issue calls after retry = %d, want 2", service.issueCallCount())
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
@@ -165,8 +194,170 @@ func TestWebhookHandlerRetriesAfterIssueSyncFailure(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("duplicate-after-success status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if len(service.issueCalls) != 2 {
-		t.Fatalf("issue calls after duplicate success = %d, want 2", len(service.issueCalls))
+	if service.issueCallCount() != 2 {
+		t.Fatalf("issue calls after duplicate success = %d, want 2", service.issueCallCount())
+	}
+}
+
+func TestWebhookHandlerConcurrentDuplicateSuccessDispatchesOnce(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	service := &fakeSyncService{
+		issueFn: func(context.Context, IssueEvent) error {
+			started <- struct{}{}
+			<-release
+			return nil
+		},
+	}
+	handler := NewWebhookHandler(Config{
+		Secret:           "secret",
+		VerificationMode: VerificationModeToken,
+	}, openTestDeliveryStore(t), service)
+
+	body := `{
+		"uuid":"uuid-concurrent-1",
+		"event_type":"issue",
+		"object_kind":"issue",
+		"object_attributes":{
+			"iid":11,
+			"title":"Issue 11",
+			"description":"content",
+			"state":"opened",
+			"action":"open",
+			"url":"https://gitcode.com/org/repo/issues/11",
+			"created_at":"2025-05-07T14:19:24Z",
+			"updated_at":"2025-05-07T14:19:24Z"
+		},
+		"user":{"name":"alice"}
+	}`
+
+	runRequest := func() <-chan int {
+		result := make(chan int, 1)
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
+			req.Header.Set("X-GitCode-Token", "secret")
+			req.Header.Set("X-GitCode-Delivery", "delivery-concurrent-1")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			result <- rec.Code
+		}()
+		return result
+	}
+
+	first := runRequest()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first request did not reach sync service")
+	}
+
+	second := runRequest()
+	select {
+	case <-started:
+		t.Fatal("concurrent duplicate reached sync service before first attempt completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+
+	if code := <-first; code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d", code, http.StatusOK)
+	}
+	if code := <-second; code != http.StatusOK {
+		t.Fatalf("second status = %d, want %d", code, http.StatusOK)
+	}
+	if service.issueCallCount() != 1 {
+		t.Fatalf("issue calls = %d, want 1", service.issueCallCount())
+	}
+}
+
+func TestWebhookHandlerConcurrentDuplicateRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	attempts := 0
+	var attemptsMu sync.Mutex
+	service := &fakeSyncService{
+		issueFn: func(context.Context, IssueEvent) error {
+			started <- struct{}{}
+			attemptsMu.Lock()
+			attempts++
+			currentAttempt := attempts
+			attemptsMu.Unlock()
+			if currentAttempt == 1 {
+				<-release
+				return errors.New("sync failed")
+			}
+			return nil
+		},
+	}
+	handler := NewWebhookHandler(Config{
+		Secret:           "secret",
+		VerificationMode: VerificationModeToken,
+	}, openTestDeliveryStore(t), service)
+
+	body := `{
+		"uuid":"uuid-concurrent-2",
+		"event_type":"issue",
+		"object_kind":"issue",
+		"object_attributes":{
+			"iid":12,
+			"title":"Issue 12",
+			"description":"content",
+			"state":"opened",
+			"action":"open",
+			"url":"https://gitcode.com/org/repo/issues/12",
+			"created_at":"2025-05-07T14:19:24Z",
+			"updated_at":"2025-05-07T14:19:24Z"
+		},
+		"user":{"name":"alice"}
+	}`
+
+	runRequest := func() <-chan int {
+		result := make(chan int, 1)
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
+			req.Header.Set("X-GitCode-Token", "secret")
+			req.Header.Set("X-GitCode-Delivery", "delivery-concurrent-2")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			result <- rec.Code
+		}()
+		return result
+	}
+
+	first := runRequest()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first request did not reach sync service")
+	}
+
+	second := runRequest()
+	select {
+	case <-started:
+		t.Fatal("concurrent duplicate reached sync service before first attempt completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+
+	if code := <-first; code != http.StatusInternalServerError {
+		t.Fatalf("first status = %d, want %d", code, http.StatusInternalServerError)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("waiting duplicate did not retry after first failure")
+	}
+	if code := <-second; code != http.StatusOK {
+		t.Fatalf("second status = %d, want %d", code, http.StatusOK)
+	}
+	if service.issueCallCount() != 2 {
+		t.Fatalf("issue calls = %d, want 2", service.issueCallCount())
 	}
 }
 
