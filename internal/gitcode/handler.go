@@ -20,7 +20,12 @@ type WebhookHandler struct {
 	service SyncService
 
 	mu       sync.Mutex
-	inFlight map[string]chan struct{}
+	inFlight map[string]*deliveryAttempt
+}
+
+type deliveryAttempt struct {
+	done chan struct{}
+	keys [2]string
 }
 
 func NewWebhookHandler(cfg Config, store *DeliveryStore, service SyncService) *WebhookHandler {
@@ -28,7 +33,7 @@ func NewWebhookHandler(cfg Config, store *DeliveryStore, service SyncService) *W
 		cfg:      cfg,
 		store:    store,
 		service:  service,
-		inFlight: make(map[string]chan struct{}),
+		inFlight: make(map[string]*deliveryAttempt),
 	}
 }
 
@@ -124,7 +129,7 @@ func (h *WebhookHandler) handleMergeRequestEvent(ctx context.Context, event Merg
 }
 
 func (h *WebhookHandler) processDelivery(ctx context.Context, record DeliveryRecord, attempt func() error) error {
-	key := deliveryCoordinationKey(record)
+	keys := deliveryCoordinationKeys(record)
 
 	for {
 		processed, err := h.wasProcessed(ctx, record)
@@ -135,7 +140,7 @@ func (h *WebhookHandler) processDelivery(ctx context.Context, record DeliveryRec
 			return nil
 		}
 
-		done, leader := h.enterDeliveryAttempt(key)
+		done, leader := h.enterDeliveryAttempt(keys)
 		if !leader {
 			select {
 			case <-done:
@@ -149,7 +154,7 @@ func (h *WebhookHandler) processDelivery(ctx context.Context, record DeliveryRec
 		if err == nil {
 			_, err = h.markProcessed(ctx, record)
 		}
-		h.leaveDeliveryAttempt(key, done)
+		h.leaveDeliveryAttempt(keys, done)
 		if err != nil {
 			return err
 		}
@@ -204,32 +209,49 @@ func validateDeliveryRecord(record DeliveryRecord) error {
 	return nil
 }
 
-func deliveryCoordinationKey(record DeliveryRecord) string {
-	return record.DeliveryID + "\x00" + record.EventUUID
+func deliveryCoordinationKeys(record DeliveryRecord) [2]string {
+	return [2]string{
+		"delivery:" + record.DeliveryID,
+		"event:" + record.EventUUID,
+	}
 }
 
-func (h *WebhookHandler) enterDeliveryAttempt(key string) (chan struct{}, bool) {
+func (h *WebhookHandler) enterDeliveryAttempt(keys [2]string) (chan struct{}, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if done, ok := h.inFlight[key]; ok {
-		return done, false
+	for _, key := range keys {
+		if current, ok := h.inFlight[key]; ok {
+			return current.done, false
+		}
 	}
 
-	done := make(chan struct{})
-	h.inFlight[key] = done
-	return done, true
+	current := &deliveryAttempt{
+		done: make(chan struct{}),
+		keys: keys,
+	}
+	for _, key := range keys {
+		h.inFlight[key] = current
+	}
+	return current.done, true
 }
 
-func (h *WebhookHandler) leaveDeliveryAttempt(key string, done chan struct{}) {
+func (h *WebhookHandler) leaveDeliveryAttempt(keys [2]string, done chan struct{}) {
 	h.mu.Lock()
-	current, ok := h.inFlight[key]
-	if ok && current == done {
-		delete(h.inFlight, key)
+	current, ok := h.inFlight[keys[0]]
+	if !ok {
+		current, ok = h.inFlight[keys[1]]
+	}
+	if ok && current.done == done {
+		for _, key := range current.keys {
+			if h.inFlight[key] == current {
+				delete(h.inFlight, key)
+			}
+		}
 	}
 	h.mu.Unlock()
 
-	if ok && current == done {
+	if ok && current.done == done {
 		close(done)
 	}
 }
