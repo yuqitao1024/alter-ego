@@ -213,6 +213,105 @@ func TestDeliveryStoreWasProcessedReportsStoredDeliveries(t *testing.T) {
 	}
 }
 
+func TestDeliveryStoreTryClaimLifecycle(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestDeliveryStore(t)
+	defer store.Close()
+
+	record := DeliveryRecord{
+		DeliveryID: "delivery-claim-1",
+		EventUUID:  "event-claim-1",
+		EventType:  "issue.updated",
+		IssueKey:   "ABC-654",
+	}
+
+	claimResult, err := store.TryClaim(ctx, record)
+	if err != nil {
+		t.Fatalf("TryClaim first attempt returned error: %v", err)
+	}
+	if claimResult != DeliveryClaimed {
+		t.Fatalf("TryClaim first attempt = %v, want %v", claimResult, DeliveryClaimed)
+	}
+
+	processed, err := store.WasProcessed(ctx, record)
+	if err != nil {
+		t.Fatalf("WasProcessed during claim returned error: %v", err)
+	}
+	if processed {
+		t.Fatal("WasProcessed during claim = true, want false")
+	}
+
+	claimResult, err = store.TryClaim(ctx, DeliveryRecord{
+		DeliveryID: "delivery-claim-2",
+		EventUUID:  "event-claim-1",
+		EventType:  "issue.updated",
+		IssueKey:   "ABC-654",
+	})
+	if err != nil {
+		t.Fatalf("TryClaim duplicate in-progress returned error: %v", err)
+	}
+	if claimResult != DeliveryInProgress {
+		t.Fatalf("TryClaim duplicate in-progress = %v, want %v", claimResult, DeliveryInProgress)
+	}
+
+	if err := store.CompleteClaim(ctx, record); err != nil {
+		t.Fatalf("CompleteClaim returned error: %v", err)
+	}
+
+	processed, err = store.WasProcessed(ctx, record)
+	if err != nil {
+		t.Fatalf("WasProcessed after complete returned error: %v", err)
+	}
+	if !processed {
+		t.Fatal("WasProcessed after complete = false, want true")
+	}
+
+	claimResult, err = store.TryClaim(ctx, record)
+	if err != nil {
+		t.Fatalf("TryClaim after complete returned error: %v", err)
+	}
+	if claimResult != DeliveryAlreadyProcessed {
+		t.Fatalf("TryClaim after complete = %v, want %v", claimResult, DeliveryAlreadyProcessed)
+	}
+}
+
+func TestDeliveryStoreReleaseClaimAllowsRetry(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestDeliveryStore(t)
+	defer store.Close()
+
+	record := DeliveryRecord{
+		DeliveryID: "delivery-claim-release-1",
+		EventUUID:  "event-claim-release-1",
+		EventType:  "issue.updated",
+		IssueKey:   "ABC-987",
+	}
+
+	claimResult, err := store.TryClaim(ctx, record)
+	if err != nil {
+		t.Fatalf("TryClaim first attempt returned error: %v", err)
+	}
+	if claimResult != DeliveryClaimed {
+		t.Fatalf("TryClaim first attempt = %v, want %v", claimResult, DeliveryClaimed)
+	}
+
+	if err := store.ReleaseClaim(ctx, record); err != nil {
+		t.Fatalf("ReleaseClaim returned error: %v", err)
+	}
+
+	claimResult, err = store.TryClaim(ctx, record)
+	if err != nil {
+		t.Fatalf("TryClaim after release returned error: %v", err)
+	}
+	if claimResult != DeliveryClaimed {
+		t.Fatalf("TryClaim after release = %v, want %v", claimResult, DeliveryClaimed)
+	}
+}
+
 func TestDeliveryStoreUpgradesLegacyDuplicateEventUUIDs(t *testing.T) {
 	t.Parallel()
 

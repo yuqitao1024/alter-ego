@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -514,6 +515,202 @@ func TestWebhookHandlerConcurrentSameEventUUIDDifferentDeliveryRetriesAfterFailu
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("waiting same-event duplicate did not retry after first failure")
+	}
+	if code := <-second; code != http.StatusOK {
+		t.Fatalf("second status = %d, want %d", code, http.StatusOK)
+	}
+	if service.issueCallCount() != 2 {
+		t.Fatalf("issue calls = %d, want 2", service.issueCallCount())
+	}
+}
+
+func TestWebhookHandlerConcurrentSameEventUUIDAcrossHandlersDispatchesOnce(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "deliveries.db")
+	storeA, err := OpenDeliveryStore(path)
+	if err != nil {
+		t.Fatalf("OpenDeliveryStore storeA returned error: %v", err)
+	}
+	defer storeA.Close()
+
+	storeB, err := OpenDeliveryStore(path)
+	if err != nil {
+		t.Fatalf("OpenDeliveryStore storeB returned error: %v", err)
+	}
+	defer storeB.Close()
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	service := &fakeSyncService{
+		issueFn: func(context.Context, IssueEvent) error {
+			started <- struct{}{}
+			<-release
+			return nil
+		},
+	}
+	handlerA := NewWebhookHandler(Config{
+		Secret:           "secret",
+		VerificationMode: VerificationModeToken,
+	}, storeA, service)
+	handlerB := NewWebhookHandler(Config{
+		Secret:           "secret",
+		VerificationMode: VerificationModeToken,
+	}, storeB, service)
+
+	body := `{
+		"uuid":"uuid-concurrent-cross-handler-1",
+		"event_type":"issue",
+		"object_kind":"issue",
+		"object_attributes":{
+			"iid":15,
+			"title":"Issue 15",
+			"description":"content",
+			"state":"opened",
+			"action":"open",
+			"url":"https://gitcode.com/org/repo/issues/15",
+			"created_at":"2025-05-07T14:19:24Z",
+			"updated_at":"2025-05-07T14:19:24Z"
+		},
+		"user":{"name":"alice"}
+	}`
+
+	runRequest := func(handler *WebhookHandler, deliveryID string) <-chan int {
+		result := make(chan int, 1)
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
+			req.Header.Set("X-GitCode-Token", "secret")
+			req.Header.Set("X-GitCode-Delivery", deliveryID)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			result <- rec.Code
+		}()
+		return result
+	}
+
+	first := runRequest(handlerA, "delivery-cross-handler-1a")
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first request did not reach sync service")
+	}
+
+	second := runRequest(handlerB, "delivery-cross-handler-1b")
+	select {
+	case <-started:
+		t.Fatal("same event uuid across handlers reached sync service before first attempt completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+
+	if code := <-first; code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d", code, http.StatusOK)
+	}
+	if code := <-second; code != http.StatusOK {
+		t.Fatalf("second status = %d, want %d", code, http.StatusOK)
+	}
+	if service.issueCallCount() != 1 {
+		t.Fatalf("issue calls = %d, want 1", service.issueCallCount())
+	}
+}
+
+func TestWebhookHandlerConcurrentSameEventUUIDAcrossHandlersRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "deliveries.db")
+	storeA, err := OpenDeliveryStore(path)
+	if err != nil {
+		t.Fatalf("OpenDeliveryStore storeA returned error: %v", err)
+	}
+	defer storeA.Close()
+
+	storeB, err := OpenDeliveryStore(path)
+	if err != nil {
+		t.Fatalf("OpenDeliveryStore storeB returned error: %v", err)
+	}
+	defer storeB.Close()
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	attempts := 0
+	var attemptsMu sync.Mutex
+	service := &fakeSyncService{
+		issueFn: func(context.Context, IssueEvent) error {
+			started <- struct{}{}
+			attemptsMu.Lock()
+			attempts++
+			currentAttempt := attempts
+			attemptsMu.Unlock()
+			if currentAttempt == 1 {
+				<-release
+				return errors.New("sync failed")
+			}
+			return nil
+		},
+	}
+	handlerA := NewWebhookHandler(Config{
+		Secret:           "secret",
+		VerificationMode: VerificationModeToken,
+	}, storeA, service)
+	handlerB := NewWebhookHandler(Config{
+		Secret:           "secret",
+		VerificationMode: VerificationModeToken,
+	}, storeB, service)
+
+	body := `{
+		"uuid":"uuid-concurrent-cross-handler-2",
+		"event_type":"issue",
+		"object_kind":"issue",
+		"object_attributes":{
+			"iid":16,
+			"title":"Issue 16",
+			"description":"content",
+			"state":"opened",
+			"action":"open",
+			"url":"https://gitcode.com/org/repo/issues/16",
+			"created_at":"2025-05-07T14:19:24Z",
+			"updated_at":"2025-05-07T14:19:24Z"
+		},
+		"user":{"name":"alice"}
+	}`
+
+	runRequest := func(handler *WebhookHandler, deliveryID string) <-chan int {
+		result := make(chan int, 1)
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
+			req.Header.Set("X-GitCode-Token", "secret")
+			req.Header.Set("X-GitCode-Delivery", deliveryID)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			result <- rec.Code
+		}()
+		return result
+	}
+
+	first := runRequest(handlerA, "delivery-cross-handler-2a")
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first request did not reach sync service")
+	}
+
+	second := runRequest(handlerB, "delivery-cross-handler-2b")
+	select {
+	case <-started:
+		t.Fatal("same event uuid across handlers reached sync service before first attempt completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+
+	if code := <-first; code != http.StatusInternalServerError {
+		t.Fatalf("first status = %d, want %d", code, http.StatusInternalServerError)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("waiting cross-handler duplicate did not retry after first failure")
 	}
 	if code := <-second; code != http.StatusOK {
 		t.Fatalf("second status = %d, want %d", code, http.StatusOK)

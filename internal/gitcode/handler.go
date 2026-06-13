@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
+	"time"
 )
 
 type SyncService interface {
@@ -17,24 +17,17 @@ type WebhookHandler struct {
 	cfg     Config
 	store   *DeliveryStore
 	service SyncService
-
-	mu       sync.Mutex
-	inFlight map[string]*deliveryAttempt
-}
-
-type deliveryAttempt struct {
-	done chan struct{}
-	keys [2]string
 }
 
 func NewWebhookHandler(cfg Config, store *DeliveryStore, service SyncService) *WebhookHandler {
 	return &WebhookHandler{
-		cfg:      cfg,
-		store:    store,
-		service:  service,
-		inFlight: make(map[string]*deliveryAttempt),
+		cfg:     cfg,
+		store:   store,
+		service: service,
 	}
 }
+
+const deliveryClaimPollInterval = 50 * time.Millisecond
 
 func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -128,60 +121,73 @@ func (h *WebhookHandler) handleMergeRequestEvent(ctx context.Context, event Merg
 }
 
 func (h *WebhookHandler) processDelivery(ctx context.Context, record DeliveryRecord, attempt func() error) error {
-	keys := deliveryCoordinationKeys(record)
-
 	for {
-		processed, err := h.wasProcessed(ctx, record)
+		claimResult, err := h.claimDelivery(ctx, record)
 		if err != nil {
 			return err
 		}
-		if processed {
+		switch claimResult {
+		case DeliveryAlreadyProcessed:
 			return nil
-		}
-
-		done, leader := h.enterDeliveryAttempt(keys)
-		if !leader {
-			select {
-			case <-done:
-				continue
-			case <-ctx.Done():
-				return ctx.Err()
+		case DeliveryInProgress:
+			if err := waitForNextClaimAttempt(ctx); err != nil {
+				return err
 			}
+			continue
+		case DeliveryClaimed:
+			err = attempt()
+			if err != nil {
+				releaseErr := h.releaseDeliveryClaim(context.WithoutCancel(ctx), record)
+				if releaseErr != nil {
+					return fmt.Errorf("%w (release delivery claim: %v)", err, releaseErr)
+				}
+				return err
+			}
+			if err := h.completeDeliveryClaim(ctx, record); err != nil {
+				releaseErr := h.releaseDeliveryClaim(context.WithoutCancel(ctx), record)
+				if releaseErr != nil {
+					return fmt.Errorf("%w (release delivery claim: %v)", err, releaseErr)
+				}
+				return err
+			}
+			return nil
+		default:
+			return fmt.Errorf("unsupported delivery claim result %d", claimResult)
 		}
+	}
+}
 
-		err = attempt()
-		if err == nil {
-			_, err = h.markProcessed(ctx, record)
-		}
-		h.leaveDeliveryAttempt(keys, done)
-		if err != nil {
-			return err
-		}
+func (h *WebhookHandler) claimDelivery(ctx context.Context, record DeliveryRecord) (DeliveryClaimResult, error) {
+	if h.store == nil {
+		return DeliveryInProgress, fmt.Errorf("gitcode delivery store is not configured")
+	}
+	return h.store.TryClaim(ctx, record)
+}
+
+func (h *WebhookHandler) completeDeliveryClaim(ctx context.Context, record DeliveryRecord) error {
+	if h.store == nil {
+		return fmt.Errorf("gitcode delivery store is not configured")
+	}
+	return h.store.CompleteClaim(ctx, record)
+}
+
+func (h *WebhookHandler) releaseDeliveryClaim(ctx context.Context, record DeliveryRecord) error {
+	if h.store == nil {
+		return fmt.Errorf("gitcode delivery store is not configured")
+	}
+	return h.store.ReleaseClaim(ctx, record)
+}
+
+func waitForNextClaimAttempt(ctx context.Context) error {
+	timer := time.NewTimer(deliveryClaimPollInterval)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
 		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-}
-
-func (h *WebhookHandler) wasProcessed(ctx context.Context, record DeliveryRecord) (bool, error) {
-	if h.store == nil {
-		return false, fmt.Errorf("gitcode delivery store is not configured")
-	}
-	return h.store.WasProcessed(ctx, record)
-}
-
-func (h *WebhookHandler) markProcessed(ctx context.Context, record DeliveryRecord) (bool, error) {
-	if h.store == nil {
-		return false, fmt.Errorf("gitcode delivery store is not configured")
-	}
-
-	processed, err := h.store.MarkProcessed(ctx, record)
-	if err != nil {
-		return false, err
-	}
-	if !processed {
-		return false, nil
-	}
-
-	return true, nil
 }
 
 func validateDeliveryRecord(record DeliveryRecord) error {
@@ -192,51 +198,4 @@ func validateDeliveryRecord(record DeliveryRecord) error {
 		return fmt.Errorf("event uuid is required")
 	}
 	return nil
-}
-
-func deliveryCoordinationKeys(record DeliveryRecord) [2]string {
-	return [2]string{
-		"delivery:" + record.DeliveryID,
-		"event:" + record.EventUUID,
-	}
-}
-
-func (h *WebhookHandler) enterDeliveryAttempt(keys [2]string) (chan struct{}, bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	for _, key := range keys {
-		if current, ok := h.inFlight[key]; ok {
-			return current.done, false
-		}
-	}
-
-	current := &deliveryAttempt{
-		done: make(chan struct{}),
-		keys: keys,
-	}
-	for _, key := range keys {
-		h.inFlight[key] = current
-	}
-	return current.done, true
-}
-
-func (h *WebhookHandler) leaveDeliveryAttempt(keys [2]string, done chan struct{}) {
-	h.mu.Lock()
-	current, ok := h.inFlight[keys[0]]
-	if !ok {
-		current, ok = h.inFlight[keys[1]]
-	}
-	if ok && current.done == done {
-		for _, key := range current.keys {
-			if h.inFlight[key] == current {
-				delete(h.inFlight, key)
-			}
-		}
-	}
-	h.mu.Unlock()
-
-	if ok && current.done == done {
-		close(done)
-	}
 }
