@@ -99,6 +99,77 @@ func TestWebhookHandlerDispatchesIssueEventOnce(t *testing.T) {
 	}
 }
 
+func TestWebhookHandlerRetriesAfterIssueSyncFailure(t *testing.T) {
+	t.Parallel()
+
+	store := openTestDeliveryStore(t)
+	service := &fakeSyncService{issueErr: errors.New("sync failed")}
+	handler := NewWebhookHandler(Config{
+		Secret:           "secret",
+		VerificationMode: VerificationModeToken,
+	}, store, service)
+
+	body := `{
+		"uuid":"uuid-retry-1",
+		"event_type":"issue",
+		"object_kind":"issue",
+		"object_attributes":{
+			"iid":10,
+			"title":"Issue 10",
+			"description":"content",
+			"state":"opened",
+			"action":"open",
+			"url":"https://gitcode.com/org/repo/issues/10",
+			"created_at":"2025-05-07T14:19:24Z",
+			"updated_at":"2025-05-07T14:19:24Z"
+		},
+		"user":{"name":"alice"}
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
+	req.Header.Set("X-GitCode-Token", "secret")
+	req.Header.Set("X-GitCode-Delivery", "delivery-retry-1")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("first status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if len(service.issueCalls) != 1 {
+		t.Fatalf("issue calls after first failure = %d, want 1", len(service.issueCalls))
+	}
+
+	service.issueErr = nil
+	req = httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
+	req.Header.Set("X-GitCode-Token", "secret")
+	req.Header.Set("X-GitCode-Delivery", "delivery-retry-1")
+	rec = httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(service.issueCalls) != 2 {
+		t.Fatalf("issue calls after retry = %d, want 2", len(service.issueCalls))
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/gitcode/webhook", strings.NewReader(body))
+	req.Header.Set("X-GitCode-Token", "secret")
+	req.Header.Set("X-GitCode-Delivery", "delivery-retry-1")
+	rec = httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("duplicate-after-success status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(service.issueCalls) != 2 {
+		t.Fatalf("issue calls after duplicate success = %d, want 2", len(service.issueCalls))
+	}
+}
+
 func TestWebhookHandlerDispatchesMergeRequestEvent(t *testing.T) {
 	t.Parallel()
 

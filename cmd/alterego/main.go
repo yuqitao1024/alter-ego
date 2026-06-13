@@ -31,6 +31,8 @@ func main() {
 	}
 }
 
+var buildTaskSubsystemForRun = buildTaskSubsystem
+
 func run() error {
 	larkCfg, err := lark.ConfigFromEnv()
 	if err != nil {
@@ -60,8 +62,24 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var gitcodeHandler http.Handler
+	if gitcodeEnabled {
+		if err := ensureParentDir(gitcodeCfg.DBPath); err != nil {
+			return err
+		}
+		deliveryStore, err := gitcode.OpenDeliveryStore(gitcodeCfg.DBPath)
+		if err != nil {
+			return err
+		}
+		defer deliveryStore.Close()
+
+		bitableClient := bitable.NewClient(bitableCfg, nil)
+		syncService := issuesync.NewService(bitableClient, bitableCfg.Fields)
+		gitcodeHandler = gitcode.NewWebhookHandler(gitcodeCfg, deliveryStore, syncService)
+	}
+
 	sessions := agent.NewSessionStore(12)
-	taskSubsystem, err := buildTaskSubsystem(ctx, taskSubsystemConfig{
+	taskSubsystem, err := buildTaskSubsystemForRun(ctx, taskSubsystemConfig{
 		RegistryRoot:           taskRegistryRoot(),
 		DBPath:                 taskDBPath(),
 		Notifier:               lark.NewTaskNotifier(larkCfg),
@@ -89,22 +107,6 @@ func run() error {
 
 	adapter := lark.NewAdapter(larkCfg, handler)
 	callbackHandler := lark.NewCallbackHandler(adapter)
-	var gitcodeHandler http.Handler
-	if gitcodeEnabled {
-		if err := ensureParentDir(gitcodeCfg.DBPath); err != nil {
-			return err
-		}
-		deliveryStore, err := gitcode.OpenDeliveryStore(gitcodeCfg.DBPath)
-		if err != nil {
-			return err
-		}
-		defer deliveryStore.Close()
-
-		bitableClient := bitable.NewClient(bitableCfg, nil)
-		syncService := issuesync.NewService(bitableClient, bitableCfg.Fields)
-		gitcodeHandler = gitcode.NewWebhookHandler(gitcodeCfg, deliveryStore, syncService)
-	}
-
 	httpHandler, listenAddr, err := buildHTTPHandler(larkCfg, webCfg, webEnabled, callbackHandler, gitcodeHandler, taskSubsystem.Service, taskSubsystem.Registry, streamBroker)
 	if err != nil {
 		return err

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -290,6 +291,55 @@ func TestBuildHTTPHandlerWithWebConfigServesGitCodeWebhook(t *testing.T) {
 	}
 	if !gitcodeHit {
 		t.Fatal("gitcode handler was not invoked")
+	}
+
+	loginReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	loginRec := httptest.NewRecorder()
+	handler.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d", loginRec.Code, http.StatusOK)
+	}
+
+	callbackReq := httptest.NewRequest(http.MethodPost, "/lark/card/callback", nil)
+	callbackRec := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRec, callbackReq)
+	if callbackRec.Code != http.StatusNoContent {
+		t.Fatalf("callback status = %d, want %d", callbackRec.Code, http.StatusNoContent)
+	}
+}
+
+func TestRunInitializesOptionalGitCodeBeforeTaskSubsystem(t *testing.T) {
+	t.Setenv("ALTER_EGO_LARK_APP_ID", "cli_test")
+	t.Setenv("ALTER_EGO_LARK_APP_SECRET", "secret")
+	t.Setenv("ALTER_EGO_GITCODE_WEBHOOK_SECRET", "top-secret")
+	t.Setenv("ALTER_EGO_GITCODE_WEBHOOK_VERIFICATION_MODE", "token")
+	t.Setenv("ALTER_EGO_GITCODE_DB_PATH", "/dev/null/gitcode.db")
+	t.Setenv("ALTER_EGO_BITABLE_APP_ID", "bitable-app")
+	t.Setenv("ALTER_EGO_BITABLE_APP_SECRET", "bitable-secret")
+	t.Setenv("ALTER_EGO_BITABLE_APP_TOKEN", "bascn_token")
+	t.Setenv("ALTER_EGO_BITABLE_TABLE_ID", "tbl_issue")
+	t.Setenv("ALTER_EGO_BITABLE_FIELD_ISSUE_KEY", "IssueKey")
+
+	originalBuildTaskSubsystem := buildTaskSubsystemForRun
+	defer func() {
+		buildTaskSubsystemForRun = originalBuildTaskSubsystem
+	}()
+
+	buildCalled := false
+	buildTaskSubsystemForRun = func(ctx context.Context, cfg taskSubsystemConfig) (*taskSubsystem, error) {
+		buildCalled = true
+		return nil, errors.New("task subsystem should not be built")
+	}
+
+	err := run()
+	if err == nil {
+		t.Fatal("run returned nil error, want gitcode initialization failure")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("run error = %q, want path initialization failure", err)
+	}
+	if buildCalled {
+		t.Fatal("task subsystem was built before gitcode initialization completed")
 	}
 }
 

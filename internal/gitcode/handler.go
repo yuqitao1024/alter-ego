@@ -2,6 +2,7 @@ package gitcode
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,19 +70,28 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebhookHandler) handleIssueEvent(ctx context.Context, event IssueEvent) error {
-	processed, err := h.markProcessed(ctx, DeliveryRecord{
+	record := DeliveryRecord{
 		DeliveryID: event.DeliveryID,
 		EventUUID:  event.EventUUID,
 		EventType:  "issue",
 		IssueKey:   event.IssueKey,
-	})
-	if err != nil || !processed {
+	}
+
+	processed, err := h.wasProcessed(ctx, record)
+	if err != nil || processed {
+		return err
+	}
+	if err := validateDeliveryRecord(record); err != nil {
 		return err
 	}
 	if h.service == nil {
 		return fmt.Errorf("gitcode sync service is not configured")
 	}
-	return h.service.ApplyIssueEvent(ctx, event)
+	if err := h.service.ApplyIssueEvent(ctx, event); err != nil {
+		return err
+	}
+	_, err = h.markProcessed(ctx, record)
+	return err
 }
 
 func (h *WebhookHandler) handleMergeRequestEvent(ctx context.Context, event MergeRequestEvent) error {
@@ -90,22 +100,53 @@ func (h *WebhookHandler) handleMergeRequestEvent(ctx context.Context, event Merg
 		issueKey = event.AssociatedIssueKeys[0]
 	}
 
-	processed, err := h.markProcessed(ctx, DeliveryRecord{
+	record := DeliveryRecord{
 		DeliveryID: event.DeliveryID,
 		EventUUID:  event.EventUUID,
 		EventType:  "merge_request",
 		IssueKey:   issueKey,
-	})
-	if err != nil || !processed {
+	}
+
+	processed, err := h.wasProcessed(ctx, record)
+	if err != nil || processed {
+		return err
+	}
+	if err := validateDeliveryRecord(record); err != nil {
 		return err
 	}
 	if len(event.AssociatedIssueKeys) == 0 {
-		return nil
+		_, err := h.markProcessed(ctx, record)
+		return err
 	}
 	if h.service == nil {
 		return fmt.Errorf("gitcode sync service is not configured")
 	}
-	return h.service.ApplyMergeRequestEvent(ctx, event)
+	if err := h.service.ApplyMergeRequestEvent(ctx, event); err != nil {
+		return err
+	}
+	_, err = h.markProcessed(ctx, record)
+	return err
+}
+
+func (h *WebhookHandler) wasProcessed(ctx context.Context, record DeliveryRecord) (bool, error) {
+	if h.store == nil || h.store.db == nil {
+		return false, fmt.Errorf("gitcode delivery store is not configured")
+	}
+
+	var matched int
+	err := h.store.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM webhook_deliveries
+		WHERE delivery_id = ? OR event_uuid = ?
+		LIMIT 1
+	`, record.DeliveryID, record.EventUUID).Scan(&matched)
+	if err == nil {
+		return true, nil
+	}
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return false, fmt.Errorf("check gitcode delivery %q processed: %w", record.DeliveryID, err)
 }
 
 func (h *WebhookHandler) markProcessed(ctx context.Context, record DeliveryRecord) (bool, error) {
@@ -122,4 +163,14 @@ func (h *WebhookHandler) markProcessed(ctx context.Context, record DeliveryRecor
 	}
 
 	return true, nil
+}
+
+func validateDeliveryRecord(record DeliveryRecord) error {
+	if record.DeliveryID == "" {
+		return fmt.Errorf("delivery id is required")
+	}
+	if record.EventUUID == "" {
+		return fmt.Errorf("event uuid is required")
+	}
+	return nil
 }
