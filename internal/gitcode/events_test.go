@@ -77,7 +77,7 @@ func TestVerifyRequestSignatureModeRejectsMismatch(t *testing.T) {
 	}
 }
 
-func TestParseEventIssueBuildsIssuePathKey(t *testing.T) {
+func TestParseEventIssueBuildsIssueURLKey(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
@@ -109,8 +109,8 @@ func TestParseEventIssueBuildsIssuePathKey(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want IssueEvent", event)
 	}
-	if issue.IssueKey != "org/repo/issues/8" {
-		t.Fatalf("IssueKey = %q, want %q", issue.IssueKey, "org/repo/issues/8")
+	if issue.IssueKey != "https://gitcode.com/org/repo/issues/8" {
+		t.Fatalf("IssueKey = %q, want %q", issue.IssueKey, "https://gitcode.com/org/repo/issues/8")
 	}
 }
 
@@ -148,15 +148,15 @@ func TestParseEventMergeRequestCollectsAssociatedIssueKeys(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want MergeRequestEvent", event)
 	}
-	if len(pr.AssociatedIssueKeys) != 1 || pr.AssociatedIssueKeys[0] != "org/repo/issues/8" {
-		t.Fatalf("AssociatedIssueKeys = %#v, want %#v", pr.AssociatedIssueKeys, []string{"org/repo/issues/8"})
+	if len(pr.AssociatedIssueKeys) != 1 || pr.AssociatedIssueKeys[0] != "https://gitcode.com/org/repo/issues/8" {
+		t.Fatalf("AssociatedIssueKeys = %#v, want %#v", pr.AssociatedIssueKeys, []string{"https://gitcode.com/org/repo/issues/8"})
 	}
 	if !strings.Contains(pr.SummaryLine(), "!45") {
 		t.Fatalf("SummaryLine = %q, want it to contain %q", pr.SummaryLine(), "!45")
 	}
 }
 
-func TestParseEventMergeRequestPrefersAssociatedIssuePath(t *testing.T) {
+func TestParseEventMergeRequestPrefersAssociatedIssueURL(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
@@ -164,7 +164,7 @@ func TestParseEventMergeRequestPrefersAssociatedIssuePath(t *testing.T) {
 		"event_type":"merge_request",
 		"object_kind":"merge_request",
 		"issues":[
-			{"iid":8,"path":"org/repo/issues/8","url":"https://gitcode.com/wrong/repo/issues/999"}
+			{"iid":8,"path":"org/repo/issues/8","url":"https://gitcode.com/org/repo/issues/8"}
 		],
 		"object_attributes":{
 			"iid":46,
@@ -188,8 +188,45 @@ func TestParseEventMergeRequestPrefersAssociatedIssuePath(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want MergeRequestEvent", event)
 	}
-	if len(pr.AssociatedIssueKeys) != 1 || pr.AssociatedIssueKeys[0] != "org/repo/issues/8" {
-		t.Fatalf("AssociatedIssueKeys = %#v, want %#v", pr.AssociatedIssueKeys, []string{"org/repo/issues/8"})
+	if len(pr.AssociatedIssueKeys) != 1 || pr.AssociatedIssueKeys[0] != "https://gitcode.com/org/repo/issues/8" {
+		t.Fatalf("AssociatedIssueKeys = %#v, want %#v", pr.AssociatedIssueKeys, []string{"https://gitcode.com/org/repo/issues/8"})
+	}
+}
+
+func TestParseEventMergeRequestBuildsAssociatedIssueURLFromPath(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+		"uuid":"uuid-pr-2b",
+		"event_type":"merge_request",
+		"object_kind":"merge_request",
+		"issues":[
+			{"iid":8,"path":"org/repo/issues/8"}
+		],
+		"object_attributes":{
+			"iid":46,
+			"title":"feat: issue 8 path fallback",
+			"state":"opened",
+			"action":"open",
+			"url":"https://gitcode.com/org/repo/pulls/46",
+			"source_branch":"feat-8",
+			"target_branch":"main",
+			"updated_at":"2025-05-08T10:00:00.000+08:00"
+		},
+		"user":{"name":"alice","username":"alice"}
+	}`)
+
+	event, err := ParseEvent(http.Header{"X-GitCode-Delivery": []string{"delivery-3b"}}, raw)
+	if err != nil {
+		t.Fatalf("ParseEvent returned error: %v", err)
+	}
+
+	pr, ok := event.(MergeRequestEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want MergeRequestEvent", event)
+	}
+	if len(pr.AssociatedIssueKeys) != 1 || pr.AssociatedIssueKeys[0] != "https://gitcode.com/org/repo/issues/8" {
+		t.Fatalf("AssociatedIssueKeys = %#v, want %#v", pr.AssociatedIssueKeys, []string{"https://gitcode.com/org/repo/issues/8"})
 	}
 }
 

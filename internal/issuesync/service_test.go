@@ -33,7 +33,7 @@ func TestServiceApplyIssueEventCreatesMissingRow(t *testing.T) {
 	createdAt := time.Date(2026, 6, 13, 8, 0, 0, 123000000, time.UTC)
 	updatedAt := createdAt.Add(10 * time.Minute)
 	event := gitcode.IssueEvent{
-		IssueKey:    "org/repo/issues/18",
+		IssueKey:    "https://gitcode.com/org/repo/issues/18",
 		IssueIID:    18,
 		Title:       "Sync issue row",
 		Description: "Populate fields",
@@ -58,7 +58,7 @@ func TestServiceApplyIssueEventCreatesMissingRow(t *testing.T) {
 	}
 
 	want := map[string]any{
-		"IssueKey":    "org/repo/issues/18",
+		"IssueKey":    "https://gitcode.com/org/repo/issues/18",
 		"IssueIID":    18,
 		"Title":       "Sync issue row",
 		"Description": "Populate fields",
@@ -87,10 +87,10 @@ func TestServiceApplyMergeRequestEventUpdatesExistingRow(t *testing.T) {
 	}
 	table := &stubTableClient{
 		findResults: map[string]stubFindResult{
-			"org/repo/issues/18": {
+			"https://gitcode.com/org/repo/issues/18": {
 				recordID: "rec_18",
 				fields: map[string]any{
-					"IssueKey":        "org/repo/issues/18",
+					"IssueKey":        "https://gitcode.com/org/repo/issues/18",
 					"RelatedPRs":      "!3 Existing PR [merged]\n!9 Old title [opened]",
 					"RelatedPRURLs":   "!3 https://gitcode.example/org/repo/-/merge_requests/3\n!9 https://gitcode.example/org/repo/-/merge_requests/9",
 					"RelatedPRStatus": "!3 merged\n!9 opened",
@@ -108,7 +108,7 @@ func TestServiceApplyMergeRequestEventUpdatesExistingRow(t *testing.T) {
 		State:               "merged",
 		URL:                 "https://gitcode.example/org/repo/-/merge_requests/9",
 		UpdatedAt:           updatedAt,
-		AssociatedIssueKeys: []string{"org/repo/issues/18"},
+		AssociatedIssueKeys: []string{"https://gitcode.com/org/repo/issues/18"},
 	}
 
 	if err := service.ApplyMergeRequestEvent(context.Background(), event); err != nil {
@@ -145,7 +145,7 @@ func TestServiceApplyMergeRequestEventSkipsMissingRows(t *testing.T) {
 		State:               "opened",
 		URL:                 "https://gitcode.example/org/repo/-/merge_requests/12",
 		UpdatedAt:           time.Date(2026, 6, 13, 9, 0, 0, 0, time.UTC),
-		AssociatedIssueKeys: []string{"org/repo/issues/99"},
+		AssociatedIssueKeys: []string{"https://gitcode.com/org/repo/issues/99"},
 	}
 
 	if err := service.ApplyMergeRequestEvent(context.Background(), event); err != nil {
@@ -169,10 +169,10 @@ func TestServiceApplyMergeRequestEventPreservesNewerNumericLastPRUpdatedAt(t *te
 	newerStored := time.Date(2026, 6, 13, 9, 30, 0, 0, time.UTC)
 	table := &stubTableClient{
 		findResults: map[string]stubFindResult{
-			"org/repo/issues/18": {
+			"https://gitcode.com/org/repo/issues/18": {
 				recordID: "rec_18",
 				fields: map[string]any{
-					"IssueKey":        "org/repo/issues/18",
+					"IssueKey":        "https://gitcode.com/org/repo/issues/18",
 					"RelatedPRs":      "!9 Existing PR [merged]",
 					"RelatedPRURLs":   "!9 https://gitcode.example/org/repo/-/merge_requests/9",
 					"RelatedPRStatus": "!9 merged",
@@ -189,7 +189,7 @@ func TestServiceApplyMergeRequestEventPreservesNewerNumericLastPRUpdatedAt(t *te
 		State:               "merged",
 		URL:                 "https://gitcode.example/org/repo/-/merge_requests/9",
 		UpdatedAt:           newerStored.Add(-30 * time.Minute),
-		AssociatedIssueKeys: []string{"org/repo/issues/18"},
+		AssociatedIssueKeys: []string{"https://gitcode.com/org/repo/issues/18"},
 	}
 
 	if err := service.ApplyMergeRequestEvent(context.Background(), olderEvent); err != nil {
@@ -216,10 +216,10 @@ func TestServiceApplyMergeRequestEventDeduplicatesWhitespacePaddedIssueKeys(t *t
 	}
 	table := &stubTableClient{
 		findResults: map[string]stubFindResult{
-			"org/repo/issues/18": {
+			"https://gitcode.com/org/repo/issues/18": {
 				recordID: "rec_18",
 				fields: map[string]any{
-					"IssueKey": "org/repo/issues/18",
+					"IssueKey": "https://gitcode.com/org/repo/issues/18",
 				},
 			},
 		},
@@ -233,8 +233,8 @@ func TestServiceApplyMergeRequestEventDeduplicatesWhitespacePaddedIssueKeys(t *t
 		URL:            "https://gitcode.example/org/repo/-/merge_requests/21",
 		UpdatedAt:      time.Date(2026, 6, 13, 10, 0, 0, 0, time.UTC),
 		AssociatedIssueKeys: []string{
-			" org/repo/issues/18 ",
-			"org/repo/issues/18",
+			" https://gitcode.com/org/repo/issues/18 ",
+			"https://gitcode.com/org/repo/issues/18",
 			"",
 			"  ",
 		},

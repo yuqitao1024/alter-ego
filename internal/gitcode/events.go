@@ -127,7 +127,7 @@ func parseIssueEvent(header http.Header, payload webhookEnvelope) (IssueEvent, e
 	if err != nil {
 		return IssueEvent{}, err
 	}
-	issueKey, err := issuePathFromURL(payload.ObjectAttributes.URL)
+	issueKey, err := canonicalIssueURL(payload.ObjectAttributes.URL)
 	if err != nil {
 		return IssueEvent{}, fmt.Errorf("parse issue key: %w", err)
 	}
@@ -252,17 +252,26 @@ func parseTimestamp(raw string) (time.Time, error) {
 }
 
 func issueKeyFromReference(ref webhookIssueRef) (string, error) {
-	path := normalizeIssuePath(ref.Path)
-	if path != "" {
-		return path, nil
+	if rawURL := strings.TrimSpace(ref.URL); rawURL != "" {
+		return canonicalIssueURL(rawURL)
 	}
-	return issuePathFromURL(ref.URL)
+	path := normalizeIssuePath(ref.Path)
+	if path == "" {
+		return "", fmt.Errorf("issue reference is missing path and url")
+	}
+	return "https://gitcode.com/" + path, nil
 }
 
-func issuePathFromURL(raw string) (string, error) {
+func canonicalIssueURL(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return "", fmt.Errorf("parse url: %w", err)
+	}
+	if strings.TrimSpace(parsed.Scheme) == "" {
+		return "", fmt.Errorf("issue url scheme is empty")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return "", fmt.Errorf("issue url host is empty")
 	}
 
 	path := strings.TrimSpace(parsed.Path)
@@ -271,7 +280,12 @@ func issuePathFromURL(raw string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("issue url path is empty")
 	}
-	return path, nil
+
+	parsed.Path = "/" + path
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.Scheme + "://" + parsed.Host + parsed.Path, nil
 }
 
 func normalizeIssuePath(raw string) string {
