@@ -63,21 +63,52 @@ type WorkspaceConfig struct {
 	Machines   []*MachineConfig `yaml:"-"`
 }
 
+type WorkspaceProfileConfig struct {
+	ID          string           `yaml:"id"`
+	DisplayName string           `yaml:"display_name"`
+	Description string           `yaml:"description"`
+	Root        string           `yaml:"root"`
+	MachineIDs  []string         `yaml:"machine_ids"`
+	Setup       *WorkspaceSetup  `yaml:"setup"`
+	Machines    []*MachineConfig `yaml:"-"`
+}
+
+type TaskType string
+
+const (
+	TaskTypeGeneral    TaskType = "general"
+	TaskTypeCodeReview TaskType = "code_review"
+)
+
+type CodeReviewConfig struct {
+	GitCodeProject string `yaml:"gitcode_project"`
+	PRSelector     string `yaml:"pr_selector"`
+	ReviewTool     string `yaml:"review_tool"`
+	HumanizerSkill string `yaml:"humanizer_skill"`
+	Approval       string `yaml:"approval"`
+	Publisher      string `yaml:"publisher"`
+}
+
 type TemplateConfig struct {
-	ID                   string           `yaml:"id"`
-	DisplayName          string           `yaml:"display_name"`
-	Description          string           `yaml:"description"`
-	WorkflowPath         string           `yaml:"workflow_path"`
-	Workspace            *WorkspaceConfig `yaml:"workspace"`
-	ResolvedWorkflowPath string           `yaml:"-"`
+	ID                   string            `yaml:"id"`
+	DisplayName          string            `yaml:"display_name"`
+	Description          string            `yaml:"description"`
+	TaskType             TaskType          `yaml:"task_type"`
+	WorkflowPath         string            `yaml:"workflow_path"`
+	WorkspaceID          string            `yaml:"workspace_id"`
+	Workspace            *WorkspaceConfig  `yaml:"workspace"`
+	CodeReview           *CodeReviewConfig `yaml:"code_review"`
+	ResolvedWorkflowPath string            `yaml:"-"`
 }
 
 type Registry struct {
 	Machines       map[string]*MachineConfig
 	Repositories   map[string]*RepositoryConfig
+	Workspaces     map[string]*WorkspaceProfileConfig
 	Templates      map[string]*TemplateConfig
 	MachineList    []*MachineConfig
 	RepositoryList []*RepositoryConfig
+	WorkspaceList  []*WorkspaceProfileConfig
 	TemplateList   []*TemplateConfig
 }
 
@@ -90,9 +121,11 @@ func LoadRegistry(root string) (*Registry, error) {
 	registry := &Registry{
 		Machines:       map[string]*MachineConfig{},
 		Repositories:   map[string]*RepositoryConfig{},
+		Workspaces:     map[string]*WorkspaceProfileConfig{},
 		Templates:      map[string]*TemplateConfig{},
 		MachineList:    []*MachineConfig{},
 		RepositoryList: []*RepositoryConfig{},
+		WorkspaceList:  []*WorkspaceProfileConfig{},
 		TemplateList:   []*TemplateConfig{},
 	}
 
@@ -100,6 +133,9 @@ func LoadRegistry(root string) (*Registry, error) {
 		return nil, err
 	}
 	if err := loadOptionalConfigDir(filepath.Join(root, "configs/repositories"), &registry.RepositoryList, registry.Repositories); err != nil {
+		return nil, err
+	}
+	if err := loadOptionalConfigDir(filepath.Join(root, "configs/workspaces"), &registry.WorkspaceList, registry.Workspaces); err != nil {
 		return nil, err
 	}
 	if err := loadConfigDir(filepath.Join(root, "configs/templates"), &registry.TemplateList, registry.Templates); err != nil {
@@ -117,15 +153,28 @@ func LoadRegistry(root string) (*Registry, error) {
 		}
 	}
 
+	for _, workspace := range registry.WorkspaceList {
+		if err := bindWorkspaceMachines(fmt.Sprintf("workspace %q", workspace.ID), workspace.workspaceConfig(), registry.Machines); err != nil {
+			return nil, err
+		}
+		workspace.Machines = workspace.Machines[:0]
+		for _, machineID := range workspace.MachineIDs {
+			workspace.Machines = append(workspace.Machines, registry.Machines[machineID])
+		}
+	}
+
 	for _, template := range registry.TemplateList {
+		if strings.TrimSpace(template.WorkspaceID) != "" {
+			workspace := registry.Workspaces[template.WorkspaceID]
+			if workspace == nil {
+				return nil, fmt.Errorf("template %q references unknown workspace %q", template.ID, template.WorkspaceID)
+			}
+			template.Workspace = workspace.AsWorkspaceConfig()
+		}
+
 		if template.Workspace != nil {
-			template.Workspace.Machines = template.Workspace.Machines[:0]
-			for _, machineID := range template.Workspace.MachineIDs {
-				machine := registry.Machines[machineID]
-				if machine == nil {
-					return nil, fmt.Errorf("template %q workspace references unknown machine %q", template.ID, machineID)
-				}
-				template.Workspace.Machines = append(template.Workspace.Machines, machine)
+			if err := bindWorkspaceMachines(fmt.Sprintf("template %q workspace", template.ID), template.Workspace, registry.Machines); err != nil {
+				return nil, err
 			}
 		}
 
@@ -145,9 +194,10 @@ type configDocument interface {
 	Validate() error
 }
 
-func (m *MachineConfig) GetID() string    { return m.ID }
-func (r *RepositoryConfig) GetID() string { return r.ID }
-func (t *TemplateConfig) GetID() string   { return t.ID }
+func (m *MachineConfig) GetID() string          { return m.ID }
+func (r *RepositoryConfig) GetID() string       { return r.ID }
+func (w *WorkspaceProfileConfig) GetID() string { return w.ID }
+func (t *TemplateConfig) GetID() string         { return t.ID }
 
 func (m *MachineConfig) Validate() error {
 	missing := make([]string, 0, 5)
@@ -208,11 +258,98 @@ func (t *TemplateConfig) Validate() error {
 	}); err != nil {
 		return err
 	}
-	if t.Workspace == nil {
-		return fmt.Errorf("template %q is missing required field %q", t.ID, "workspace")
+	if strings.TrimSpace(t.WorkspaceID) != "" && t.Workspace != nil {
+		return fmt.Errorf("template %q must define only one of %q or %q", t.ID, "workspace_id", "workspace")
 	}
-	if err := t.Workspace.Validate(t.ID); err != nil {
+	if strings.TrimSpace(t.WorkspaceID) == "" && t.Workspace == nil {
+		return fmt.Errorf("template %q is missing required field %q or %q", t.ID, "workspace_id", "workspace")
+	}
+	if t.Workspace != nil {
+		if err := t.Workspace.Validate(t.ID); err != nil {
+			return err
+		}
+	}
+
+	switch t.EffectiveTaskType() {
+	case TaskTypeGeneral:
+		if t.CodeReview != nil {
+			return fmt.Errorf("template %q has code_review config but task_type is %q", t.ID, t.EffectiveTaskType())
+		}
+	case TaskTypeCodeReview:
+		if t.CodeReview == nil {
+			return fmt.Errorf("template %q with task_type %q is missing required field %q", t.ID, t.EffectiveTaskType(), "code_review")
+		}
+		if err := t.CodeReview.Validate(t.ID); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("template %q has unsupported task_type %q", t.ID, t.TaskType)
+	}
+	return nil
+}
+
+func (t *TemplateConfig) EffectiveTaskType() TaskType {
+	if t == nil || strings.TrimSpace(string(t.TaskType)) == "" {
+		return TaskTypeGeneral
+	}
+	return t.TaskType
+}
+
+func (w *WorkspaceProfileConfig) Validate() error {
+	if err := requireFields("workspace", w.ID, []requiredField{
+		{name: "id", value: w.ID},
+	}); err != nil {
 		return err
+	}
+	return w.workspaceConfig().Validate(w.ID)
+}
+
+func (w *WorkspaceProfileConfig) workspaceConfig() *WorkspaceConfig {
+	if w == nil {
+		return nil
+	}
+	return &WorkspaceConfig{
+		Root:       w.Root,
+		MachineIDs: w.MachineIDs,
+		Setup:      w.Setup,
+		Machines:   w.Machines,
+	}
+}
+
+func (w *WorkspaceProfileConfig) AsWorkspaceConfig() *WorkspaceConfig {
+	if w == nil {
+		return nil
+	}
+	return &WorkspaceConfig{
+		Root:       w.Root,
+		MachineIDs: append([]string(nil), w.MachineIDs...),
+		Setup:      cloneWorkspaceSetup(w.Setup),
+		Machines:   append([]*MachineConfig(nil), w.Machines...),
+	}
+}
+
+func (c *CodeReviewConfig) Validate(templateID string) error {
+	if err := requireFields("template code_review", templateID, []requiredField{
+		{name: "gitcode_project", value: c.GitCodeProject},
+		{name: "pr_selector", value: c.PRSelector},
+		{name: "review_tool", value: c.ReviewTool},
+		{name: "humanizer_skill", value: c.HumanizerSkill},
+		{name: "approval", value: c.Approval},
+		{name: "publisher", value: c.Publisher},
+	}); err != nil {
+		return err
+	}
+	if c.PRSelector != "latest_open" {
+		return fmt.Errorf("template code_review %q has unsupported pr_selector %q", templateID, c.PRSelector)
+	}
+	if c.ReviewTool != "codex_builtin" {
+		return fmt.Errorf("template code_review %q has unsupported review_tool %q", templateID, c.ReviewTool)
+	}
+	if c.Approval != "lark" {
+		return fmt.Errorf("template code_review %q has unsupported approval %q", templateID, c.Approval)
+	}
+	if c.Publisher != "gitcode" {
+		return fmt.Errorf("template code_review %q has unsupported publisher %q", templateID, c.Publisher)
 	}
 	return nil
 }
@@ -259,6 +396,43 @@ func (s *WorkspaceSetup) Validate(templateID string) error {
 	default:
 		return fmt.Errorf("template workspace setup %q has unsupported type %q", templateID, s.Type)
 	}
+}
+
+func bindWorkspaceMachines(label string, workspace *WorkspaceConfig, machines map[string]*MachineConfig) error {
+	if workspace == nil {
+		return nil
+	}
+	workspace.Machines = workspace.Machines[:0]
+	for _, machineID := range workspace.MachineIDs {
+		machine := machines[machineID]
+		if machine == nil {
+			return fmt.Errorf("%s references unknown machine %q", label, machineID)
+		}
+		workspace.Machines = append(workspace.Machines, machine)
+	}
+	return nil
+}
+
+func cloneWorkspaceSetup(setup *WorkspaceSetup) *WorkspaceSetup {
+	if setup == nil {
+		return nil
+	}
+	return &WorkspaceSetup{
+		Type:               setup.Type,
+		RemoteRepoURL:      setup.RemoteRepoURL,
+		CheckoutBranch:     setup.CheckoutBranch,
+		PreCloneBootstrap:  append([]string(nil), setup.PreCloneBootstrap...),
+		PostCloneBootstrap: append([]string(nil), setup.PostCloneBootstrap...),
+		CustomSteps:        append([]string(nil), setup.CustomSteps...),
+	}
+}
+
+func cloneCodeReviewConfig(config *CodeReviewConfig) *CodeReviewConfig {
+	if config == nil {
+		return nil
+	}
+	clone := *config
+	return &clone
 }
 
 func workspaceFromRepository(repo *RepositoryConfig) *WorkspaceConfig {

@@ -388,6 +388,208 @@ workflow_path: docs/workflows/research.md
 	}
 }
 
+func TestLoadConfigBindsTemplateWorkspaceID(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
+app_server_ws_auth_token: test-token
+`)
+	writeConfigFile(t, root, "configs/workspaces/backend.yaml", `
+id: backend_workspace
+display_name: Backend Workspace
+description: Shared backend checkout.
+root: /srv/codex-tasks
+machine_ids:
+  - machine_a
+setup:
+  type: repo
+  remote_repo_url: git@github.com:example/backend.git
+  checkout_branch: main
+  pre_clone_bootstrap:
+    - setup-git-auth
+  post_clone_bootstrap:
+    - pnpm install
+`)
+	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
+id: feature_dev
+display_name: Feature Development
+description: Default feature workflow
+workspace_id: backend_workspace
+workflow_path: docs/workflows/example-feature-dev.md
+`)
+	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", "# Feature Development\n")
+
+	registry, err := LoadRegistry(root)
+	if err != nil {
+		t.Fatalf("LoadRegistry returned error: %v", err)
+	}
+
+	if len(registry.WorkspaceList) != 1 || registry.WorkspaceList[0].ID != "backend_workspace" {
+		t.Fatalf("WorkspaceList order = %#v, want [backend_workspace]", workspaceIDs(registry.WorkspaceList))
+	}
+	template := registry.Templates["feature_dev"]
+	if template == nil {
+		t.Fatal("Templates[feature_dev] = nil")
+	}
+	if template.WorkspaceID != "backend_workspace" {
+		t.Fatalf("template.WorkspaceID = %q, want backend_workspace", template.WorkspaceID)
+	}
+	if template.Workspace == nil {
+		t.Fatal("template.Workspace = nil")
+	}
+	if template.Workspace.Root != "/srv/codex-tasks" {
+		t.Fatalf("template.Workspace.Root = %q, want /srv/codex-tasks", template.Workspace.Root)
+	}
+	if len(template.Workspace.Machines) != 1 || template.Workspace.Machines[0] != registry.Machines["machine_a"] {
+		t.Fatalf("template.Workspace.Machines = %#v, want bound machine_a", template.Workspace.Machines)
+	}
+	if template.Workspace.Setup.RemoteRepoURL != "git@github.com:example/backend.git" {
+		t.Fatalf("template.Workspace.Setup.RemoteRepoURL = %q", template.Workspace.Setup.RemoteRepoURL)
+	}
+	if len(template.Workspace.Setup.PostCloneBootstrap) != 1 || template.Workspace.Setup.PostCloneBootstrap[0] != "pnpm install" {
+		t.Fatalf("template.Workspace.Setup.PostCloneBootstrap = %#v", template.Workspace.Setup.PostCloneBootstrap)
+	}
+}
+
+func TestLoadConfigRejectsTemplateWithUnknownWorkspaceID(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
+app_server_ws_auth_token: test-token
+`)
+	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
+id: feature_dev
+workspace_id: missing_workspace
+workflow_path: docs/workflows/example-feature-dev.md
+`)
+	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", "# Feature Development\n")
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error")
+	}
+	if !strings.Contains(err.Error(), "missing_workspace") {
+		t.Fatalf("LoadRegistry error = %q, want missing_workspace", err)
+	}
+}
+
+func TestLoadConfigRejectsTemplateWithWorkspaceAndWorkspaceID(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
+app_server_ws_auth_token: test-token
+`)
+	writeConfigFile(t, root, "configs/workspaces/backend.yaml", `
+id: backend_workspace
+root: /srv/codex-tasks
+machine_ids:
+  - machine_a
+setup:
+  type: empty
+`)
+	writeConfigFile(t, root, "configs/templates/feature-dev.yaml", `
+id: feature_dev
+workspace_id: backend_workspace
+workspace:
+  root: /srv/codex-tasks
+  machine_ids:
+    - machine_a
+  setup:
+    type: empty
+workflow_path: docs/workflows/example-feature-dev.md
+`)
+	writeConfigFile(t, root, "docs/workflows/example-feature-dev.md", "# Feature Development\n")
+
+	_, err := LoadRegistry(root)
+	if err == nil {
+		t.Fatal("LoadRegistry returned nil error")
+	}
+	if !strings.Contains(err.Error(), "workspace_id") || !strings.Contains(err.Error(), "workspace") {
+		t.Fatalf("LoadRegistry error = %q, want workspace exclusivity error", err)
+	}
+}
+
+func TestLoadConfigSupportsCodeReviewTemplateConfig(t *testing.T) {
+	root := t.TempDir()
+
+	writeConfigFile(t, root, "configs/machines/machine-a.yaml", `
+id: machine_a
+host: machine-a.example.com
+user: dev
+app_server_listen_host: 0.0.0.0
+app_server_listen_port: 4317
+app_server_service_name: codex-app-server
+app_server_install_user: dev
+app_server_ws_auth_token: test-token
+`)
+	writeConfigFile(t, root, "configs/workspaces/backend.yaml", `
+id: backend_workspace
+root: /srv/codex-tasks
+machine_ids:
+  - machine_a
+setup:
+  type: repo
+  remote_repo_url: git@github.com:example/backend.git
+  checkout_branch: main
+`)
+	writeConfigFile(t, root, "configs/templates/code-review.yaml", `
+id: code_review
+display_name: Code Review
+description: Review the latest pull request.
+task_type: code_review
+workspace_id: backend_workspace
+code_review:
+  gitcode_project: example/backend
+  pr_selector: latest_open
+  review_tool: codex_builtin
+  humanizer_skill: humanizer:humanizer
+  approval: lark
+  publisher: gitcode
+workflow_path: docs/workflows/code-review.md
+`)
+	writeConfigFile(t, root, "docs/workflows/code-review.md", "# Code Review\n")
+
+	registry, err := LoadRegistry(root)
+	if err != nil {
+		t.Fatalf("LoadRegistry returned error: %v", err)
+	}
+
+	template := registry.Templates["code_review"]
+	if template == nil {
+		t.Fatal("Templates[code_review] = nil")
+	}
+	if template.TaskType != TaskTypeCodeReview {
+		t.Fatalf("template.TaskType = %q, want %q", template.TaskType, TaskTypeCodeReview)
+	}
+	if template.CodeReview == nil {
+		t.Fatal("template.CodeReview = nil")
+	}
+	if template.CodeReview.GitCodeProject != "example/backend" || template.CodeReview.PRSelector != "latest_open" || template.CodeReview.Publisher != "gitcode" {
+		t.Fatalf("template.CodeReview = %#v", template.CodeReview)
+	}
+}
+
 func TestLoadConfigRejectsRepositoryWithUnknownMachine(t *testing.T) {
 	root := t.TempDir()
 
@@ -729,6 +931,14 @@ func repositoryIDs(repositories []*RepositoryConfig) []string {
 	ids := make([]string, 0, len(repositories))
 	for _, repository := range repositories {
 		ids = append(ids, repository.ID)
+	}
+	return ids
+}
+
+func workspaceIDs(workspaces []*WorkspaceProfileConfig) []string {
+	ids := make([]string, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		ids = append(ids, workspace.ID)
 	}
 	return ids
 }

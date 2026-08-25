@@ -24,6 +24,8 @@ func (c RegistryTemplateCatalog) ListTemplates(context.Context) ([]TemplateSumma
 			ID:          template.ID,
 			DisplayName: template.DisplayName,
 			Description: template.Description,
+			TaskType:    string(template.EffectiveTaskType()),
+			WorkspaceID: template.WorkspaceID,
 		})
 	}
 	return items, nil

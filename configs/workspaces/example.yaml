@@ -1,0 +1,14 @@
+id: backend_workspace
+display_name: Backend Workspace
+description: Shared checkout workspace for backend development tasks.
+root: /srv/codex-tasks
+machine_ids:
+  - machine_a
+setup:
+  type: repo
+  remote_repo_url: git@github.com:example/backend.git
+  checkout_branch: main
+  pre_clone_bootstrap:
+    - setup-git-auth
+  post_clone_bootstrap:
+    - git submodule update --init --recursive

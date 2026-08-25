@@ -667,8 +667,10 @@ func (s *Service) startPendingTask(ctx context.Context, task TaskRun) error {
 	session, err := s.runner.StartInteractiveSession(ctx, StartRequest{
 		Machine:             *machine,
 		TaskID:              task.TaskID,
+		TaskType:            template.EffectiveTaskType(),
 		RemoteWorkspaceRoot: workspace.Root,
 		WorkspaceSetup:      *workspace.Setup,
+		CodeReview:          cloneCodeReviewConfig(template.CodeReview),
 		UserRequest:         task.UserRequest,
 		WorkflowContent:     workflowText,
 	})

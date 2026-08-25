@@ -114,6 +114,54 @@ func TestStartTaskSupportsTemplateWithEmptyWorkspace(t *testing.T) {
 	}
 }
 
+func TestStartTaskPassesTemplateTaskTypeToRunner(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeServiceRunner{
+		startSession: RemoteSession{
+			MachineID:    "machine_a",
+			Workdir:      "/srv/codex-tasks/task-1/repo",
+			ThreadID:     "thread-1",
+			ActiveTurnID: "turn-1",
+		},
+	}
+	service, _, cleanup := newCustomTestService(t, runner, &fakeDecisionEngine{})
+	defer cleanup()
+
+	service.registry.Templates["code_review"] = &TemplateConfig{
+		ID:       "code_review",
+		TaskType: TaskTypeCodeReview,
+		Workspace: &WorkspaceConfig{
+			Root:       "/srv/codex-tasks",
+			MachineIDs: []string{"machine_a"},
+			Machines: []*MachineConfig{
+				service.registry.Machines["machine_a"],
+			},
+			Setup: &WorkspaceSetup{
+				Type:           WorkspaceSetupTypeRepo,
+				RemoteRepoURL:  "git@github.com:example/backend.git",
+				CheckoutBranch: "main",
+			},
+		},
+		CodeReview: &CodeReviewConfig{
+			GitCodeProject: "example/backend",
+			PRSelector:     "latest_open",
+			ReviewTool:     "codex_builtin",
+			HumanizerSkill: "humanizer:humanizer",
+			Approval:       "lark",
+			Publisher:      "gitcode",
+		},
+		ResolvedWorkflowPath: writeWorkflowFixture(t, "Review workflow\n"),
+	}
+
+	if _, err := service.StartTask(context.Background(), "code_review", "yuqitao", "Review latest PR"); err != nil {
+		t.Fatalf("StartTask returned error: %v", err)
+	}
+	if runner.lastStartRequest.TaskType != TaskTypeCodeReview {
+		t.Fatalf("runner.lastStartRequest.TaskType = %q, want %q", runner.lastStartRequest.TaskType, TaskTypeCodeReview)
+	}
+}
+
 func TestTickDoesNotReplyToCodexWithoutExplicitPendingRequest(t *testing.T) {
 	t.Parallel()
 

@@ -31,8 +31,11 @@ alterego/
   opt/alterego/bin/alterego
   opt/alterego/config/configs/machines/example.yaml
   opt/alterego/config/configs/repositories/example.yaml
+  opt/alterego/config/configs/workspaces/example.yaml
   opt/alterego/config/configs/templates/example.yaml
+  opt/alterego/config/configs/templates/example-code-review.yaml
   opt/alterego/config/docs/workflows/example-feature-dev.md
+  opt/alterego/config/docs/workflows/example-code-review.md
   etc/alterego/alterego.env.example
   etc/systemd/system/alteregod.service
   var/lib/alterego/
@@ -46,8 +49,9 @@ The service expects:
 - SQLite state: `/var/lib/alterego/tasks.db`
 - progress reports: disabled by default unless `ALTER_EGO_TASK_PROGRESS_REPORTS_ENABLED=true`
 
-Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`; machine YAML now carries the app-server socket and bootstrap command list for each remote host.
-Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`; machine YAML must include the Codex app-server fields:
+Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`.
+Templates reference reusable workspace profiles from `configs/workspaces/*.yaml`; each workspace profile defines the fixed remote task root, machine pool, and setup strategy.
+Machine YAML must include the Codex app-server fields:
 
 - `app_server_listen_host`
 - `app_server_listen_port`

@@ -81,11 +81,32 @@ func taskRepoWorkdir(workspaceRoot, taskID string) string {
 	return path.Join(taskRootDir(workspaceRoot, taskID), "repo")
 }
 
-func buildStartInput(workflow, userRequest string) string {
+func buildStartInput(workflow, userRequest string, taskType TaskType, codeReview *CodeReviewConfig) string {
 	var builder strings.Builder
 	if strings.TrimSpace(workflow) != "" {
 		builder.WriteString("[Workflow]\n")
 		builder.WriteString(strings.TrimSpace(workflow))
+		builder.WriteString("\n\n")
+	}
+	if taskType != "" && taskType != TaskTypeGeneral {
+		builder.WriteString("[Task Type]\n")
+		builder.WriteString(string(taskType))
+		builder.WriteString("\n\n")
+	}
+	if codeReview != nil {
+		builder.WriteString("[Code Review Config]\n")
+		builder.WriteString("gitcode_project: ")
+		builder.WriteString(strings.TrimSpace(codeReview.GitCodeProject))
+		builder.WriteString("\npr_selector: ")
+		builder.WriteString(strings.TrimSpace(codeReview.PRSelector))
+		builder.WriteString("\nreview_tool: ")
+		builder.WriteString(strings.TrimSpace(codeReview.ReviewTool))
+		builder.WriteString("\nhumanizer_skill: ")
+		builder.WriteString(strings.TrimSpace(codeReview.HumanizerSkill))
+		builder.WriteString("\napproval: ")
+		builder.WriteString(strings.TrimSpace(codeReview.Approval))
+		builder.WriteString("\npublisher: ")
+		builder.WriteString(strings.TrimSpace(codeReview.Publisher))
 		builder.WriteString("\n\n")
 	}
 	builder.WriteString("[User Request]\n")

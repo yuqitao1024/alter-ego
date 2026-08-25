@@ -1,0 +1,13 @@
+id: code_review
+display_name: Code Review
+description: Review the latest open GitCode pull request and request approval before publishing comments.
+task_type: code_review
+workspace_id: backend_workspace
+code_review:
+  gitcode_project: example/backend
+  pr_selector: latest_open
+  review_tool: codex_builtin
+  humanizer_skill: humanizer:humanizer
+  approval: lark
+  publisher: gitcode
+workflow_path: docs/workflows/example-code-review.md

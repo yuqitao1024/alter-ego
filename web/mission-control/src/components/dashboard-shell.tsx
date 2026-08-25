@@ -495,6 +495,8 @@ function TaskLaunchPanel({
   onRequirementChange: (value: string) => void
   onCreate: () => void
 }) {
+  const selectedTemplate = templates.find((item) => item.id === createTemplateID)
+
   return (
     <section className="rounded-[26px] bg-white/[0.04] p-5">
       <div className="flex flex-col gap-4">
@@ -526,8 +528,18 @@ function TaskLaunchPanel({
               </option>
             ))}
           </select>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="rounded-full bg-[rgba(87,224,172,0.1)] px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-[rgba(190,244,229,0.9)]">
+              {selectedTemplate?.task_type || 'general'}
+            </span>
+            {selectedTemplate?.workspace_id ? (
+              <span className="rounded-full bg-white/[0.05] px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-[rgba(204,218,230,0.8)]">
+                {selectedTemplate.workspace_id}
+              </span>
+            ) : null}
+          </div>
           <p className="mt-3 text-sm leading-6 text-[rgba(154,176,194,0.74)]">
-            {templates.find((item) => item.id === createTemplateID)?.description || 'No template description available.'}
+            {selectedTemplate?.description || 'No template description available.'}
           </p>
         </label>
 

@@ -154,6 +154,72 @@ func TestAppServerRunnerStartInteractiveSessionUsesTaskRootForEmptyWorkspace(t *
 	}
 }
 
+func TestAppServerRunnerStartInteractiveSessionIncludesCodeReviewContext(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCodexRuntime{
+		startThreadID: "thread-1",
+		startTurnID:   "turn-1",
+	}
+	runner := NewAppServerRunner(runtime)
+	runner.transport = &fakeSSHTransport{}
+	runner.machineResolver = func(machineID string) (MachineConfig, error) {
+		return MachineConfig{
+			ID:                   machineID,
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		}, nil
+	}
+
+	_, err := runner.StartInteractiveSession(context.Background(), StartRequest{
+		Machine: MachineConfig{
+			ID:                   "machine_a",
+			Host:                 "machine-a.example.com",
+			User:                 "coder",
+			AppServerListenHost:  "0.0.0.0",
+			AppServerListenPort:  4317,
+			AppServerServiceName: "codex-app-server",
+			AppServerInstallUser: "coder",
+		},
+		TaskID:              "task-review",
+		TaskType:            TaskTypeCodeReview,
+		RemoteWorkspaceRoot: "/srv/codex-tasks",
+		WorkspaceSetup: WorkspaceSetup{
+			Type:           WorkspaceSetupTypeRepo,
+			RemoteRepoURL:  "git@github.com:example/backend.git",
+			CheckoutBranch: "main",
+		},
+		CodeReview: &CodeReviewConfig{
+			GitCodeProject: "example/backend",
+			PRSelector:     "latest_open",
+			ReviewTool:     "codex_builtin",
+			HumanizerSkill: "humanizer:humanizer",
+			Approval:       "lark",
+			Publisher:      "gitcode",
+		},
+		UserRequest:     "Review the latest PR",
+		WorkflowContent: "review workflow",
+	})
+	if err != nil {
+		t.Fatalf("StartInteractiveSession returned error: %v", err)
+	}
+	for _, want := range []string{
+		"[Task Type]\ncode_review",
+		"[Code Review Config]",
+		"gitcode_project: example/backend",
+		"publisher: gitcode",
+		"[User Request]\nReview the latest PR",
+	} {
+		if !strings.Contains(runtime.startRequest.Input, want) {
+			t.Fatalf("startRequest.Input = %q, want substring %q", runtime.startRequest.Input, want)
+		}
+	}
+}
+
 func TestAppServerRunnerSendInteractiveInputSteersActiveTurn(t *testing.T) {
 	t.Parallel()
 

@@ -162,11 +162,12 @@ Configuration layout:
 ```text
 configs/machines/*.yaml
 configs/repositories/*.yaml
+configs/workspaces/*.yaml
 configs/templates/*.yaml
 docs/workflows/*.md
 ```
 
-Each repository binds to its remote machine pool. Each template binds to one repository and one workflow document. Task state is stored in the SQLite database defined by `ALTER_EGO_TASK_DB_PATH`.
+Repositories optionally document source-control defaults. Workspace profiles define the fixed remote task root, machine pool, and setup strategy. Templates reference a workspace profile with `workspace_id` and attach the workflow document that tells Codex how to execute that kind of task. Task state is stored in the SQLite database defined by `ALTER_EGO_TASK_DB_PATH`.
 
 Remote machine prerequisites:
 
@@ -194,7 +195,7 @@ Use `shell_init` only for idempotent environment setup such as exporting `CODEX_
 
 Non-loopback Codex app-server websocket listeners also require websocket auth. Set a per-machine `app_server_ws_auth_token`; Alter Ego will install it onto the remote machine as a capability token file and will connect with `Authorization: Bearer <token>`.
 
-Repository configuration now uses task-scoped checkout settings instead of a fixed repository path. A repository entry should define:
+Repository configuration is optional metadata. A repository entry can define:
 
 ```yaml
 id: repo_backend
@@ -210,17 +211,48 @@ post_clone_bootstrap:
   - pnpm install
 ```
 
+Workspace configuration is the reusable execution profile consumed by templates:
+
+```yaml
+id: backend_workspace
+display_name: Backend Workspace
+root: /srv/codex-tasks
+machine_ids:
+  - machine_a
+setup:
+  type: repo
+  remote_repo_url: git@github.com:org/repo.git
+  checkout_branch: main
+  pre_clone_bootstrap:
+    - setup-git-auth
+  post_clone_bootstrap:
+    - pnpm install
+```
+
+Template configuration stays focused on the task type and workflow:
+
+```yaml
+id: feature_dev
+display_name: Feature Development
+description: Default feature workflow for scoped repository changes.
+task_type: general
+workspace_id: backend_workspace
+workflow_path: docs/workflows/example-feature-dev.md
+```
+
 For each new task, Alter Ego will:
 
-1. choose a machine from the repository machine pool;
-2. create a task directory under `remote_workspace_root/<task-id>`;
+1. choose a machine from the workspace machine pool;
+2. create a task directory under `<workspace.root>/<task-id>`;
 3. run `pre_clone_bootstrap`;
 4. clone the repository;
-5. checkout `default_branch`;
+5. checkout the workspace `checkout_branch`;
 6. run `post_clone_bootstrap`;
 7. connect to the machine's long-lived Codex app-server websocket endpoint;
 8. create a task-scoped app-server thread;
 9. start `codex` inside that thread.
+
+The bundled `code_review` template is a structured entry point for PR review work. It carries `task_type: code_review` and a `code_review` config block so Codex receives the GitCode project, PR selector, review tool, humanizer skill, approval channel, and publisher in the initial task input. The current implementation uses the normal task approval loop; a dedicated background PR scanner and automatic GitCode comment publisher can be added on top of this task type without changing the template shape.
 
 Interactive task lifecycle:
 

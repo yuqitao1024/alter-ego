@@ -24,12 +24,14 @@ type RemoteRunner interface {
 type StartRequest struct {
 	Machine             MachineConfig
 	TaskID              string
+	TaskType            TaskType
 	RemoteRepoURL       string
 	RemoteWorkspaceRoot string
 	CheckoutBranch      string
 	PreCloneBootstrap   []string
 	PostCloneBootstrap  []string
 	WorkspaceSetup      WorkspaceSetup
+	CodeReview          *CodeReviewConfig
 	UserRequest         string
 	WorkflowContent     string
 }

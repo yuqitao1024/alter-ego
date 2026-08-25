@@ -27,7 +27,10 @@ grep -q 'alterego/etc/systemd/system/alterego-web.service$' "${TMP_DIR}/archive.
 grep -q 'alterego/etc/alterego/alterego.env.example$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/opt/alterego/config/configs/machines/example.yaml$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/opt/alterego/config/configs/repositories/example.yaml$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/opt/alterego/config/configs/workspaces/example.yaml$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/opt/alterego/config/configs/templates/example.yaml$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/opt/alterego/config/configs/templates/example-code-review.yaml$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/opt/alterego/config/docs/workflows/example-feature-dev.md$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/opt/alterego/config/docs/workflows/example-code-review.md$' "${TMP_DIR}/archive.txt"
 
 printf 'package smoke test passed: %s\n' "${ARCHIVE_PATH}"

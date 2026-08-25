@@ -8,6 +8,8 @@ export type TaskTemplate = {
   id: string
   display_name: string
   description: string
+  task_type: string
+  workspace_id: string
 }
 
 export type DashboardTaskEvent = {

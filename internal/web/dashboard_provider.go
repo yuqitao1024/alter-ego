@@ -25,6 +25,8 @@ type TemplateSummary struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"display_name"`
 	Description string `json:"description"`
+	TaskType    string `json:"task_type"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type OrchestratorDashboardProvider struct {

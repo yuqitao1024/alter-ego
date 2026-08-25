@@ -62,7 +62,7 @@ func (r *AppServerRunner) StartInteractiveSession(ctx context.Context, req Start
 	threadID, turnID, err := r.manager.StartTaskSession(ctx, machineRuntimeConfig(req.Machine), codexappserver.StartTaskSessionRequest{
 		Cwd:              workdir,
 		BaseInstructions: strings.TrimSpace(req.WorkflowContent),
-		Input:            buildStartInput(req.WorkflowContent, req.UserRequest),
+		Input:            buildStartInput(req.WorkflowContent, req.UserRequest, req.TaskType, req.CodeReview),
 		ApprovalPolicy:   "never",
 		SandboxPolicy: codexappserver.SandboxPolicy{
 			Type:          codexappserver.DangerFullAccessSandboxPolicy().Type,

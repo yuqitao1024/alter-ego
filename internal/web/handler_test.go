@@ -555,8 +555,8 @@ func (*stubDataProvider) Dashboard(context.Context) (any, error) {
 
 func (*stubDataProvider) Templates(context.Context) (any, error) {
 	return []map[string]any{
-		{"id": "feature_dev", "display_name": "Feature Development", "description": "Default feature workflow"},
-		{"id": "simt-stl-research", "display_name": "Research", "description": "Research workflow"},
+		{"id": "feature_dev", "display_name": "Feature Development", "description": "Default feature workflow", "task_type": "general", "workspace_id": "backend_workspace"},
+		{"id": "code_review", "display_name": "Code Review", "description": "Review workflow", "task_type": "code_review", "workspace_id": "backend_workspace"},
 	}, nil
 }
 

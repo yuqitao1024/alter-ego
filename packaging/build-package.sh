@@ -24,6 +24,7 @@ mkdir -p \
 	"${STAGE_DIR}/opt/alterego/bin" \
 	"${STAGE_DIR}/opt/alterego/config/configs/machines" \
 	"${STAGE_DIR}/opt/alterego/config/configs/repositories" \
+	"${STAGE_DIR}/opt/alterego/config/configs/workspaces" \
 	"${STAGE_DIR}/opt/alterego/config/configs/templates" \
 	"${STAGE_DIR}/opt/alterego/config/docs/workflows" \
 	"${STAGE_DIR}/etc/alterego" \
@@ -46,8 +47,11 @@ cp "${ROOT_DIR}/packaging/templates/Caddyfile" "${STAGE_DIR}/etc/caddy/Caddyfile
 
 cp "${ROOT_DIR}/configs/machines/example.yaml" "${STAGE_DIR}/opt/alterego/config/configs/machines/example.yaml"
 cp "${ROOT_DIR}/configs/repositories/example.yaml" "${STAGE_DIR}/opt/alterego/config/configs/repositories/example.yaml"
+cp "${ROOT_DIR}/configs/workspaces/example.yaml" "${STAGE_DIR}/opt/alterego/config/configs/workspaces/example.yaml"
 cp "${ROOT_DIR}/configs/templates/example.yaml" "${STAGE_DIR}/opt/alterego/config/configs/templates/example.yaml"
+cp "${ROOT_DIR}/configs/templates/example-code-review.yaml" "${STAGE_DIR}/opt/alterego/config/configs/templates/example-code-review.yaml"
 cp "${ROOT_DIR}/docs/workflows/example-feature-dev.md" "${STAGE_DIR}/opt/alterego/config/docs/workflows/example-feature-dev.md"
+cp "${ROOT_DIR}/docs/workflows/example-code-review.md" "${STAGE_DIR}/opt/alterego/config/docs/workflows/example-code-review.md"
 
 cp "${ROOT_DIR}/README.md" "${STAGE_DIR}/opt/alterego/README.md"
 cp "${ROOT_DIR}/LICENSE" "${STAGE_DIR}/opt/alterego/LICENSE"
