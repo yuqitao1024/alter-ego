@@ -19,6 +19,19 @@ type fakeProvider struct {
 	role    string
 }
 
+type fakeAbilityContextBuilder struct {
+	contextText string
+	err         error
+	called      bool
+	userText    string
+}
+
+func (f *fakeAbilityContextBuilder) BuildContext(ctx context.Context, userText string) (string, error) {
+	f.called = true
+	f.userText = userText
+	return f.contextText, f.err
+}
+
 func (f *fakeProvider) CreateResponse(ctx context.Context, req ChatRequest) (string, error) {
 	f.lastReq = req
 	return f.reply, f.err
@@ -88,6 +101,74 @@ func TestChatHandlerBuildsPromptFromHistoryAndCurrentMessage(t *testing.T) {
 	}
 	if client.lastReq.Messages[3].Role != "user" || client.lastReq.Messages[3].Content != "current user" {
 		t.Fatalf("current user = %#v", client.lastReq.Messages[3])
+	}
+}
+
+func TestChatHandlerInjectsAbilityContextIntoSystemPrompt(t *testing.T) {
+	store := NewSessionStore(12)
+	client := &fakeProvider{reply: "assistant reply"}
+	builder := &fakeAbilityContextBuilder{contextText: "内部能力上下文：不要输出资料标题。"}
+	handler := NewChatHandler(Config{APIKey: "sk-test", Model: "gpt-test"}, store, client)
+	handler.abilityContext = builder
+	event := channel.MessageEvent{
+		Text:     " 怎么和老板沟通项目延期 ",
+		Platform: "lark",
+		Conversation: channel.Conversation{
+			ID:   "oc_1",
+			Kind: channel.ConversationDirect,
+		},
+	}
+
+	_, err := handler.HandleMessage(context.Background(), event)
+	if err != nil {
+		t.Fatalf("HandleMessage returned error: %v", err)
+	}
+	if !builder.called {
+		t.Fatal("ability context builder was not called")
+	}
+	if builder.userText != "怎么和老板沟通项目延期" {
+		t.Fatalf("builder.userText = %q", builder.userText)
+	}
+	if !strings.Contains(client.lastReq.Messages[0].Content, "高能力分身") {
+		t.Fatalf("system prompt missing alter ego persona: %q", client.lastReq.Messages[0].Content)
+	}
+	if !strings.Contains(client.lastReq.Messages[0].Content, "默认使用简体中文") {
+		t.Fatalf("system prompt missing Simplified Chinese instruction: %q", client.lastReq.Messages[0].Content)
+	}
+	if !strings.Contains(client.lastReq.Messages[0].Content, "关键名词可以保留英文") {
+		t.Fatalf("system prompt missing English term instruction: %q", client.lastReq.Messages[0].Content)
+	}
+	if !strings.Contains(client.lastReq.Messages[0].Content, "不要用“当然”") {
+		t.Fatalf("system prompt missing humanizer instruction: %q", client.lastReq.Messages[0].Content)
+	}
+	if !strings.Contains(client.lastReq.Messages[0].Content, "内部能力上下文") {
+		t.Fatalf("system prompt missing ability context: %q", client.lastReq.Messages[0].Content)
+	}
+}
+
+func TestChatHandlerIgnoresAbilityContextErrors(t *testing.T) {
+	store := NewSessionStore(12)
+	client := &fakeProvider{reply: "assistant reply"}
+	handler := NewChatHandler(Config{APIKey: "sk-test", Model: "gpt-test"}, store, client)
+	handler.abilityContext = &fakeAbilityContextBuilder{err: errors.New("rag unavailable")}
+	event := channel.MessageEvent{
+		Text:     "怎么复盘",
+		Platform: "lark",
+		Conversation: channel.Conversation{
+			ID:   "oc_1",
+			Kind: channel.ConversationDirect,
+		},
+	}
+
+	reply, err := handler.HandleMessage(context.Background(), event)
+	if err != nil {
+		t.Fatalf("HandleMessage returned error: %v", err)
+	}
+	if reply.Text != "assistant reply" {
+		t.Fatalf("reply.Text = %q", reply.Text)
+	}
+	if strings.Contains(client.lastReq.Messages[0].Content, "rag unavailable") {
+		t.Fatalf("system prompt leaked context error: %q", client.lastReq.Messages[0].Content)
 	}
 }
 

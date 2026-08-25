@@ -36,6 +36,8 @@ alterego/
   opt/alterego/config/configs/templates/example-code-review.yaml
   opt/alterego/config/docs/workflows/example-feature-dev.md
   opt/alterego/config/docs/workflows/example-code-review.md
+  opt/alterego/.agents/skills/ability-*/
+  opt/alterego/.agents/ability-rag/
   etc/alterego/alterego.env.example
   etc/systemd/system/alteregod.service
   var/lib/alterego/
@@ -51,6 +53,9 @@ The service expects:
 
 Remote task execution is configured from the unpacked repository tree under `/opt/alterego/config`.
 Templates reference reusable workspace profiles from `configs/workspaces/*.yaml`; each workspace profile defines the fixed remote task root, machine pool, and setup strategy.
+
+Ordinary chat can use the packaged ability skills and RAG database under `/opt/alterego/.agents`.
+Task workflows do not load these ability skills.
 Machine YAML must include the Codex app-server fields:
 
 - `app_server_listen_host`

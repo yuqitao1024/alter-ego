@@ -32,5 +32,10 @@ grep -q 'alterego/opt/alterego/config/configs/templates/example.yaml$' "${TMP_DI
 grep -q 'alterego/opt/alterego/config/configs/templates/example-code-review.yaml$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/opt/alterego/config/docs/workflows/example-feature-dev.md$' "${TMP_DIR}/archive.txt"
 grep -q 'alterego/opt/alterego/config/docs/workflows/example-code-review.md$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/opt/alterego/.agents/skills/ability-thinking-models/SKILL.md$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/opt/alterego/.agents/skills/ability-work-methodology/SKILL.md$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/opt/alterego/.agents/skills/ability-communication-skills/SKILL.md$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/opt/alterego/.agents/ability-rag/rag-db/rag.sqlite$' "${TMP_DIR}/archive.txt"
+grep -q 'alterego/opt/alterego/.agents/ability-rag/scripts/search_rag.py$' "${TMP_DIR}/archive.txt"
 
 printf 'package smoke test passed: %s\n' "${ARCHIVE_PATH}"

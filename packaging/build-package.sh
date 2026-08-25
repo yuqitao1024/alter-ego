@@ -22,6 +22,8 @@ trap cleanup EXIT
 
 mkdir -p \
 	"${STAGE_DIR}/opt/alterego/bin" \
+	"${STAGE_DIR}/opt/alterego/.agents/skills" \
+	"${STAGE_DIR}/opt/alterego/.agents/ability-rag" \
 	"${STAGE_DIR}/opt/alterego/config/configs/machines" \
 	"${STAGE_DIR}/opt/alterego/config/configs/repositories" \
 	"${STAGE_DIR}/opt/alterego/config/configs/workspaces" \
@@ -52,6 +54,13 @@ cp "${ROOT_DIR}/configs/templates/example.yaml" "${STAGE_DIR}/opt/alterego/confi
 cp "${ROOT_DIR}/configs/templates/example-code-review.yaml" "${STAGE_DIR}/opt/alterego/config/configs/templates/example-code-review.yaml"
 cp "${ROOT_DIR}/docs/workflows/example-feature-dev.md" "${STAGE_DIR}/opt/alterego/config/docs/workflows/example-feature-dev.md"
 cp "${ROOT_DIR}/docs/workflows/example-code-review.md" "${STAGE_DIR}/opt/alterego/config/docs/workflows/example-code-review.md"
+
+cp -R "${ROOT_DIR}/.agents/skills/ability-thinking-models" "${STAGE_DIR}/opt/alterego/.agents/skills/ability-thinking-models"
+cp -R "${ROOT_DIR}/.agents/skills/ability-work-methodology" "${STAGE_DIR}/opt/alterego/.agents/skills/ability-work-methodology"
+cp -R "${ROOT_DIR}/.agents/skills/ability-communication-skills" "${STAGE_DIR}/opt/alterego/.agents/skills/ability-communication-skills"
+cp -R "${ROOT_DIR}/.agents/ability-rag/README.md" "${STAGE_DIR}/opt/alterego/.agents/ability-rag/README.md"
+cp -R "${ROOT_DIR}/.agents/ability-rag/rag-db" "${STAGE_DIR}/opt/alterego/.agents/ability-rag/rag-db"
+cp -R "${ROOT_DIR}/.agents/ability-rag/scripts" "${STAGE_DIR}/opt/alterego/.agents/ability-rag/scripts"
 
 cp "${ROOT_DIR}/README.md" "${STAGE_DIR}/opt/alterego/README.md"
 cp "${ROOT_DIR}/LICENSE" "${STAGE_DIR}/opt/alterego/LICENSE"
